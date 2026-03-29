@@ -1,0 +1,142 @@
+import React, { useState } from 'react';
+import {
+  View, Text, StyleSheet, SafeAreaView, TouchableOpacity,
+  TextInput, ScrollView, StatusBar, KeyboardAvoidingView, Platform,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { StackScreenProps } from '@react-navigation/stack';
+import { RootStackParamList } from '../navigation/types';
+
+type Props = StackScreenProps<RootStackParamList, 'AddBankAccount'>;
+
+const TEAL = '#4ECDC4';
+const BG = '#0a0a0a';
+const CARD = '#111111';
+const MUTED = '#888888';
+const TEXT = '#FFFFFF';
+
+export default function AddBankAccountScreen({ navigation }: Props) {
+  const [accountName, setAccountName] = useState('');
+  const [accountNumber, setAccountNumber] = useState('');
+  const [sortCode, setSortCode] = useState('');
+
+  const formatSortCode = (v: string) => {
+    const clean = v.replace(/\D/g, '').slice(0, 6);
+    if (clean.length >= 4) return `${clean.slice(0, 2)}-${clean.slice(2, 4)}-${clean.slice(4)}`;
+    if (clean.length >= 2) return `${clean.slice(0, 2)}-${clean.slice(2)}`;
+    return clean;
+  };
+
+  const isComplete = accountName.length >= 2 && accountNumber.length === 8 && sortCode.replace(/-/g, '').length === 6;
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor={BG} />
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()}>
+          <Ionicons name="arrow-back" size={24} color={TEXT} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Add bank account</Text>
+        <View style={{ width: 24 }} />
+      </View>
+
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          <Text style={styles.intro}>
+            Your bank account is used for withdrawals. We use bank-grade encryption to keep your details safe.
+          </Text>
+
+          <Text style={styles.sectionLabel}>ACCOUNT DETAILS</Text>
+          <View style={styles.card}>
+            <View style={styles.fieldRow}>
+              <Text style={styles.fieldLabel}>Account holder name</Text>
+              <TextInput
+                style={styles.fieldInput}
+                value={accountName}
+                onChangeText={setAccountName}
+                placeholder="Full name on account"
+                placeholderTextColor={MUTED}
+                autoCapitalize="words"
+                selectionColor={TEAL}
+              />
+            </View>
+            <View style={styles.divider} />
+            <View style={styles.fieldRow}>
+              <Text style={styles.fieldLabel}>Account number</Text>
+              <TextInput
+                style={styles.fieldInput}
+                value={accountNumber}
+                onChangeText={v => setAccountNumber(v.replace(/\D/g, '').slice(0, 8))}
+                placeholder="8 digits"
+                placeholderTextColor={MUTED}
+                keyboardType="number-pad"
+                selectionColor={TEAL}
+                maxLength={8}
+              />
+            </View>
+            <View style={styles.divider} />
+            <View style={styles.fieldRow}>
+              <Text style={styles.fieldLabel}>Sort code</Text>
+              <TextInput
+                style={styles.fieldInput}
+                value={sortCode}
+                onChangeText={v => setSortCode(formatSortCode(v))}
+                placeholder="00-00-00"
+                placeholderTextColor={MUTED}
+                keyboardType="number-pad"
+                selectionColor={TEAL}
+                maxLength={8}
+              />
+            </View>
+          </View>
+
+          <View style={styles.secureRow}>
+            <Ionicons name="shield-checkmark-outline" size={14} color={TEAL} />
+            <Text style={styles.secureText}>Protected by bank-level encryption</Text>
+          </View>
+
+          <View style={styles.infoCard}>
+            <Ionicons name="information-circle-outline" size={16} color={MUTED} />
+            <Text style={styles.infoText}>
+              Withdrawals typically take 1–3 business days. You'll receive a confirmation email once initiated.
+            </Text>
+          </View>
+        </ScrollView>
+
+        <View style={styles.footer}>
+          <TouchableOpacity
+            style={[styles.saveBtn, !isComplete && { opacity: 0.4 }]}
+            disabled={!isComplete}
+            onPress={() => navigation.goBack()}
+          >
+            <Text style={styles.saveBtnText}>Save bank account</Text>
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: BG },
+  header: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#1a1a1a',
+  },
+  headerTitle: { fontSize: 17, fontWeight: '700', color: TEXT },
+  content: { padding: 20, paddingBottom: 40 },
+  intro: { fontSize: 14, color: MUTED, lineHeight: 20, marginBottom: 24 },
+  sectionLabel: { fontSize: 11, color: MUTED, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 10, marginLeft: 4 },
+  card: { backgroundColor: CARD, borderRadius: 16, overflow: 'hidden', marginBottom: 16 },
+  fieldRow: { paddingHorizontal: 18, paddingVertical: 14 },
+  fieldLabel: { fontSize: 11, color: MUTED, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 },
+  fieldInput: { fontSize: 16, color: TEXT, fontWeight: '500' },
+  divider: { height: 1, backgroundColor: '#1c1c1c' },
+  secureRow: { flexDirection: 'row', alignItems: 'center', gap: 8, justifyContent: 'center', marginBottom: 16 },
+  secureText: { fontSize: 12, color: TEAL },
+  infoCard: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, backgroundColor: '#151515', borderRadius: 12, padding: 14 },
+  infoText: { flex: 1, fontSize: 12, color: MUTED, lineHeight: 18 },
+  footer: { padding: 20, borderTopWidth: 1, borderTopColor: '#1a1a1a' },
+  saveBtn: { backgroundColor: TEAL, borderRadius: 30, paddingVertical: 16, alignItems: 'center' },
+  saveBtnText: { fontSize: 16, fontWeight: '700', color: '#0a0a0a' },
+});

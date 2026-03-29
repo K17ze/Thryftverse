@@ -1,0 +1,190 @@
+import React from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Image,
+  ScrollView,
+  TouchableOpacity,
+  StatusBar,
+  Dimensions,
+  FlatList,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { useRoute, useNavigation } from '@react-navigation/native';
+import { Colors } from '../constants/colors';
+import { MOCK_LISTINGS, MOCK_USERS, Listing, User } from '../data/mockData';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+const { width, height } = Dimensions.get('window');
+
+export default function ItemDetailScreen() {
+  const route = useRoute<any>();
+  const navigation = useNavigation<any>();
+  const insets = useSafeAreaInsets();
+
+  const { itemId } = route.params || {};
+  const item: Listing = MOCK_LISTINGS.find(l => l.id === itemId) || MOCK_LISTINGS[0];
+  const seller: User = MOCK_USERS.find(u => u.id === item.sellerId) || MOCK_USERS[0];
+  const sellerItems = MOCK_LISTINGS.filter(l => l.sellerId === seller.id && l.id !== item.id);
+
+  return (
+    <View style={styles.container}>
+      <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
+
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
+        
+        {/* ── Image Carousel (Restored functionality) ── */}
+        <View style={styles.heroContainer}>
+          <FlatList
+            data={item.images}
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            keyExtractor={(_, idx) => idx.toString()}
+            renderItem={({ item: imageUrl }) => (
+              <Image source={{ uri: imageUrl }} style={styles.heroImage} resizeMode="cover" />
+            )}
+          />
+
+          {item.isSold && (
+            <View style={styles.soldOverlay}>
+              <Text style={styles.soldText}>SOLD</Text>
+            </View>
+          )}
+
+          <View style={[styles.floatingHeader, { paddingTop: Math.max(insets.top, 20) }]}>
+            <TouchableOpacity style={styles.blurBtn} onPress={() => navigation.goBack()}>
+              <Ionicons name="arrow-back" size={24} color="#fff" />
+            </TouchableOpacity>
+            <View style={styles.headerRight}>
+              <TouchableOpacity style={styles.blurBtn}>
+                <Ionicons name="share-outline" size={24} color="#fff" />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.blurBtn}>
+                <Ionicons name="heart-outline" size={24} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.detailsContainer}>
+          <View style={styles.priceRow}>
+            <Text style={styles.price}>£{item.price.toFixed(2)}</Text>
+            <Text style={styles.brand}>{item.brand}</Text>
+          </View>
+          {item.priceWithProtection && (
+            <Text style={styles.protectionText}>incl. £{(item.priceWithProtection - item.price).toFixed(2)} Buyer Protection fee</Text>
+          )}
+
+          <Text style={styles.title}>{item.title}</Text>
+          <Text style={styles.sizeCondition}>{item.size} • {item.condition}</Text>
+
+          <View style={styles.descriptionBox}>
+            <Text style={styles.description}>{item.description}</Text>
+            <Text style={styles.timePosted}>Posted 2 hours ago in {seller.location}</Text>
+            <View style={styles.statsRow}>
+              <Ionicons name="eye-outline" size={16} color={Colors.textMuted} />
+              <Text style={styles.statsText}>{item.likes * 12} Views</Text>
+              <Ionicons name="heart-outline" size={16} color={Colors.textMuted} style={{ marginLeft: 12 }} />
+              <Text style={styles.statsText}>{item.likes} Likes</Text>
+            </View>
+          </View>
+
+          {/* ── Seller Card ── */}
+          <TouchableOpacity style={styles.sellerCard} onPress={() => navigation.navigate('UserProfile', { userId: seller.id })} activeOpacity={0.8}>
+            <Image source={{ uri: seller.avatar }} style={styles.sellerAvatar} />
+            <View style={styles.sellerInfo}>
+              <Text style={styles.sellerName}>{seller.username}</Text>
+              <Text style={styles.sellerStats}>{seller.rating} ★ • {seller.reviewCount} Reviews</Text>
+              <Text style={styles.sellerLastSeen}>Last seen: {seller.lastSeen}</Text>
+            </View>
+            <TouchableOpacity style={styles.followBtn} onPress={(e) => { e.stopPropagation(); navigation.navigate('Chat', { conversationId: `${seller.id}_${item.id}` }); }}>
+              <Text style={styles.followBtnText}>Message</Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
+
+          {/* Restored Similar Items Feature */}
+          {sellerItems.length > 0 && (
+            <View style={styles.sellerItemsSection}>
+              <Text style={styles.sectionTitle}>More from {seller.username}</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
+                {sellerItems.map(sItem => (
+                  <TouchableOpacity 
+                    key={sItem.id} 
+                    style={styles.sellerItemCard}
+                    onPress={() => navigation.push('ItemDetail', { itemId: sItem.id })}
+                  >
+                    <Image source={{ uri: sItem.images[0] }} style={styles.sellerItemImg} />
+                    <Text style={styles.sellerItemPrice}>£{sItem.price}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          )}
+        </View>
+      </ScrollView>
+
+      {/* ── Floating Buy Bar ── */}
+      {!item.isSold && (
+        <View style={[styles.floatingBuyBar, { paddingBottom: Math.max(insets.bottom, 20) }]}>
+          <TouchableOpacity
+            style={styles.buyBtn}
+            activeOpacity={0.9}
+            onPress={() => navigation.navigate('Checkout', { itemId: item.id })}
+          >
+            <Text style={styles.buyBtnText}>Buy Now</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.offerBtn}
+            activeOpacity={0.9}
+            onPress={() => navigation.navigate('MakeOffer', { itemId: item.id, price: item.price, title: item.title })}
+          >
+            <Text style={styles.offerBtnText}>Offer</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: Colors.background },
+  heroContainer: { width: width, height: height * 0.65, position: 'relative', backgroundColor: '#111' },
+  heroImage: { width: width, height: '100%' },
+  soldOverlay: { position: 'absolute', bottom: 32, left: 20, backgroundColor: Colors.success, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
+  soldText: { color: Colors.background, fontSize: 16, fontFamily: 'Inter_700Bold', letterSpacing: 1 },
+  floatingHeader: { position: 'absolute', top: 0, left: 0, right: 0, flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 20, zIndex: 10 },
+  headerRight: { flexDirection: 'row', gap: 12 },
+  blurBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center' },
+  detailsContainer: { paddingHorizontal: 20, paddingTop: 24 },
+  priceRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 4 },
+  price: { fontSize: 42, fontFamily: 'Inter_800ExtraBold', color: Colors.textPrimary, letterSpacing: -1.5 },
+  brand: { fontSize: 18, fontFamily: 'Inter_700Bold', color: Colors.textPrimary, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 8 },
+  protectionText: { fontSize: 12, color: Colors.textMuted, fontFamily: 'Inter_400Regular', marginBottom: 12 },
+  title: { fontSize: 20, fontFamily: 'Inter_400Regular', color: Colors.textSecondary, marginBottom: 12, lineHeight: 28 },
+  sizeCondition: { fontSize: 15, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary },
+  descriptionBox: { marginTop: 24, backgroundColor: '#111', padding: 20, borderRadius: 24 },
+  description: { fontSize: 15, fontFamily: 'Inter_400Regular', color: Colors.textSecondary, lineHeight: 24 },
+  timePosted: { fontSize: 12, fontFamily: 'Inter_500Medium', color: Colors.textMuted, marginTop: 12 },
+  statsRow: { flexDirection: 'row', alignItems: 'center', marginTop: 12 },
+  statsText: { fontSize: 12, color: Colors.textSecondary, marginLeft: 6, fontFamily: 'Inter_500Medium' },
+  sellerCard: { flexDirection: 'row', alignItems: 'center', marginTop: 40, paddingBottom: 16, gap: 16 },
+  sellerAvatar: { width: 56, height: 56, borderRadius: 28 },
+  sellerInfo: { flex: 1 },
+  sellerName: { fontSize: 16, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary },
+  sellerStats: { fontSize: 13, fontFamily: 'Inter_500Medium', color: Colors.textMuted, marginTop: 4 },
+  sellerLastSeen: { fontSize: 11, fontFamily: 'Inter_400Regular', color: Colors.textMuted, marginTop: 2 },
+  followBtn: { backgroundColor: '#222', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20 },
+  followBtnText: { color: Colors.textPrimary, fontSize: 13, fontFamily: 'Inter_600SemiBold' },
+  sellerItemsSection: { marginTop: 24, paddingBottom: 32 },
+  sectionTitle: { fontSize: 16, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary, marginBottom: 16 },
+  sellerItemCard: { width: 100 },
+  sellerItemImg: { width: 100, height: 130, borderRadius: 16, marginBottom: 8 },
+  sellerItemPrice: { fontSize: 14, fontFamily: 'Inter_700Bold', color: Colors.textPrimary },
+  floatingBuyBar: { position: 'absolute', bottom: 0, left: 0, right: 0, flexDirection: 'row', gap: 12, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 40, backgroundColor: 'rgba(10, 10, 10, 0.95)' },
+  buyBtn: { flex: 2, backgroundColor: Colors.textPrimary, borderRadius: 30, height: 60, alignItems: 'center', justifyContent: 'center' },
+  buyBtnText: { color: Colors.background, fontSize: 18, fontFamily: 'Inter_800ExtraBold', letterSpacing: -0.5 },
+  offerBtn: { flex: 1, backgroundColor: '#1A1A1A', borderRadius: 30, height: 60, alignItems: 'center', justifyContent: 'center' },
+  offerBtnText: { color: Colors.textPrimary, fontSize: 16, fontFamily: 'Inter_700Bold' },
+});

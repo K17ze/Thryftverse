@@ -1,0 +1,120 @@
+import React from 'react';
+import { createStackNavigator } from '@react-navigation/stack';
+import { RootStackParamList } from './types';
+
+import SplashScreen from '../screens/SplashScreen';
+import AuthLandingScreen from '../screens/AuthLandingScreen';
+import LoginScreen from '../screens/LoginScreen';
+import SignUpScreen from '../screens/SignUpScreen';
+import TabNavigator from './TabNavigator';
+import CategoryDetailScreen from '../screens/CategoryDetailScreen';
+import BrowseScreen from '../screens/BrowseScreen';
+import ItemDetailScreen from '../screens/ItemDetailScreen';
+import ChatScreen from '../screens/ChatScreen';
+import UserProfileScreen from '../screens/UserProfileScreen';
+
+// Profile Subs
+import BalanceScreen from '../screens/BalanceScreen';
+import MyOrdersScreen from '../screens/MyOrdersScreen';
+import FavouritesScreen from '../screens/FavouritesScreen';
+import PersonalisationScreen from '../screens/PersonalisationScreen';
+import SettingsScreen from '../screens/SettingsScreen';
+import EditProfileScreen from '../screens/EditProfileScreen';
+import AccountSettingsScreen from '../screens/AccountSettingsScreen';
+import PaymentsScreen from '../screens/PaymentsScreen';
+
+// Phase 16 new screens
+import MakeOfferScreen from '../screens/MakeOfferScreen';
+import PushNotificationsScreen from '../screens/PushNotificationsScreen';
+import PostageScreen from '../screens/PostageScreen';
+import InviteFriendsScreen from '../screens/InviteFriendsScreen';
+import BalanceHistoryScreen from '../screens/BalanceHistoryScreen';
+
+// Phase 17 new screens
+import AddCardScreen from '../screens/AddCardScreen';
+import AddBankAccountScreen from '../screens/AddBankAccountScreen';
+import HelpSupportScreen from '../screens/HelpSupportScreen';
+
+// Phase 18 new screens
+import OrderDetailScreen from '../screens/OrderDetailScreen';
+
+// Phase 19 new screens
+import CheckoutScreen from '../screens/CheckoutScreen';
+import SuccessScreen from '../screens/SuccessScreen';
+import ManageListingScreen from '../screens/ManageListingScreen';
+import WithdrawScreen from '../screens/WithdrawScreen';
+import CategoryTreeScreen from '../screens/CategoryTreeScreen';
+
+// Phase 24 new screens
+import GlobalSearchScreen from '../screens/GlobalSearchScreen';
+import AddAddressScreen from '../screens/AddAddressScreen';
+
+// Phase 25 new screens
+import FilterScreen from '../screens/FilterScreen';
+import ListingSuccessScreen from '../screens/ListingSuccessScreen';
+
+// Phase 27
+import NotificationsScreen from '../screens/NotificationsScreen';
+
+const Stack = createStackNavigator<RootStackParamList>();
+
+export default function AppNavigator() {
+  return (
+    <Stack.Navigator initialRouteName="Splash" screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="Splash" component={SplashScreen} />
+      
+      {/* Auth Flow */}
+      <Stack.Screen name="AuthLanding" component={AuthLandingScreen} />
+      <Stack.Screen name="Login" component={LoginScreen} />
+      <Stack.Screen name="SignUp" component={SignUpScreen} />
+
+      <Stack.Screen name="MainTabs" component={TabNavigator} />
+      <Stack.Screen name="CategoryDetail" component={CategoryDetailScreen} />
+      <Stack.Screen name="Browse" component={BrowseScreen} />
+      <Stack.Screen name="ItemDetail" component={ItemDetailScreen} />
+      <Stack.Screen name="Chat" component={ChatScreen} />
+      <Stack.Screen name="UserProfile" component={UserProfileScreen} />
+      <Stack.Screen name="Balance" component={BalanceScreen} />
+      <Stack.Screen name="MyOrders" component={MyOrdersScreen} />
+      <Stack.Screen name="Favourites" component={FavouritesScreen} />
+      <Stack.Screen name="Personalisation" component={PersonalisationScreen} />
+      <Stack.Screen name="Settings" component={SettingsScreen} />
+      <Stack.Screen name="EditProfile" component={EditProfileScreen} />
+      <Stack.Screen name="AccountSettings" component={AccountSettingsScreen} />
+      <Stack.Screen name="Payments" component={PaymentsScreen} />
+
+      {/* Phase 16 new screens */}
+      <Stack.Screen name="MakeOffer" component={MakeOfferScreen} />
+      <Stack.Screen name="PushNotifications" component={PushNotificationsScreen} />
+      <Stack.Screen name="Postage" component={PostageScreen} />
+      <Stack.Screen name="InviteFriends" component={InviteFriendsScreen} />
+      <Stack.Screen name="BalanceHistory" component={BalanceHistoryScreen} />
+
+      {/* Phase 17 new screens */}
+      <Stack.Screen name="AddCard" component={AddCardScreen} />
+      <Stack.Screen name="AddBankAccount" component={AddBankAccountScreen} />
+      <Stack.Screen name="HelpSupport" component={HelpSupportScreen} />
+
+      {/* Phase 18 new screens */}
+      <Stack.Screen name="OrderDetail" component={OrderDetailScreen} />
+
+      {/* Phase 19 new screens */}
+      <Stack.Screen name="Checkout" component={CheckoutScreen} />
+      <Stack.Screen name="Success" component={SuccessScreen} />
+      <Stack.Screen name="ManageListing" component={ManageListingScreen} />
+      <Stack.Screen name="Withdraw" component={WithdrawScreen} />
+      <Stack.Screen name="CategoryTree" component={CategoryTreeScreen} />
+      
+      {/* Phase 24 new screens */}
+      <Stack.Screen name="GlobalSearch" component={GlobalSearchScreen} />
+      <Stack.Screen name="AddAddress" component={AddAddressScreen} />
+
+      {/* Phase 25 new screens */}
+      <Stack.Screen name="Filter" component={FilterScreen} options={{ presentation: 'modal' }} />
+      <Stack.Screen name="ListingSuccess" component={ListingSuccessScreen} />
+
+      {/* Phase 27 new screens */}
+      <Stack.Screen name="NotificationsList" component={NotificationsScreen} />
+    </Stack.Navigator>
+  );
+}
