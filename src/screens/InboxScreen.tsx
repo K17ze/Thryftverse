@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   StyleSheet,
   Image,
   StatusBar,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,75 +16,121 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { Colors } from '../constants/colors';
 import { MOCK_CONVERSATIONS, MOCK_USERS, MOCK_LISTINGS } from '../data/mockData';
 import { RootStackParamList } from '../navigation/types';
+import { Swipeable } from 'react-native-gesture-handler';
+import Reanimated, { FadeInDown } from 'react-native-reanimated';
+import { EmptyState } from '../components/EmptyState';
+import { useToast } from '../context/ToastContext';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 const TEAL = '#4ECDC4';
 
+type ConvoItem = typeof MOCK_CONVERSATIONS[0];
+
 export default function InboxScreen() {
   const navigation = useNavigation<NavT>();
+  const { show } = useToast();
+  const [conversations, setConversations] = useState(MOCK_CONVERSATIONS);
+
+  const handleDelete = useCallback((id: string) => {
+    setConversations(prev => prev.filter(c => c.id !== id));
+    show('Conversation deleted', 'error');
+  }, []);
+
+  const handleArchive = useCallback((id: string) => {
+    setConversations(prev => prev.filter(c => c.id !== id));
+    show('Conversation archived', 'info');
+  }, []);
+
+  const renderRightActions = (id: string) => (
+    <TouchableOpacity
+      style={styles.swipeDelete}
+      onPress={() => handleDelete(id)}
+    >
+      <Ionicons name="trash-outline" size={22} color="#fff" />
+      <Text style={styles.swipeActionText}>Delete</Text>
+    </TouchableOpacity>
+  );
+
+  const renderLeftActions = (id: string) => (
+    <TouchableOpacity
+      style={styles.swipeArchive}
+      onPress={() => handleArchive(id)}
+    >
+      <Ionicons name="archive-outline" size={22} color="#fff" />
+      <Text style={styles.swipeActionText}>Archive</Text>
+    </TouchableOpacity>
+  );
+
+  const renderItem = ({ item, index }: { item: ConvoItem; index: number }) => {
+    const seller = MOCK_USERS.find((u) => u.id === item.sellerId);
+    const listing = MOCK_LISTINGS.find((l) => l.id === item.itemId);
+
+    return (
+      <Reanimated.View entering={FadeInDown.delay(Math.min(index, 7) * 60).duration(400)}>
+        <Swipeable
+          friction={2}
+          overshootLeft={false}
+          overshootRight={false}
+          renderRightActions={() => renderRightActions(item.id)}
+          renderLeftActions={() => renderLeftActions(item.id)}
+        >
+          <TouchableOpacity
+            style={styles.messageCard}
+            onPress={() => navigation.navigate('Chat', { conversationId: item.id })}
+            activeOpacity={0.85}
+          >
+            <View style={styles.avatarWrap}>
+              <Image source={{ uri: seller?.avatar }} style={styles.avatar} />
+              <View style={styles.onlineDot} />
+            </View>
+
+            <View style={styles.messageBody}>
+              <View style={styles.messageTop}>
+                <Text style={styles.senderName}>{seller?.username}</Text>
+                <Text style={styles.time}>{item.lastMessageTime}</Text>
+              </View>
+              <Text style={styles.snippet} numberOfLines={2}>{item.lastMessage}</Text>
+
+              {listing && (
+                <View style={styles.itemPreview}>
+                  <Image source={{ uri: listing.images[0] }} style={styles.itemThumb} />
+                  <Text style={styles.itemName} numberOfLines={1}>{listing.title}</Text>
+                  <Text style={styles.itemPrice}>£{listing.price}</Text>
+                </View>
+              )}
+            </View>
+
+            {item.unread && <View style={styles.unreadDot} />}
+          </TouchableOpacity>
+        </Swipeable>
+      </Reanimated.View>
+    );
+  };
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
 
-      {/* ── Header ── */}
       <View style={styles.header}>
         <Text style={styles.headerLabel}>COMMUNICATION</Text>
         <Text style={styles.hugeTitle}>Inbox</Text>
       </View>
 
-      {/* ── Content ── */}
       <FlatList
-        data={MOCK_CONVERSATIONS}
+        data={conversations}
         keyExtractor={(c) => c.id}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 120 }}
+        contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 120, flexGrow: 1 }}
         ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
-        renderItem={({ item }) => {
-          const seller = MOCK_USERS.find((u) => u.id === item.sellerId);
-          const listing = MOCK_LISTINGS.find((l) => l.id === item.itemId);
-          return (
-            <TouchableOpacity
-              style={styles.messageCard}
-              onPress={() => navigation.navigate('Chat', { conversationId: item.id })}
-              activeOpacity={0.85}
-            >
-              {/* Avatar with online indicator */}
-              <View style={styles.avatarWrap}>
-                <Image source={{ uri: seller?.avatar }} style={styles.avatar} />
-                <View style={styles.onlineDot} />
-              </View>
-
-              {/* Message content */}
-              <View style={styles.messageBody}>
-                <View style={styles.messageTop}>
-                  <Text style={styles.senderName}>{seller?.username}</Text>
-                  <Text style={styles.time}>{item.lastMessageTime}</Text>
-                </View>
-                <Text style={styles.snippet} numberOfLines={2}>{item.lastMessage}</Text>
-                
-                {/* Item preview strip */}
-                {listing && (
-                  <View style={styles.itemPreview}>
-                    <Image source={{ uri: listing.images[0] }} style={styles.itemThumb} />
-                    <Text style={styles.itemName} numberOfLines={1}>{listing.title}</Text>
-                    <Text style={styles.itemPrice}>£{listing.price}</Text>
-                  </View>
-                )}
-              </View>
-
-              {item.unread && <View style={styles.unreadDot} />}
-            </TouchableOpacity>
-          );
-        }}
+        renderItem={renderItem}
         ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <View style={styles.emptyIcon}>
-              <Ionicons name="chatbubbles-outline" size={48} color={Colors.textMuted} />
-            </View>
-            <Text style={styles.emptyTitle}>No messages yet</Text>
-            <Text style={styles.emptySubtitle}>Start a conversation by messaging a seller</Text>
-          </View>
+          <EmptyState
+            icon="chatbubbles-outline"
+            title="All quiet here"
+            subtitle="Start a conversation by messaging a seller"
+            ctaLabel="Browse listings"
+            onCtaPress={() => navigation.navigate('MainTabs')}
+          />
         }
       />
     </SafeAreaView>
@@ -93,7 +140,6 @@ export default function InboxScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
 
-  // Header
   header: {
     paddingHorizontal: 20,
     paddingTop: 10,
@@ -113,7 +159,6 @@ const styles = StyleSheet.create({
     letterSpacing: -0.5,
   },
 
-  // Message cards — floated inside pill cards
   messageCard: {
     backgroundColor: '#111',
     borderRadius: 20,
@@ -146,7 +191,6 @@ const styles = StyleSheet.create({
   time: { fontSize: 11, color: Colors.textMuted, fontFamily: 'Inter_400Regular' },
   snippet: { color: Colors.textSecondary, fontSize: 14, fontFamily: 'Inter_400Regular', lineHeight: 20, marginBottom: 10 },
 
-  // Item preview strip inside message card
   itemPreview: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -167,33 +211,28 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
 
-  // Empty states
-  emptyState: {
-    alignItems: 'center',
+  // Swipe actions
+  swipeDelete: {
+    backgroundColor: '#FF3B30',
     justifyContent: 'center',
-    paddingTop: 60,
-    paddingHorizontal: 40,
-  },
-  emptyIcon: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    backgroundColor: '#111',
     alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 20,
+    width: 90,
+    borderRadius: 20,
+    marginLeft: 8,
+    gap: 4,
   },
-  emptyTitle: {
-    fontSize: 20,
+  swipeArchive: {
+    backgroundColor: TEAL,
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 90,
+    borderRadius: 20,
+    marginRight: 8,
+    gap: 4,
+  },
+  swipeActionText: {
+    color: '#fff',
+    fontSize: 12,
     fontFamily: 'Inter_600SemiBold',
-    color: Colors.textPrimary,
-    marginBottom: 8,
-  },
-  emptySubtitle: {
-    fontSize: 14,
-    fontFamily: 'Inter_400Regular',
-    color: Colors.textSecondary,
-    textAlign: 'center',
-    lineHeight: 22,
   },
 });

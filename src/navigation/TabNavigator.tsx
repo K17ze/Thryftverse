@@ -1,8 +1,17 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { View, StyleSheet, TouchableOpacity, Text, Platform } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Reanimated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withRepeat,
+  withTiming,
+  withSequence,
+  Easing,
+  withSpring,
+} from 'react-native-reanimated';
 import { TabParamList } from './types';
 import { Colors } from '../constants/colors';
 
@@ -11,24 +20,73 @@ import SearchScreen from '../screens/SearchScreen';
 import SellScreen from '../screens/SellScreen';
 import InboxScreen from '../screens/InboxScreen';
 import MyProfileScreen from '../screens/MyProfileScreen';
+import { useHaptic } from '../hooks/useHaptic';
 
 const Tab = createBottomTabNavigator<TabParamList>();
 
 // Custom Middle Circular Button
 const SellButton = ({ onPress }: { onPress: () => void }) => {
+  const scale = useSharedValue(1);
+
+  useEffect(() => {
+    scale.value = withRepeat(
+      withSequence(
+        withTiming(1.08, { duration: 1500, easing: Easing.inOut(Easing.ease) }),
+        withTiming(1, { duration: 1500, easing: Easing.inOut(Easing.ease) })
+      ),
+      -1,
+      true
+    );
+  }, []);
+
+  const animStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+
   return (
     <TouchableOpacity style={styles.sellBtnWrap} onPress={onPress} activeOpacity={0.85}>
-      <View style={styles.sellBtnInner}>
+      <Reanimated.View style={[styles.sellBtnInner, animStyle]}>
         <Ionicons name="add" size={28} color={Colors.textInverse} />
-      </View>
+      </Reanimated.View>
     </TouchableOpacity>
+  );
+};
+
+interface SpringIconProps {
+  name: keyof typeof Ionicons.glyphMap;
+  color: string;
+  focused: boolean;
+}
+
+const SpringIcon = ({ name, color, focused }: SpringIconProps) => {
+  const scale = useSharedValue(1);
+
+  useEffect(() => {
+    if (focused) {
+      scale.value = withSequence(
+        withSpring(1.2, { damping: 12 }),
+        withSpring(1)
+      );
+    } else {
+      scale.value = withTiming(1, { duration: 200 });
+    }
+  }, [focused]);
+
+  const animStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+
+  return (
+    <Reanimated.View style={animStyle}>
+      <Ionicons name={name} size={22} color={color} />
+    </Reanimated.View>
   );
 };
 
 export default function TabNavigator() {
   const insets = useSafeAreaInsets();
-  // We construct a floating pill effect by ignoring bottom inset inside the container,
-  // then adding margin. We use a custom tab bar implementation.
+  const haptic = useHaptic();
+
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
       <Tab.Navigator
@@ -47,14 +105,19 @@ export default function TabNavigator() {
             marginTop: 2,
           },
         }}
+        screenListeners={{
+          tabPress: () => {
+            haptic.light();
+          },
+        }}
       >
         <Tab.Screen
           name="Home"
           component={HomeScreen}
           options={{
             tabBarLabel: 'Feed',
-            tabBarIcon: ({ color }) => (
-              <Ionicons name="documents-outline" size={22} color={color} />
+            tabBarIcon: ({ color, focused }) => (
+              <SpringIcon name={focused ? 'documents' : 'documents-outline'} color={color} focused={focused} />
             ),
           }}
         />
@@ -63,8 +126,8 @@ export default function TabNavigator() {
           component={SearchScreen}
           options={{
             tabBarLabel: 'Closet',
-            tabBarIcon: ({ color }) => (
-              <Ionicons name="bookmark-outline" size={22} color={color} />
+            tabBarIcon: ({ color, focused }) => (
+              <SpringIcon name={focused ? 'bookmark' : 'bookmark-outline'} color={color} focused={focused} />
             ),
           }}
         />
@@ -82,8 +145,8 @@ export default function TabNavigator() {
           component={InboxScreen}
           options={{
             tabBarLabel: 'Inbox',
-            tabBarIcon: ({ color }) => (
-              <Ionicons name="chatbubbles-outline" size={22} color={color} />
+            tabBarIcon: ({ color, focused }) => (
+              <SpringIcon name={focused ? 'chatbubbles' : 'chatbubbles-outline'} color={color} focused={focused} />
             ),
           }}
         />
@@ -92,8 +155,8 @@ export default function TabNavigator() {
           component={MyProfileScreen}
           options={{
             tabBarLabel: 'Profile',
-            tabBarIcon: ({ color }) => (
-              <Ionicons name="person-outline" size={22} color={color} />
+            tabBarIcon: ({ color, focused }) => (
+              <SpringIcon name={focused ? 'person' : 'person-outline'} color={color} focused={focused} />
             ),
           }}
         />
@@ -108,7 +171,7 @@ const styles = StyleSheet.create({
     left: 20,
     right: 20,
     height: 64,
-    backgroundColor: '#0a0a0ad0', // Transparent deep dark
+    backgroundColor: '#0a0a0ad0',
     borderRadius: 32,
     borderTopWidth: 0,
     elevation: 10,
@@ -116,11 +179,11 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.5,
     shadowRadius: 10,
-    paddingBottom: 0, // Reset bottom padding inside tab container
+    paddingBottom: 0,
     paddingHorizontal: 8,
   },
   sellBtnWrap: {
-    top: -8, // floats up slightly
+    top: -8,
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -131,10 +194,11 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.accent,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#fff',
+    shadowColor: '#4ECDC4',
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
-    elevation: 5,
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 8,
   },
 });
+

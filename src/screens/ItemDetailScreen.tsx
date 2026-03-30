@@ -10,12 +10,26 @@ import {
   Dimensions,
   FlatList,
 } from 'react-native';
+import Reanimated, {
+  useAnimatedScrollHandler,
+  useSharedValue,
+  useAnimatedStyle,
+  interpolate,
+  Extrapolation,
+  withSpring,
+  withTiming,
+  withSequence,
+} from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import { Colors } from '../constants/colors';
 import { MOCK_LISTINGS, MOCK_USERS, Listing, User } from '../data/mockData';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useStore } from '../store/useStore';
+import { ImageViewer } from '../components/ImageViewer';
+import { AnimatedHeart } from '../components/AnimatedHeart';
+import { useToast } from '../context/ToastContext';
+import { useHaptic } from '../hooks/useHaptic';
 
 const { width, height } = Dimensions.get('window');
 
@@ -32,24 +46,78 @@ export default function ItemDetailScreen() {
   const seller: User = MOCK_USERS.find(u => u.id === item.sellerId) || MOCK_USERS[0];
   const sellerItems = MOCK_LISTINGS.filter(l => l.sellerId === seller.id && l.id !== item.id);
 
+  const { show } = useToast();
+  const haptic = useHaptic();
+
+  const handleToggleFav = () => {
+    toggleFav(item.id);
+    if (!isFav) {
+      show('Added to favourites ♥', 'success');
+    }
+  };
+
+  const scrollY = useSharedValue(0);
+  const scrollHandler = useAnimatedScrollHandler((event) => {
+    scrollY.value = event.contentOffset.y;
+  });
+
+  const heroStyle = useAnimatedStyle(() => {
+    const translateY = interpolate(scrollY.value, [-100, 0, height * 0.65], [-50, 0, height * 0.65 * 0.5], Extrapolation.CLAMP);
+    const scale = interpolate(scrollY.value, [-100, 0], [1.2, 1], Extrapolation.CLAMP);
+    return {
+      transform: [{ translateY }, { scale }],
+    };
+  });
+
+  const buyBarStyle = useAnimatedStyle(() => {
+    const translateY = interpolate(scrollY.value, [height * 0.65 - 100, height * 0.65], [100, 0], Extrapolation.CLAMP);
+    return {
+      transform: [{ translateY }],
+    };
+  });
+
+  // Big heart for double tap animation
+  const bigHeartScale = useSharedValue(0);
+  const bigHeartOpacity = useSharedValue(0);
+
+  const handleDoubleTap = () => {
+    haptic.heavy();
+    if (!isFav) {
+      toggleFav(item.id);
+      show('Added to favourites ♥', 'success');
+    }
+    
+    bigHeartOpacity.value = 1;
+    bigHeartScale.value = withSequence(
+      withSpring(1.5, { damping: 12 }),
+      withTiming(1.5, { duration: 400 }),
+      withTiming(0, { duration: 200 })
+    );
+  };
+
+  const bigHeartStyle = useAnimatedStyle(() => ({
+    opacity: bigHeartOpacity.value,
+    transform: [{ scale: bigHeartScale.value }],
+  }));
+
   return (
     <View style={styles.container}>
       <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
+      <Reanimated.ScrollView 
+        showsVerticalScrollIndicator={false} 
+        contentContainerStyle={{ paddingBottom: 100 }}
+        onScroll={scrollHandler}
+        scrollEventThrottle={16}
+      >
         
-        {/* ── Image Carousel (Restored functionality) ── */}
-        <View style={styles.heroContainer}>
-          <FlatList
-            data={item.images}
-            horizontal
-            pagingEnabled
-            showsHorizontalScrollIndicator={false}
-            keyExtractor={(_, idx) => idx.toString()}
-            renderItem={({ item: imageUrl }) => (
-              <Image source={{ uri: imageUrl }} style={styles.heroImage} resizeMode="cover" />
-            )}
-          />
+        {/* ── Image Carousel ── */}
+        <Reanimated.View style={[styles.heroContainer, heroStyle]}>
+          <ImageViewer images={item.images} height={height * 0.65} onDoubleTap={handleDoubleTap} />
+
+          <Reanimated.View style={[StyleSheet.absoluteFill, { alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 5 }, bigHeartStyle]}>
+            <Ionicons name="heart" size={100} color="#fff" style={{ shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 10 }} />
+          </Reanimated.View>
 
           {item.isSold && (
             <View style={styles.soldOverlay}>
@@ -65,12 +133,18 @@ export default function ItemDetailScreen() {
               <TouchableOpacity style={styles.blurBtn}>
                 <Ionicons name="share-outline" size={24} color="#fff" />
               </TouchableOpacity>
-              <TouchableOpacity style={styles.blurBtn} onPress={() => toggleFav(item.id)}>
-                <Ionicons name={isFav ? "heart" : "heart-outline"} size={24} color={isFav ? Colors.danger : "#fff"} />
-              </TouchableOpacity>
+              <View style={styles.blurBtn}>
+                <AnimatedHeart
+                  isFavourite={isFav}
+                  onToggle={handleToggleFav}
+                  size={24}
+                  activeColor={Colors.danger}
+                  inactiveColor="#fff"
+                />
+              </View>
             </View>
           </View>
-        </View>
+        </Reanimated.View>
 
         <View style={styles.detailsContainer}>
           <View style={styles.priceRow}>
@@ -127,11 +201,11 @@ export default function ItemDetailScreen() {
             </View>
           )}
         </View>
-      </ScrollView>
+      </Reanimated.ScrollView>
 
       {/* ── Floating Buy Bar ── */}
       {!item.isSold && (
-        <View style={[styles.floatingBuyBar, { paddingBottom: Math.max(insets.bottom, 20) }]}>
+        <Reanimated.View style={[styles.floatingBuyBar, { paddingBottom: Math.max(insets.bottom, 20) }, buyBarStyle]}>
           <TouchableOpacity
             style={styles.buyBtn}
             activeOpacity={0.9}
@@ -146,7 +220,7 @@ export default function ItemDetailScreen() {
           >
             <Text style={styles.offerBtnText}>Offer</Text>
           </TouchableOpacity>
-        </View>
+        </Reanimated.View>
       )}
     </View>
   );

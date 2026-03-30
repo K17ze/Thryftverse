@@ -1,15 +1,17 @@
 import React, { useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, StatusBar } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, StatusBar, SafeAreaView } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../constants/colors';
+import { Confetti } from '../components/Confetti';
 
 export default function SuccessScreen() {
   const navigation = useNavigation<any>();
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+      <Confetti />
       
       <View style={styles.centerContent}>
         <View style={styles.iconCircle}>
@@ -40,7 +42,7 @@ export default function SuccessScreen() {
           <Text style={styles.secondaryText}>Continue Browsing</Text>
         </TouchableOpacity>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 

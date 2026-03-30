@@ -9,11 +9,14 @@ import {
   Inter_500Medium,
   Inter_600SemiBold,
   Inter_700Bold,
+  Inter_800ExtraBold,
 } from '@expo-google-fonts/inter';
 import * as SplashScreen from 'expo-splash-screen';
 import { View, ActivityIndicator } from 'react-native';
 import AppNavigator from './src/navigation/AppNavigator';
 import { Colors } from './src/constants/colors';
+import { ToastProvider } from './src/context/ToastContext';
+import { ToastContainer } from './src/components/Toast';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -23,6 +26,7 @@ export default function App() {
     Inter_500Medium,
     Inter_600SemiBold,
     Inter_700Bold,
+    Inter_800ExtraBold,
   });
 
   React.useEffect(() => {
@@ -42,10 +46,13 @@ export default function App() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <NavigationContainer>
-          <StatusBar style="light" backgroundColor={Colors.background} />
-          <AppNavigator />
-        </NavigationContainer>
+        <ToastProvider>
+          <NavigationContainer>
+            <StatusBar style="light" backgroundColor={Colors.background} />
+            <AppNavigator />
+          </NavigationContainer>
+          <ToastContainer />
+        </ToastProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

@@ -7,13 +7,14 @@ import {
   StyleSheet,
   Dimensions,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../constants/colors';
 import { Listing } from '../data/mockData';
 import { useStore } from '../store/useStore';
+import { AnimatedHeart } from './AnimatedHeart';
+import { useToast } from '../context/ToastContext';
 
 const { width } = Dimensions.get('window');
-const CARD_WIDTH = (width - 48) / 2; // Extra padding around grids
+const CARD_WIDTH = (width - 48) / 2;
 
 interface Props {
   item: Listing;
@@ -23,6 +24,14 @@ interface Props {
 export function ProductCard({ item, onPress }: Props) {
   const isFav = useStore((state) => state.isFavourite(item.id));
   const toggleFav = useStore((state) => state.toggleFavourite);
+  const { show } = useToast();
+
+  const handleToggle = () => {
+    toggleFav(item.id);
+    if (!isFav) {
+      show('Added to favourites ♥', 'success');
+    }
+  };
 
   return (
     <TouchableOpacity style={styles.container} onPress={onPress} activeOpacity={0.9}>
@@ -38,19 +47,17 @@ export function ProductCard({ item, onPress }: Props) {
             <Text style={styles.soldText}>SOLD</Text>
           </View>
         )}
-        
-        {/* Favourite Button */}
-        <TouchableOpacity 
-          style={styles.favBtn} 
-          onPress={() => toggleFav(item.id)}
-          activeOpacity={0.7}
-        >
-          <Ionicons 
-            name={isFav ? "heart" : "heart-outline"} 
-            size={20} 
-            color={isFav ? Colors.danger : Colors.textPrimary} 
+
+        {/* Animated Favourite Button */}
+        <View style={styles.favBtn}>
+          <AnimatedHeart
+            isFavourite={isFav}
+            onToggle={handleToggle}
+            size={20}
+            activeColor={Colors.danger}
+            inactiveColor="#ffffff"
           />
-        </TouchableOpacity>
+        </View>
       </View>
 
       <View style={styles.info}>
@@ -64,12 +71,12 @@ export function ProductCard({ item, onPress }: Props) {
 const styles = StyleSheet.create({
   container: {
     width: CARD_WIDTH,
-    backgroundColor: Colors.background, // Pure black underlying
+    backgroundColor: Colors.background,
     marginBottom: 20,
   },
   imageContainer: {
     width: CARD_WIDTH,
-    height: CARD_WIDTH * 1.4, // Taller image ratio
+    height: CARD_WIDTH * 1.4,
     backgroundColor: Colors.surface,
     borderRadius: 16,
     overflow: 'hidden',
@@ -109,10 +116,10 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: 8,
     right: 8,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
   },

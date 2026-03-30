@@ -11,6 +11,13 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import Reanimated, { 
+  SlideInRight, 
+  SlideInLeft, 
+  ZoomIn, 
+  FadeIn, 
+  Layout 
+} from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
@@ -82,21 +89,21 @@ export default function ChatScreen({ navigation }: Props) {
   const renderMessage = (msg: Message) => {
     if (msg.date) {
       return (
-        <View key={msg.id + '_date'} style={styles.dateLabel}>
+        <Reanimated.View key={msg.id + '_date'} entering={FadeIn} layout={Layout.springify()} style={styles.dateLabel}>
           <Text style={styles.dateLabelText}>{msg.date}</Text>
-        </View>
+        </Reanimated.View>
       );
     }
     if (msg.type === 'purchase_status') {
       const lines = msg.text!.split('\n');
       return (
-        <View key={msg.id} style={styles.statusBlock}>
+        <Reanimated.View key={msg.id} entering={FadeIn.delay(200)} layout={Layout.springify()} style={styles.statusBlock}>
           <Text style={styles.statusTitle}>{lines[0]}</Text>
           <Text style={styles.statusBody}>{lines.slice(1).join('\n')}</Text>
           {msg.id === 's2' && (
             <TouchableOpacity><Text style={styles.tealLink}>Tracking information</Text></TouchableOpacity>
           )}
-        </View>
+        </Reanimated.View>
       );
     }
     if (msg.type === 'offer' || msg.type === 'offer_declined') {
@@ -104,7 +111,12 @@ export default function ChatScreen({ navigation }: Props) {
       const offerStatus = msg.offer!.status;
       
       return (
-        <View key={msg.id} style={[styles.msgRow, isMe && styles.msgRowRight]}>
+        <Reanimated.View 
+          key={msg.id} 
+          entering={ZoomIn.duration(400).springify()}
+          layout={Layout.springify()}
+          style={[styles.msgRow, isMe && styles.msgRowRight]}
+        >
           <View style={[styles.offerBubble, isMe && styles.offerBubbleMe]}>
             <View style={styles.offerTextRow}>
               <Text style={styles.offerPrice}>£{msg.offer!.price.toFixed(2)}</Text>
@@ -138,17 +150,22 @@ export default function ChatScreen({ navigation }: Props) {
               </View>
             )}
           </View>
-        </View>
+        </Reanimated.View>
       );
     }
     if (!msg.text) return null;
     const isMe = msg.sender === 'me';
     return (
-      <View key={msg.id} style={[styles.msgRow, isMe && styles.msgRowRight]}>
+      <Reanimated.View 
+        key={msg.id} 
+        entering={isMe ? SlideInRight.springify() : SlideInLeft.springify()}
+        layout={Layout.springify()}
+        style={[styles.msgRow, isMe && styles.msgRowRight]}
+      >
          <View style={[styles.textBubble, isMe && styles.textBubbleMe]}>
           <Text style={[styles.bubbleText, isMe && styles.bubbleTextMe]}>{msg.text}</Text>
         </View>
-      </View>
+      </Reanimated.View>
     );
   };
 
