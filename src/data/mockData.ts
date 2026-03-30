@@ -1,3 +1,43 @@
+
+export interface Address {
+  id: string;
+  name: string;
+  street: string;
+  city: string;
+  postcode: string;
+  isDefault: boolean;
+}
+
+export interface PaymentMethod {
+  id: string;
+  type: 'card' | 'bank_account';
+  last4: string;
+  brand?: 'visa' | 'mastercard' | 'amex';
+  bankName?: string;
+  expiry?: string;
+  isDefault: boolean;
+}
+
+export interface Order {
+  id: string;
+  listingId: string;
+  buyerId: string;
+  sellerId: string;
+  status: 'pending' | 'shipped' | 'delivered' | 'cancelled';
+  totalPrice: number;
+  trackingNumber?: string;
+  createdAt: string;
+}
+
+export interface Transaction {
+  id: string;
+  type: 'sale' | 'purchase' | 'withdrawal' | 'refund';
+  amount: number;
+  status: 'completed' | 'pending';
+  date: string;
+  description: string;
+}
+
 export interface Listing {
   id: string;
   title: string;
@@ -14,6 +54,7 @@ export interface Listing {
   category: string;
   subcategory: string;
   description: string;
+  createdAt?: string;
 }
 
 export interface User {
@@ -43,6 +84,9 @@ export interface Message {
   systemTitle?: string;
   timestamp: string;
   itemImage?: string;
+  type?: 'text' | 'offer' | 'system';
+  sender?: 'me' | 'other' | 'system';
+  offer?: { originalPrice: number; offerPrice: number; status: 'pending' | 'accepted' | 'declined' };
 }
 
 export interface Conversation {
@@ -156,6 +200,7 @@ export const MOCK_LISTINGS: Listing[] = [
     category: 'women',
     subcategory: 'Clothing',
     description: 'Beautiful YSL sweater in great condition. Barely worn, no signs of wear.',
+    createdAt: '2026-03-28T10:00:00Z',
   },
   {
     id: 'l2',
@@ -174,6 +219,7 @@ export const MOCK_LISTINGS: Listing[] = [
     category: 'men',
     subcategory: 'Clothing',
     description: 'Pit to pit 20 in. Simple striped shirt from AMI Paris. Very good condition.',
+    createdAt: '2026-03-28T10:00:00Z',
   },
   {
     id: 'l3',
@@ -191,6 +237,7 @@ export const MOCK_LISTINGS: Listing[] = [
     category: 'men',
     subcategory: 'Clothing',
     description: 'Classic Ralph Lauren Harrington jacket in excellent condition.',
+    createdAt: '2026-03-28T10:00:00Z',
   },
   {
     id: 'l4',
@@ -209,6 +256,7 @@ export const MOCK_LISTINGS: Listing[] = [
     category: 'men',
     subcategory: 'Clothing',
     description: 'Rare Stüssy graphic tee from the New York collection.',
+    createdAt: '2026-03-28T10:00:00Z',
   },
   {
     id: 'l5',
@@ -226,6 +274,7 @@ export const MOCK_LISTINGS: Listing[] = [
     category: 'men',
     subcategory: 'Clothing',
     description: 'Iconic Off-White arrow hoodie. Authentic, with tags.',
+    createdAt: '2026-03-28T10:00:00Z',
   },
   {
     id: 'l6',
@@ -243,6 +292,7 @@ export const MOCK_LISTINGS: Listing[] = [
     category: 'men',
     subcategory: 'Shoes',
     description: 'Classic Air Max 90 in white. Light signs of wear on soles.',
+    createdAt: '2026-03-28T10:00:00Z',
   },
   {
     id: 'l7',
@@ -260,6 +310,7 @@ export const MOCK_LISTINGS: Listing[] = [
     category: 'women',
     subcategory: 'Clothing',
     description: 'Brand new with tags cargo trousers from Zara. Never worn.',
+    createdAt: '2026-03-28T10:00:00Z',
   },
   {
     id: 'l8',
@@ -277,6 +328,7 @@ export const MOCK_LISTINGS: Listing[] = [
     category: 'women',
     subcategory: 'Bags',
     description: 'Authentic Jacquemus Le Chiquito mini bag in excellent condition.',
+    createdAt: '2026-03-28T10:00:00Z',
   },
   {
     id: 'l9',
@@ -295,6 +347,7 @@ export const MOCK_LISTINGS: Listing[] = [
     category: 'men',
     subcategory: 'Clothing',
     description: 'Premium Represent Clo. hoodie in large. Great condition.',
+    createdAt: '2026-03-28T10:00:00Z',
   },
   {
     id: 'l10',
@@ -312,6 +365,7 @@ export const MOCK_LISTINGS: Listing[] = [
     category: 'men',
     subcategory: 'Shoes',
     description: 'Classic black and white Chuck Taylors.',
+    createdAt: '2026-03-28T10:00:00Z',
   },
 ];
 
@@ -466,4 +520,21 @@ export const MOCK_CATEGORIES = [
   { id: 'cat2', name: 'Y2K', subItems: [{ id: 'sub3', name: 'Tops' }, { id: 'sub4', name: 'Accessories' }] },
   { id: 'cat3', name: 'Designer', subItems: [{ id: 'sub5', name: 'Bags' }, { id: 'sub6', name: 'Shoes' }] },
   { id: 'cat4', name: 'Streetwear', subItems: [{ id: 'sub7', name: 'Sneakers' }, { id: 'sub8', name: 'Jackets' }] },
+];
+
+export const MOCK_ADDRESSES: Address[] = [
+  { id: 'addr1', name: 'Thryft User', street: '123 Fake Street', city: 'London', postcode: 'W1D 1AN', isDefault: true },
+];
+
+export const MOCK_PAYMENT_METHODS: PaymentMethod[] = [
+  { id: 'pm1', type: 'card', brand: 'visa', last4: '4242', expiry: '12/28', isDefault: true },
+];
+
+export const MOCK_ORDERS: Order[] = [
+  { id: 'ord1', listingId: 'l2', buyerId: 'me', sellerId: 'u2', status: 'shipped', totalPrice: 51.10, trackingNumber: 'TRK123456', createdAt: '2026-03-25T14:30:00Z' },
+];
+
+export const MOCK_TRANSACTIONS: Transaction[] = [
+  { id: 'tx1', type: 'sale', amount: 48.00, status: 'completed', date: '2026-03-20T10:20:00Z', description: 'Sold: AMI Striped Shirt' },
+  { id: 'tx2', type: 'withdrawal', amount: -20.00, status: 'completed', date: '2026-03-22T09:15:00Z', description: 'Bank transfer' },
 ];

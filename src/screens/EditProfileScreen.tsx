@@ -5,6 +5,7 @@ import { Colors } from '../constants/colors';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { MY_USER } from '../data/mockData';
+import { Alert } from 'react-native';
 
 export default function EditProfileScreen() {
   const navigation = useNavigation();
@@ -26,9 +27,13 @@ export default function EditProfileScreen() {
 
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.avatarSection}>
-          <View style={styles.avatarPlaceholder}>
+          <TouchableOpacity 
+            style={styles.avatarPlaceholder}
+            onPress={() => Alert.alert('Change Avatar', 'Camera / photo library integration would open here.')}
+            activeOpacity={0.8}
+          >
             <Ionicons name="camera-outline" size={32} color={Colors.textPrimary} />
-          </View>
+          </TouchableOpacity>
           <Text style={styles.changeText}>Change Avatar</Text>
         </View>
 
@@ -82,7 +87,15 @@ export default function EditProfileScreen() {
           </View>
         </View>
 
-        <TouchableOpacity style={styles.saveBtn} activeOpacity={0.8} onPress={() => navigation.goBack()}>
+        <TouchableOpacity 
+          style={styles.saveBtn} 
+          activeOpacity={0.8} 
+          onPress={() => {
+            Alert.alert('Profile Updated', 'Your changes have been saved.', [
+              { text: 'OK', onPress: () => navigation.goBack() }
+            ]);
+          }}
+        >
           <Text style={styles.saveText}>Save Changes</Text>
         </TouchableOpacity>
       </ScrollView>

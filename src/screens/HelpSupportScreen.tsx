@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, SafeAreaView, TouchableOpacity,
-  ScrollView, StatusBar, TextInput, KeyboardAvoidingView, Platform,
+  ScrollView, StatusBar, TextInput, KeyboardAvoidingView, Platform, Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { StackScreenProps } from '@react-navigation/stack';
@@ -42,11 +42,11 @@ export default function HelpSupportScreen({ navigation }: Props) {
         {/* Quick Actions */}
         <View style={styles.quickRow}>
           {[
-            { icon: 'chatbubble-outline', label: 'Live Chat' },
-            { icon: 'mail-outline', label: 'Email Us' },
-            { icon: 'document-text-outline', label: 'My Tickets' },
+            { icon: 'chatbubble-outline', label: 'Live Chat', onPress: () => Alert.alert('Live Chat', 'Our chat support is available Mon–Fri, 9am–6pm.') },
+            { icon: 'mail-outline', label: 'Email Us', onPress: () => Alert.alert('Email Support', 'Email us at support@thryftverse.com') },
+            { icon: 'document-text-outline', label: 'My Tickets', onPress: () => Alert.alert('My Tickets', 'You have no open support tickets.') },
           ].map(a => (
-            <TouchableOpacity key={a.label} style={styles.quickBtn}>
+            <TouchableOpacity key={a.label} style={styles.quickBtn} onPress={a.onPress}>
               <View style={styles.quickIcon}>
                 <Ionicons name={a.icon as any} size={22} color={TEAL} />
               </View>

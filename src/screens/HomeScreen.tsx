@@ -11,13 +11,14 @@ import {
   Image,
   Dimensions,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../constants/colors';
 import { MOCK_USERS, MOCK_LISTINGS } from '../data/mockData';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
+import { useStore } from '../store/useStore';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -85,6 +86,7 @@ const FEED_LOOKS: FeedLook[] = [
 
 export default function HomeScreen() {
   const navigation = useNavigation<NavT>();
+  const notificationCount = useStore(state => state.notificationCount);
 
   // ── Stories Row ──
   const renderStories = () => (
@@ -153,7 +155,11 @@ export default function HomeScreen() {
           </TouchableOpacity>
           <TouchableOpacity style={styles.headerBtn} onPress={() => navigation.navigate('NotificationsList')}>
             <Ionicons name="notifications-outline" size={22} color={Colors.textPrimary} />
-            <View style={styles.notiBadge} />
+            {notificationCount > 0 && (
+              <View style={styles.notiBadge}>
+                <Text style={styles.notiBadgeText}>{notificationCount}</Text>
+              </View>
+            )}
           </TouchableOpacity>
         </View>
       </View>
@@ -206,14 +212,19 @@ const styles = StyleSheet.create({
   },
   notiBadge: {
     position: 'absolute',
-    top: 10,
-    right: 10,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: TEAL,
-    borderWidth: 1,
-    borderColor: '#111',
+    top: 6,
+    right: 8,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: Colors.danger,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  notiBadgeText: {
+    color: '#fff',
+    fontSize: 9,
+    fontFamily: 'Inter_700Bold',
   },
 
   // Stories

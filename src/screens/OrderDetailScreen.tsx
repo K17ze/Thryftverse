@@ -182,11 +182,19 @@ export default function OrderDetailScreen() {
 
         {/* ── Actions ── */}
         <View style={styles.actionsRow}>
-          <TouchableOpacity style={styles.actionBtnSecondary} activeOpacity={0.85}>
+          <TouchableOpacity 
+            style={styles.actionBtnSecondary} 
+            activeOpacity={0.85}
+            onPress={() => navigation.navigate('Report', { type: 'item' })}
+          >
             <Ionicons name="alert-circle-outline" size={18} color={Colors.textPrimary} />
             <Text style={styles.actionBtnSecondaryText}>Report issue</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.actionBtnPrimary} activeOpacity={0.85}>
+          <TouchableOpacity 
+            style={styles.actionBtnPrimary} 
+            activeOpacity={0.85}
+            onPress={() => navigation.navigate('WriteReview', { orderId: listing.id })}
+          >
             <Text style={styles.actionBtnPrimaryText}>Mark as received</Text>
           </TouchableOpacity>
         </View>

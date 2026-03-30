@@ -15,6 +15,7 @@ import { useRoute, useNavigation } from '@react-navigation/native';
 import { Colors } from '../constants/colors';
 import { MOCK_LISTINGS, MOCK_USERS, Listing, User } from '../data/mockData';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useStore } from '../store/useStore';
 
 const { width, height } = Dimensions.get('window');
 
@@ -22,6 +23,9 @@ export default function ItemDetailScreen() {
   const route = useRoute<any>();
   const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
+  
+  const isFav = useStore(state => state.isFavourite(route.params?.itemId));
+  const toggleFav = useStore(state => state.toggleFavourite);
 
   const { itemId } = route.params || {};
   const item: Listing = MOCK_LISTINGS.find(l => l.id === itemId) || MOCK_LISTINGS[0];
@@ -61,8 +65,8 @@ export default function ItemDetailScreen() {
               <TouchableOpacity style={styles.blurBtn}>
                 <Ionicons name="share-outline" size={24} color="#fff" />
               </TouchableOpacity>
-              <TouchableOpacity style={styles.blurBtn}>
-                <Ionicons name="heart-outline" size={24} color="#fff" />
+              <TouchableOpacity style={styles.blurBtn} onPress={() => toggleFav(item.id)}>
+                <Ionicons name={isFav ? "heart" : "heart-outline"} size={24} color={isFav ? Colors.danger : "#fff"} />
               </TouchableOpacity>
             </View>
           </View>

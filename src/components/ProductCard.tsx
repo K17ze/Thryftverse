@@ -7,8 +7,10 @@ import {
   StyleSheet,
   Dimensions,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../constants/colors';
 import { Listing } from '../data/mockData';
+import { useStore } from '../store/useStore';
 
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = (width - 48) / 2; // Extra padding around grids
@@ -19,6 +21,9 @@ interface Props {
 }
 
 export function ProductCard({ item, onPress }: Props) {
+  const isFav = useStore((state) => state.isFavourite(item.id));
+  const toggleFav = useStore((state) => state.toggleFavourite);
+
   return (
     <TouchableOpacity style={styles.container} onPress={onPress} activeOpacity={0.9}>
       <View style={styles.imageContainer}>
@@ -33,6 +38,19 @@ export function ProductCard({ item, onPress }: Props) {
             <Text style={styles.soldText}>SOLD</Text>
           </View>
         )}
+        
+        {/* Favourite Button */}
+        <TouchableOpacity 
+          style={styles.favBtn} 
+          onPress={() => toggleFav(item.id)}
+          activeOpacity={0.7}
+        >
+          <Ionicons 
+            name={isFav ? "heart" : "heart-outline"} 
+            size={20} 
+            color={isFav ? Colors.danger : Colors.textPrimary} 
+          />
+        </TouchableOpacity>
       </View>
 
       <View style={styles.info}>
@@ -86,5 +104,16 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     fontSize: 12,
     fontFamily: 'Inter_400Regular',
+  },
+  favBtn: {
+    position: 'absolute',
+    bottom: 8,
+    right: 8,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

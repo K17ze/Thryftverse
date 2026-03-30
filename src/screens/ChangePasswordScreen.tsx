@@ -4,19 +4,16 @@ import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../constants/colors';
-import { useStore } from '../store/useStore';
-import { MY_USER } from '../data/mockData';
 
-export default function LoginScreen() {
+export default function ChangePasswordScreen() {
   const navigation = useNavigation<any>();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const login = useStore(state => state.login);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
 
-  const handleLogin = () => {
-    // Navigate straight to MainTabs temporarily (dummy auth)
-    login(MY_USER);
-    navigation.replace('MainTabs');
+  const handleChange = () => {
+    // Navigate back to settings
+    navigation.goBack();
   };
 
   return (
@@ -27,51 +24,55 @@ export default function LoginScreen() {
         <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
         </TouchableOpacity>
+        <Text style={styles.headerTitle}>Change Password</Text>
+        <View style={{ width: 44 }} />
       </View>
 
       <KeyboardAvoidingView 
         style={styles.content} 
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <Text style={styles.title}>Welcome{'\n'}back.</Text>
-        
         <View style={styles.form}>
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Email</Text>
+            <Text style={styles.label}>Current Password</Text>
             <TextInput 
               style={styles.input} 
-              placeholder="Enter your email" 
+              placeholder="Enter current password" 
               placeholderTextColor={Colors.textMuted}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              value={email}
-              onChangeText={setEmail}
+              secureTextEntry
+              value={currentPassword}
+              onChangeText={setCurrentPassword}
             />
           </View>
           
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Password</Text>
+            <Text style={styles.label}>New Password</Text>
             <TextInput 
               style={styles.input} 
-              placeholder="Enter your password" 
+              placeholder="Enter new password" 
               placeholderTextColor={Colors.textMuted}
               secureTextEntry
-              value={password}
-              onChangeText={setPassword}
+              value={newPassword}
+              onChangeText={setNewPassword}
             />
           </View>
 
-          <TouchableOpacity 
-            style={styles.forgotBtn} 
-            onPress={() => navigation.navigate('ForgotPassword')}
-          >
-            <Text style={styles.forgotText}>Forgot password?</Text>
-          </TouchableOpacity>
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>Confirm New Password</Text>
+            <TextInput 
+              style={styles.input} 
+              placeholder="Confirm new password" 
+              placeholderTextColor={Colors.textMuted}
+              secureTextEntry
+              value={confirmPassword}
+              onChangeText={setConfirmPassword}
+            />
+          </View>
         </View>
 
         <View style={styles.footer}>
-          <TouchableOpacity style={styles.primaryBtn} onPress={handleLogin} activeOpacity={0.9}>
-            <Text style={styles.primaryText}>Log In</Text>
+          <TouchableOpacity style={styles.primaryBtn} onPress={handleChange} activeOpacity={0.9}>
+            <Text style={styles.primaryText}>Update Password</Text>
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
@@ -81,13 +82,22 @@ export default function LoginScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  header: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: 20 },
+  header: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    justifyContent: 'space-between',
+    paddingHorizontal: 20, 
+    paddingTop: 10, 
+    paddingBottom: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1a1a1a',
+  },
   backBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#111', alignItems: 'center', justifyContent: 'center' },
+  headerTitle: { fontSize: 18, fontFamily: 'Inter_700Bold', color: Colors.textPrimary },
   
-  content: { flex: 1, paddingHorizontal: 24, justifyContent: 'center' },
-  title: { fontSize: 44, fontFamily: 'Inter_700Bold', color: Colors.textPrimary, lineHeight: 48, letterSpacing: -1, marginBottom: 40 },
+  content: { flex: 1, paddingHorizontal: 24, paddingTop: 32 },
   
-  form: { marginBottom: 40 },
+  form: { flex: 1 },
   inputGroup: { marginBottom: 24 },
   label: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: Colors.textSecondary, marginBottom: 12 },
   input: { 
@@ -98,9 +108,6 @@ const styles = StyleSheet.create({
     fontSize: 16, 
     fontFamily: 'Inter_400Regular' 
   },
-  
-  forgotBtn: { alignSelf: 'flex-start', marginTop: 8 },
-  forgotText: { color: Colors.textSecondary, fontSize: 14, fontFamily: 'Inter_500Medium', textDecorationLine: 'underline' },
   
   footer: { paddingBottom: 40 },
   primaryBtn: { backgroundColor: Colors.textPrimary, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center' },

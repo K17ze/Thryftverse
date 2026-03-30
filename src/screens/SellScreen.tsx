@@ -15,6 +15,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { Colors } from '../constants/colors';
+import { Alert, Modal } from 'react-native';
+import { useStore } from '../store/useStore';
+
+const CONDITIONS = ['New with tags', 'Very good', 'Good', 'Satisfactory'];
+const SIZES = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', 'One size'];
+const BRANDS = ['Nike', 'Adidas', 'Zara', 'H&M', 'Ralph Lauren', 'Off-White', 'Stone Island', 'Stüssy', 'Other'];
 
 const { width } = Dimensions.get('window');
 
@@ -24,7 +30,39 @@ export default function SellScreen() {
   const [title, setTitle] = useState('');
   const [desc, setDesc] = useState('');
   const [price, setPrice] = useState('');
-  const [category, setCategory] = useState('');
+  
+  const sellDraft = useStore(state => state.sellDraft);
+  const updateSellDraft = useStore(state => state.updateSellDraft);
+
+  const handlePublish = () => {
+    if (!title || !price || !sellDraft.categoryId) {
+      Alert.alert('Missing Details', 'Please provide a title, price, and category.');
+      return;
+    }
+    // Fake publish
+    navigation.replace('ListingSuccess');
+  };
+
+  const pickCondition = () => {
+    Alert.alert('Select Condition', '', [
+      ...CONDITIONS.map(c => ({ text: c, onPress: () => updateSellDraft({ condition: c }) })),
+      { text: 'Cancel', style: 'cancel' as const },
+    ]);
+  };
+
+  const pickSize = () => {
+    Alert.alert('Select Size', '', [
+      ...SIZES.map(s => ({ text: s, onPress: () => updateSellDraft({ size: s }) })),
+      { text: 'Cancel', style: 'cancel' as const },
+    ]);
+  };
+
+  const pickBrand = () => {
+    Alert.alert('Select Brand', '', [
+      ...BRANDS.map(b => ({ text: b, onPress: () => updateSellDraft({ brand: b }) })),
+      { text: 'Cancel', style: 'cancel' as const },
+    ]);
+  };
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -43,7 +81,11 @@ export default function SellScreen() {
         </View>
 
         {/* Giant Camera-Centric Upload Box */}
-        <TouchableOpacity style={styles.giantCameraBox} activeOpacity={0.9}>
+        <TouchableOpacity 
+          style={styles.giantCameraBox} 
+          activeOpacity={0.9}
+          onPress={() => Alert.alert('Camera', 'expo-image-picker integration would open here.')}
+        >
           <View style={styles.cameraCircle}>
             <Ionicons name="camera" size={40} color={Colors.background} />
           </View>
@@ -87,11 +129,15 @@ export default function SellScreen() {
 
           {/* ── Pickers (Floating Cards) ── */}
           <View style={styles.cardGroup}>
-            <TouchableOpacity style={styles.pickerRow} activeOpacity={0.7} onPress={() => setCategory('Clothing')}>
+            <TouchableOpacity 
+              style={styles.pickerRow} 
+              activeOpacity={0.7} 
+              onPress={() => navigation.navigate('CategoryTree', { categoryPrefix: 'Sell' })}
+            >
               <Text style={styles.pickerLabel}>Category</Text>
               <View style={styles.pickerValueArea}>
-                <Text style={[styles.pickerValue, !category && styles.pickerPlaceholder]}>
-                  {category || 'Select'}
+                <Text style={[styles.pickerValue, !sellDraft.categoryId && styles.pickerPlaceholder]}>
+                  {sellDraft.categoryId || 'Select'}
                 </Text>
                 <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
               </View>
@@ -99,20 +145,48 @@ export default function SellScreen() {
             
             <View style={styles.divider} />
 
-            <TouchableOpacity style={styles.pickerRow} activeOpacity={0.7}>
+            <TouchableOpacity 
+              style={styles.pickerRow} 
+              activeOpacity={0.7}
+              onPress={pickBrand}
+            >
               <Text style={styles.pickerLabel}>Brand</Text>
               <View style={styles.pickerValueArea}>
-                <Text style={styles.pickerPlaceholder}>Optional</Text>
+                <Text style={[styles.pickerValue, !sellDraft.brand && styles.pickerPlaceholder]}>
+                  {sellDraft.brand || 'Optional'}
+                </Text>
                 <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
               </View>
             </TouchableOpacity>
             
             <View style={styles.divider} />
 
-            <TouchableOpacity style={styles.pickerRow} activeOpacity={0.7}>
+            <TouchableOpacity 
+              style={styles.pickerRow} 
+              activeOpacity={0.7}
+              onPress={pickSize}
+            >
+              <Text style={styles.pickerLabel}>Size</Text>
+              <View style={styles.pickerValueArea}>
+                <Text style={[styles.pickerValue, !sellDraft.size && styles.pickerPlaceholder]}>
+                  {sellDraft.size || 'Select'}
+                </Text>
+                <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
+              </View>
+            </TouchableOpacity>
+            
+            <View style={styles.divider} />
+
+            <TouchableOpacity 
+              style={styles.pickerRow} 
+              activeOpacity={0.7}
+              onPress={pickCondition}
+            >
               <Text style={styles.pickerLabel}>Condition</Text>
               <View style={styles.pickerValueArea}>
-                <Text style={styles.pickerPlaceholder}>Select</Text>
+                <Text style={[styles.pickerValue, !sellDraft.condition && styles.pickerPlaceholder]}>
+                  {sellDraft.condition || 'Select'}
+                </Text>
                 <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
               </View>
             </TouchableOpacity>
@@ -139,7 +213,7 @@ export default function SellScreen() {
 
       {/* ── Huge Action Button ── */}
       <View style={styles.stickyFooter}>
-        <TouchableOpacity style={styles.uploadCta} activeOpacity={0.9} onPress={() => navigation.replace('ListingSuccess')}>
+        <TouchableOpacity style={styles.uploadCta} activeOpacity={0.9} onPress={handlePublish}>
           <Text style={styles.uploadCtaText}>Publish Item</Text>
         </TouchableOpacity>
       </View>

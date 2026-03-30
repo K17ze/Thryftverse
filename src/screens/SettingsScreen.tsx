@@ -5,6 +5,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../constants/colors';
 import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
+import { useStore } from '../store/useStore';
+import { Alert } from 'react-native';
 
 type Props = StackScreenProps<RootStackParamList, 'Settings'>;
 const TEAL = '#4ECDC4';
@@ -18,6 +20,7 @@ interface SettingItem {
 }
 
 export default function SettingsScreen({ navigation }: Props) {
+  const logout = useStore(state => state.logout);
 
   const renderSettingRow = (item: SettingItem, isLast: boolean = false) => (
     <TouchableOpacity
@@ -50,14 +53,14 @@ export default function SettingsScreen({ navigation }: Props) {
   ];
 
   const appItems: SettingItem[] = [
-    { icon: 'language-outline', title: 'Language', subtitle: 'English EN', color: '#FFD700' },
-    { icon: 'moon-outline', title: 'Dark Mode', subtitle: 'Always on', color: '#BB86FC' },
+    { icon: 'language-outline', title: 'Language', subtitle: 'English EN', color: '#FFD700', onPress: () => Alert.alert('Language', 'Language switching coming soon.') },
+    { icon: 'moon-outline', title: 'Dark Mode', subtitle: 'Always on', color: '#BB86FC', onPress: () => Alert.alert('Dark Mode', 'Dark mode is always on.') },
   ];
 
   const supportItems: SettingItem[] = [
     { icon: 'help-circle-outline', title: 'Help Centre', subtitle: 'FAQs and support', color: TEAL, onPress: () => navigation.navigate('HelpSupport') },
-    { icon: 'document-text-outline', title: 'Terms & Conditions', color: '#a0a0a0' },
-    { icon: 'shield-checkmark-outline', title: 'Privacy Policy', color: '#a0a0a0' },
+    { icon: 'document-text-outline', title: 'Terms & Conditions', color: '#a0a0a0', onPress: () => Alert.alert('Terms & Conditions', 'Opening terms...') },
+    { icon: 'shield-checkmark-outline', title: 'Privacy Policy', color: '#a0a0a0', onPress: () => Alert.alert('Privacy Policy', 'Opening privacy policy...') },
   ];
 
   return (
@@ -113,7 +116,14 @@ export default function SettingsScreen({ navigation }: Props) {
         </View>
 
         {/* Logout */}
-        <TouchableOpacity style={styles.logoutPill} activeOpacity={0.8}>
+        <TouchableOpacity 
+          style={styles.logoutPill} 
+          activeOpacity={0.8}
+          onPress={() => {
+            logout();
+            navigation.replace('AuthLanding');
+          }}
+        >
           <Ionicons name="log-out-outline" size={20} color={Colors.danger} style={{ marginRight: 8 }} />
           <Text style={styles.logoutText}>Log out</Text>
         </TouchableOpacity>

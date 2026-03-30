@@ -107,7 +107,10 @@ export default function MakeOfferScreen({ navigation, route }: Props) {
         <TouchableOpacity
           style={[styles.sendBtn, numericOffer <= 0 && { opacity: 0.5 }]}
           disabled={numericOffer <= 0}
-          onPress={() => navigation.goBack()}
+          onPress={() => {
+            // Navigate to the inbox tab after sending
+            navigation.navigate('MainTabs', { screen: 'Inbox' } as any);
+          }}
           activeOpacity={0.9}
         >
           <Text style={styles.sendBtnText}>Send offer · £{total.toFixed(2)}</Text>

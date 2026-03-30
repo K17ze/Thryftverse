@@ -44,6 +44,11 @@ export type RootStackParamList = {
   ListingSuccess: undefined;
   // Phase 27
   NotificationsList: undefined;
+  // Phase 28
+  ForgotPassword: undefined;
+  ChangePassword: undefined;
+  WriteReview: { orderId: string };
+  Report: { type: 'item' | 'user' };
 };
 
 export type TabParamList = {

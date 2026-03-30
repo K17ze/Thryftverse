@@ -56,6 +56,12 @@ import ListingSuccessScreen from '../screens/ListingSuccessScreen';
 // Phase 27
 import NotificationsScreen from '../screens/NotificationsScreen';
 
+// Phase 28
+import ForgotPasswordScreen from '../screens/ForgotPasswordScreen';
+import ChangePasswordScreen from '../screens/ChangePasswordScreen';
+import WriteReviewScreen from '../screens/WriteReviewScreen';
+import ReportScreen from '../screens/ReportScreen';
+
 const Stack = createStackNavigator<RootStackParamList>();
 
 export default function AppNavigator() {
@@ -67,6 +73,7 @@ export default function AppNavigator() {
       <Stack.Screen name="AuthLanding" component={AuthLandingScreen} />
       <Stack.Screen name="Login" component={LoginScreen} />
       <Stack.Screen name="SignUp" component={SignUpScreen} />
+      <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
 
       <Stack.Screen name="MainTabs" component={TabNavigator} />
       <Stack.Screen name="CategoryDetail" component={CategoryDetailScreen} />
@@ -115,6 +122,11 @@ export default function AppNavigator() {
 
       {/* Phase 27 new screens */}
       <Stack.Screen name="NotificationsList" component={NotificationsScreen} />
+
+      {/* Phase 28 new screens */}
+      <Stack.Screen name="ChangePassword" component={ChangePasswordScreen} />
+      <Stack.Screen name="WriteReview" component={WriteReviewScreen} options={{ presentation: 'modal' }} />
+      <Stack.Screen name="Report" component={ReportScreen} options={{ presentation: 'modal' }} />
     </Stack.Navigator>
   );
 }

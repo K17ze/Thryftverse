@@ -13,6 +13,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
+import { Alert, Image } from 'react-native';
+import { MOCK_LISTINGS } from '../data/mockData';
 
 type Props = StackScreenProps<RootStackParamList, 'UserProfile'>;
 
@@ -29,14 +31,8 @@ const ITEM_SIZE = (width - 40 - GRID_SPACING) / 2;
 
 type Tab = 'Listings' | 'Reviews' | 'About';
 
-const MOCK_ITEMS = [
-  { id: '1', title: 'AMI Striped Shirt', brand: 'AMI', size: 'XL', price: 48, likes: 12, condition: 'Very good' },
-  { id: '2', title: 'Stüssy Tee', brand: 'Stüssy', size: 'XL', price: 53, likes: 25, condition: 'Very good' },
-  { id: '3', title: 'Off-White Hoodie', brand: 'Off-White', size: 'XL', price: 78, likes: 23, condition: 'Good' },
-  { id: '4', title: 'Ralph Lauren Shirt', brand: 'Ralph Lauren', size: 'M', price: 28, likes: 8, condition: 'Like new' },
-  { id: '5', title: 'Burberry Chinos', brand: 'Burberry', size: 'L', price: 65, likes: 31, condition: 'Very good' },
-  { id: '6', title: 'Ami Paris Jacket', brand: 'AMI', size: 'M', price: 120, likes: 9, condition: 'Like new' },
-];
+// Use real listings from shared data
+const MOCK_ITEMS = MOCK_LISTINGS.slice(0, 6);
 
 const MOCK_REVIEWS = [
   { id: 'r1', from: 'Thryftverse', rating: 5, text: 'Auto-feedback: Sale completed successfully', time: '6 days ago', auto: true },
@@ -72,7 +68,7 @@ export default function UserProfileScreen({ navigation, route }: Props) {
 
   const renderItem = ({ item, index }: { item: typeof MOCK_ITEMS[0], index: number }) => (
     <TouchableOpacity
-      style={[styles.gridItem, index % 2 === 0 ? { marginTop: 0 } : { marginTop: 24 }]} // Staggered masonry effect like BrowseScreen
+      style={[styles.gridItem, index % 2 === 0 ? { marginTop: 0 } : { marginTop: 24 }]}
       activeOpacity={0.9}
       onPress={() => {
         if (route.params?.isMe) {
@@ -83,9 +79,11 @@ export default function UserProfileScreen({ navigation, route }: Props) {
       }}
     >
       <View style={styles.gridImageWrap}>
-        <View style={styles.gridImagePlaceholder}>
-          <Ionicons name="shirt-outline" size={32} color={MUTED} />
-        </View>
+        <Image 
+          source={{ uri: item.images[0] }} 
+          style={styles.gridImage} 
+          resizeMode="cover"
+        />
         <View style={styles.likeBtnPill}>
           <Ionicons name="heart-outline" size={14} color="#fff" />
         </View>
@@ -110,7 +108,13 @@ export default function UserProfileScreen({ navigation, route }: Props) {
           <Ionicons name="arrow-back" size={24} color={TEXT} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>mariefullery</Text>
-        <TouchableOpacity style={styles.backBtn}>
+        <TouchableOpacity style={styles.backBtn} onPress={() => {
+          Alert.alert('Report or Block', 'What would you like to do?', [
+            { text: 'Report user', onPress: () => navigation.navigate('Report', { type: 'user' }) },
+            { text: 'Block user', style: 'destructive', onPress: () => {} },
+            { text: 'Cancel', style: 'cancel' },
+          ]);
+        }}>
           <Ionicons name="ellipsis-horizontal" size={22} color={TEXT} />
         </TouchableOpacity>
       </View>
@@ -353,6 +357,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   gridImagePlaceholder: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  gridImage: { width: '100%', height: '100%' },
   likeBtnPill: {
     position: 'absolute', top: 10, right: 10,
     width: 32, height: 32, borderRadius: 16,

@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, StatusBar, ScrollView, Switch } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, StatusBar, ScrollView, Switch, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors } from '../constants/colors';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import { StackNavigationProp } from '@react-navigation/stack';
+import { RootStackParamList } from '../navigation/types';
 
 export default function AccountSettingsScreen() {
-  const navigation = useNavigation();
+  const navigation = useNavigation<StackNavigationProp<RootStackParamList>>();
 
   // Expanded Data States restored
   const [email, setEmail] = useState('user@example.com');
@@ -93,14 +95,17 @@ export default function AccountSettingsScreen() {
         {/* Security */}
         <Text style={styles.sectionTitle}>Security</Text>
         <View style={styles.cardGroup}>
-          <TouchableOpacity style={styles.actionRow}>
+          <TouchableOpacity style={styles.actionRow} onPress={() => navigation.navigate('ChangePassword')}>
             <View>
               <Text style={styles.rowTitle}>Password</Text>
               <Text style={styles.rowSub}>Last changed 2 months ago</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.actionRow}>
+          <TouchableOpacity 
+            style={styles.actionRow}
+            onPress={() => Alert.alert('Two-Factor Authentication', 'Opening 2FA setup flow...')}
+          >
             <View>
               <Text style={styles.rowTitle}>Two-Factor Authentication</Text>
               <Text style={styles.rowSub}>Off</Text>
