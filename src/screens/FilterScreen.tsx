@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,11 +7,26 @@ import {
   ScrollView,
   StatusBar,
   Platform,
+  Dimensions,
+  Pressable
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import Reanimated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  withTiming,
+  runOnJS,
+  interpolate,
+  Extrapolation
+} from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../constants/colors';
 import { useNavigation } from '@react-navigation/native';
+
+const { height, width } = Dimensions.get('window');
+const SNAP_HALF = height * 0.5;
+const SNAP_FULL = height * 0.1;
 
 export default function FilterScreen() {
   const navigation = useNavigation<any>();
@@ -20,6 +35,49 @@ export default function FilterScreen() {
   const [selectedBrands, setSelectedBrands] = useState<string[]>(['Nike', 'Stüssy']);
   const [selectedSizes, setSelectedSizes] = useState<string[]>(['M', 'L']);
   const [selectedCondition, setSelectedCondition] = useState('Any');
+
+  const translateY = useSharedValue(height);
+  const contextY = useSharedValue(0);
+
+  useEffect(() => {
+    translateY.value = withSpring(SNAP_HALF, { damping: 20, stiffness: 200 });
+  }, []);
+
+  const closeBottomSheet = () => {
+    translateY.value = withSpring(height, { damping: 20, stiffness: 200 }, () => {
+      runOnJS(navigation.goBack)();
+    });
+  };
+
+  const gesture = Gesture.Pan()
+    .onStart(() => {
+      contextY.value = translateY.value;
+    })
+    .onUpdate((e) => {
+      translateY.value = Math.max(SNAP_FULL, contextY.value + e.translationY);
+    })
+    .onEnd((e) => {
+      if (e.translationY > 100 && e.velocityY > 500) {
+        runOnJS(closeBottomSheet)();
+      } else if (translateY.value > SNAP_HALF + 100) {
+        runOnJS(closeBottomSheet)();
+      } else if (translateY.value < SNAP_HALF - 50) {
+        // Snap to full (90% height)
+        translateY.value = withSpring(SNAP_FULL, { damping: 20, stiffness: 200 });
+      } else {
+        // Snap back to half
+        translateY.value = withSpring(SNAP_HALF, { damping: 20, stiffness: 200 });
+      }
+    });
+
+  const sheetStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateY.value }],
+  }));
+
+  const overlayStyle = useAnimatedStyle(() => {
+    const opacity = interpolate(translateY.value, [SNAP_FULL, height], [0.6, 0], Extrapolation.CLAMP);
+    return { opacity };
+  });
 
   const MOCK_BRANDS = ['Nike', 'Adidas', 'Stüssy', 'Carhartt', 'Arc\'teryx', 'Levi\'s'];
   const MOCK_SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
@@ -40,20 +98,26 @@ export default function FilterScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+    <View style={styles.container}>
+      <Reanimated.View style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }, overlayStyle]}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={closeBottomSheet} />
+      </Reanimated.View>
 
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.goBack()} activeOpacity={0.8}>
-          <Ionicons name="close" size={28} color={Colors.textPrimary} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Filter & Sort</Text>
-        <TouchableOpacity style={styles.iconBtn} onPress={() => { setSelectedBrands([]); setSelectedSizes([]); setSelectedCondition('Any'); }} activeOpacity={0.8}>
-          <Text style={styles.clearText}>Clear</Text>
-        </TouchableOpacity>
-      </View>
+      <GestureDetector gesture={gesture}>
+        <Reanimated.View style={[styles.sheet, sheetStyle]}>
+          {/* Drag Handle */}
+          <View style={styles.handleContainer}>
+            <View style={styles.handle} />
+          </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+          <View style={styles.header}>
+            <Text style={styles.headerTitle}>Filter & Sort</Text>
+            <TouchableOpacity hitSlop={15} onPress={() => { setSelectedBrands([]); setSelectedSizes([]); setSelectedCondition('Any'); }} activeOpacity={0.8}>
+              <Text style={styles.clearText}>Clear</Text>
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         
         {/* Sort Section */}
         <Text style={styles.sectionHeading}>Sort By</Text>
@@ -130,33 +194,55 @@ export default function FilterScreen() {
           ))}
         </ScrollView>
 
-        <View style={{ height: 120 }} />
-      </ScrollView>
-
-      {/* Sticky Bottom Action */}
-      <View style={styles.footer}>
-        <TouchableOpacity style={styles.applyBtn} onPress={() => navigation.goBack()} activeOpacity={0.9}>
-          <Text style={styles.applyBtnText}>Show {getResultsCount()} items</Text>
-        </TouchableOpacity>
-      </View>
-    </SafeAreaView>
+            {/* Sticky Bottom Action */}
+            <View style={styles.footer}>
+              <TouchableOpacity style={styles.applyBtn} onPress={closeBottomSheet} activeOpacity={0.9}>
+                <Text style={styles.applyBtnText}>Show {getResultsCount()} items</Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </Reanimated.View>
+      </GestureDetector>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
+  container: { flex: 1, backgroundColor: 'transparent' },
+  sheet: {
+    position: 'absolute',
+    bottom: 0,
+    width: width,
+    height: height, // allow scroll but cut off below screen
+    backgroundColor: Colors.background,
+    borderTopLeftRadius: 36,
+    borderTopRightRadius: 36,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 20,
+  },
+  handleContainer: {
+    alignItems: 'center',
+    paddingVertical: 14,
+  },
+  handle: {
+    width: 44,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: '#333',
+  },
   
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 10,
+    paddingHorizontal: 24,
     paddingBottom: 20,
   },
-  iconBtn: { width: 60, height: 44, justifyContent: 'center' },
-  headerTitle: { flex: 1, textAlign: 'center', fontSize: 17, fontFamily: 'Inter_700Bold', color: Colors.textPrimary },
-  clearText: { color: '#4ECDC4', fontSize: 15, fontFamily: 'Inter_600SemiBold', textAlign: 'right' },
+  headerTitle: { fontSize: 22, fontFamily: 'Inter_800ExtraBold', color: Colors.textPrimary, letterSpacing: -0.5 },
+  clearText: { color: '#4ECDC4', fontSize: 16, fontFamily: 'Inter_600SemiBold' },
 
   scrollContent: { paddingTop: 10, paddingBottom: 40 },
   

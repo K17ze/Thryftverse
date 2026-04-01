@@ -26,10 +26,10 @@ type NotifItem = { key: string; label: string; subtitle: string };
 const NOTIFICATIONS: NotifItem[] = [
   { key: 'messages', label: 'New messages', subtitle: 'When someone sends you a message' },
   { key: 'offers', label: 'Offers received', subtitle: 'When buyers make an offer on your item' },
-  { key: 'favourites', label: 'Favourites', subtitle: 'When someone likes your item' },
+  { key: 'wishlist', label: 'Wishlist activity', subtitle: 'When someone likes your item' },
   { key: 'followers', label: 'New followers', subtitle: 'When someone starts following you' },
   { key: 'orderUpdates', label: 'Order updates', subtitle: 'Shipping and delivery status changes' },
-  { key: 'priceDrops', label: 'Price drops', subtitle: 'For items on your favourites list' },
+  { key: 'priceDrops', label: 'Price drops', subtitle: 'For items on your wishlist' },
   { key: 'news', label: 'Thryftverse news', subtitle: 'Promotions, features and announcements' },
 ];
 

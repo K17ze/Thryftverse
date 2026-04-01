@@ -38,8 +38,8 @@ export default function ItemDetailScreen() {
   const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
   
-  const isFav = useStore(state => state.isFavourite(route.params?.itemId));
-  const toggleFav = useStore(state => state.toggleFavourite);
+  const isFav = useStore(state => state.isWishlisted(route.params?.itemId));
+  const toggleFav = useStore(state => state.toggleWishlist);
 
   const { itemId } = route.params || {};
   const item: Listing = MOCK_LISTINGS.find(l => l.id === itemId) || MOCK_LISTINGS[0];
@@ -52,7 +52,7 @@ export default function ItemDetailScreen() {
   const handleToggleFav = () => {
     toggleFav(item.id);
     if (!isFav) {
-      show('Added to favourites ♥', 'success');
+      show('Added to wishlist ♥', 'success');
     }
   };
 
@@ -84,7 +84,7 @@ export default function ItemDetailScreen() {
     haptic.heavy();
     if (!isFav) {
       toggleFav(item.id);
-      show('Added to favourites ♥', 'success');
+      show('Added to wishlist ♥', 'success');
     }
     
     bigHeartOpacity.value = 1;
@@ -113,7 +113,7 @@ export default function ItemDetailScreen() {
         
         {/* ── Image Carousel ── */}
         <Reanimated.View style={[styles.heroContainer, heroStyle]}>
-          <ImageViewer images={item.images} height={height * 0.65} onDoubleTap={handleDoubleTap} />
+          <ImageViewer images={item.images} height={height * 0.65} onDoubleTap={handleDoubleTap} itemId={item.id} />
 
           <Reanimated.View style={[StyleSheet.absoluteFill, { alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 5 }, bigHeartStyle]}>
             <Ionicons name="heart" size={100} color="#fff" style={{ shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 10 }} />
@@ -135,7 +135,7 @@ export default function ItemDetailScreen() {
               </TouchableOpacity>
               <View style={styles.blurBtn}>
                 <AnimatedHeart
-                  isFavourite={isFav}
+                  isActive={isFav}
                   onToggle={handleToggleFav}
                   size={24}
                   activeColor={Colors.danger}

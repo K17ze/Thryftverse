@@ -27,7 +27,7 @@ const MY_LISTINGS = MOCK_LISTINGS.filter((_, i) => i < 6);
 const QUICK_ACCESS = [
   { icon: 'receipt-outline', label: 'Orders', route: 'MyOrders' as const, color: '#4ECDC4' },
   { icon: 'wallet-outline', label: 'Balance', route: 'Balance' as const, value: '£120', color: '#FFD700' },
-  { icon: 'heart-outline', label: 'Favourites', route: 'Favourites' as const, color: '#FF6B6B' },
+  { icon: 'bookmark-outline', label: 'Wishlist', route: 'MainTabs' as const, color: '#FF6B6B' },
   { icon: 'color-palette-outline', label: 'Style', route: 'Personalisation' as const, color: '#BB86FC' },
   { icon: 'people-outline', label: 'Invite', route: 'InviteFriends' as const, color: '#4ECDC4' },
   { icon: 'settings-outline', label: 'Settings', route: 'Settings' as const, color: '#a0a0a0' },
@@ -108,7 +108,14 @@ export default function MyProfileScreen() {
                 key={item.label}
                 style={styles.quickItem}
                 activeOpacity={0.8}
-                onPress={() => navigation.navigate(item.route as any)}
+                onPress={() => {
+                  if (item.route === 'MainTabs') {
+                    (navigation as any).navigate('Search');
+                    return;
+                  }
+
+                  navigation.navigate(item.route as any);
+                }}
               >
                 <View style={[styles.quickIconCircle, { borderColor: item.color + '40' }]}>
                   <Ionicons name={item.icon as any} size={22} color={item.color} />

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, StatusBar } from 'react-native';
+import Reanimated, { useSharedValue, useAnimatedStyle, withSequence, withTiming, withSpring, FadeInUp, FadeOutUp, Layout } from 'react-native-reanimated';
 import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -10,8 +11,31 @@ export default function SignUpScreen() {
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
+
+  const shakeOffset = useSharedValue(0);
+
+  const shake = () => {
+    shakeOffset.value = withSequence(
+      withTiming(-10, { duration: 50 }),
+      withTiming(10, { duration: 50 }),
+      withTiming(-10, { duration: 50 }),
+      withTiming(10, { duration: 50 }),
+      withSpring(0, { damping: 20, stiffness: 400 })
+    );
+  };
+
+  const shakeStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: shakeOffset.value }]
+  }));
 
   const handleSignUp = () => {
+    if (!username || !email || !password) {
+      setErrorMsg('Please fill in all details.');
+      shake();
+      return;
+    }
+    setErrorMsg('');
     // Navigate straight to MainTabs temporarily (dummy auth)
     navigation.replace('MainTabs');
   };
@@ -75,9 +99,23 @@ export default function SignUpScreen() {
           <Text style={styles.termsText}>
             By signing up, you agree to our Terms of Service and Privacy Policy.
           </Text>
-          <TouchableOpacity style={styles.primaryBtn} onPress={handleSignUp} activeOpacity={0.9}>
-            <Text style={styles.primaryText}>Create Account</Text>
-          </TouchableOpacity>
+          
+          {!!errorMsg && (
+            <Reanimated.Text 
+              entering={FadeInUp.springify().damping(20).duration(400)} 
+              exiting={FadeOutUp}
+              layout={Layout.springify()}
+              style={styles.errorText}
+            >
+              {errorMsg}
+            </Reanimated.Text>
+          )}
+
+          <Reanimated.View style={shakeStyle} layout={Layout.springify()}>
+            <TouchableOpacity style={styles.primaryBtn} onPress={handleSignUp} activeOpacity={0.9}>
+              <Text style={styles.primaryText}>Create Account</Text>
+            </TouchableOpacity>
+          </Reanimated.View>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -104,8 +142,9 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_400Regular' 
   },
   
-  footer: { paddingBottom: 40 },
+  footer: { paddingBottom: 40, position: 'relative' },
   termsText: { fontSize: 12, fontFamily: 'Inter_400Regular', color: Colors.textMuted, textAlign: 'center', marginBottom: 20, lineHeight: 18 },
+  errorText: { color: Colors.danger, fontSize: 13, fontFamily: 'Inter_500Medium', textAlign: 'center', marginBottom: 12 },
   primaryBtn: { backgroundColor: Colors.textPrimary, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center' },
   primaryText: { color: Colors.background, fontSize: 16, fontFamily: 'Inter_700Bold' },
 });

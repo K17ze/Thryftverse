@@ -14,7 +14,6 @@ import {
   Gesture,
   FlatList,
 } from 'react-native-gesture-handler';
-import { Image } from 'react-native';
 
 const { width: W } = Dimensions.get('window');
 const MAX_ZOOM = 4;
@@ -23,9 +22,10 @@ const MIN_ZOOM = 1;
 interface ImagePageProps {
   uri: string;
   onDoubleTap?: () => void;
+  sharedTransitionTag?: string;
 }
 
-function ImagePage({ uri, onDoubleTap }: ImagePageProps) {
+function ImagePage({ uri, onDoubleTap, sharedTransitionTag }: ImagePageProps) {
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
   const translateX = useSharedValue(0);
@@ -98,10 +98,12 @@ function ImagePage({ uri, onDoubleTap }: ImagePageProps) {
   return (
     <GestureDetector gesture={composed}>
       <Reanimated.View style={[styles.page, animStyle]}>
-        <Image
+        <Reanimated.Image
           source={{ uri }}
           style={styles.image}
           resizeMode="cover"
+          // @ts-ignore
+          sharedTransitionTag={sharedTransitionTag}
         />
       </Reanimated.View>
     </GestureDetector>
@@ -135,9 +137,10 @@ interface Props {
   images: string[];
   height?: number;
   onDoubleTap?: () => void;
+  itemId?: string;
 }
 
-export function ImageViewer({ images, height = W, onDoubleTap }: Props) {
+export function ImageViewer({ images, height = W, onDoubleTap, itemId }: Props) {
   const [activeIndex, setActiveIndex] = React.useState(0);
 
   const onViewableItemsChanged = useCallback(({ viewableItems }: any) => {
@@ -158,8 +161,12 @@ export function ImageViewer({ images, height = W, onDoubleTap }: Props) {
         showsHorizontalScrollIndicator={false}
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={viewabilityConfig.current}
-        renderItem={({ item }) => (
-          <ImagePage uri={item} onDoubleTap={onDoubleTap} />
+        renderItem={({ item, index }) => (
+          <ImagePage 
+            uri={item} 
+            onDoubleTap={onDoubleTap}
+            sharedTransitionTag={index === 0 && itemId ? `image-${itemId}-0` : undefined} 
+          />
         )}
       />
       {images.length > 1 && (

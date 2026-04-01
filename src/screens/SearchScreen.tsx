@@ -10,15 +10,20 @@ import {
   ScrollView,
   Image,
   Dimensions,
+  RefreshControl,
 } from 'react-native';
+import Reanimated, { useSharedValue, useAnimatedScrollHandler, FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { ProductCard } from '../components/ProductCard';
 import { Colors } from '../constants/colors';
-import { MOCK_LISTINGS, MOCK_USERS, Listing } from '../data/mockData';
+import { MOCK_LISTINGS } from '../data/mockData';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
+import { RefreshIndicator } from '../components/RefreshIndicator';
+import { EmptyState } from '../components/EmptyState';
+import { useStore } from '../store/useStore';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -80,10 +85,6 @@ const SAVED_LOOKS: SavedLook[] = [
   },
 ];
 
-// Wishlist items — simulate some favourited listings
-const WISHLIST_IDS = ['l1', 'l4', 'l5', 'l7', 'l8', 'l9'];
-const WISHLIST_ITEMS = MOCK_LISTINGS.filter(l => WISHLIST_IDS.includes(l.id));
-
 // ── Look Card Component ──────────────────────────────────────
 function LookCard({ look, onPress }: { look: SavedLook; onPress: () => void }) {
   return (
@@ -141,8 +142,30 @@ export default function SearchScreen() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const navigation = useNavigation<NavT>();
+  const wishlistIds = useStore(state => state.wishlist);
 
-  const filteredWishlist = WISHLIST_ITEMS.filter(l =>
+  const [refreshing, setRefreshing] = useState(false);
+  const scrollY = useSharedValue(0);
+
+  const wishlistItems = React.useMemo(
+    () => MOCK_LISTINGS.filter(l => wishlistIds.includes(l.id)),
+    [wishlistIds]
+  );
+
+  const scrollHandler = useAnimatedScrollHandler({
+    onScroll: (e) => {
+      scrollY.value = e.contentOffset.y;
+    },
+  });
+
+  const handleRefresh = () => {
+    setRefreshing(true);
+    setTimeout(() => setRefreshing(false), 2000);
+  };
+
+  const AnimatedFlatList = Reanimated.createAnimatedComponent(FlatList);
+
+  const filteredWishlist = wishlistItems.filter(l =>
     !searchQuery || l.title.toLowerCase().includes(searchQuery.toLowerCase()) || l.brand?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
@@ -161,7 +184,7 @@ export default function SearchScreen() {
           <Text style={styles.hugeTitle}>My Closet</Text>
         </View>
         <View style={styles.headerRight}>
-          <Text style={styles.itemCount}>{WISHLIST_ITEMS.length + SAVED_LOOKS.length} items</Text>
+          <Text style={styles.itemCount}>{wishlistItems.length + SAVED_LOOKS.length} items</Text>
         </View>
       </View>
 
@@ -211,73 +234,95 @@ export default function SearchScreen() {
       </View>
 
       {/* ── Content ── */}
-      {activeTab === 'SAVED LOOKS' ? (
-        filteredLooks.length > 0 ? (
-          <FlatList
-            data={filteredLooks}
-            keyExtractor={item => item.id}
-            contentContainerStyle={styles.listContent}
-            showsVerticalScrollIndicator={false}
-            renderItem={({ item }) => (
-              <LookCard
-                look={item}
-                onPress={() => {/* Navigate to look detail in future */}}
-              />
-            )}
-            ListFooterComponent={
-              <View style={styles.emptyFooter}>
-                <Text style={styles.footerHint}>
-                  Save looks from the Feed to build your collection
-                </Text>
-              </View>
-            }
-          />
+      <View style={{ flex: 1 }}>
+        <RefreshIndicator scrollY={scrollY} isRefreshing={refreshing} topInset={20} />
+        
+        {activeTab === 'SAVED LOOKS' ? (
+          filteredLooks.length > 0 ? (
+            <AnimatedFlatList
+              data={filteredLooks}
+              keyExtractor={(item: any) => item.id}
+              contentContainerStyle={styles.listContent}
+              showsVerticalScrollIndicator={false}
+              onScroll={scrollHandler}
+              scrollEventThrottle={16}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={handleRefresh}
+                  tintColor="transparent"
+                  colors={['transparent']}
+                  progressBackgroundColor="transparent"
+                />
+              }
+              renderItem={({ item, index }: any) => (
+                <Reanimated.View entering={FadeInDown.delay(Math.min(index, 10) * 50).duration(400)}>
+                  <LookCard
+                    look={item}
+                    onPress={() => {/* Navigate to look detail in future */}}
+                  />
+                </Reanimated.View>
+              )}
+              ListFooterComponent={
+                <View style={styles.emptyFooter}>
+                  <Text style={styles.footerHint}>
+                    Save looks from the Feed to build your collection
+                  </Text>
+                </View>
+              }
+            />
+          ) : (
+            <EmptyState
+              icon="layers-outline"
+              title="No saved looks yet"
+              subtitle={`Browse the Feed and save outfit looks\nto build your style collection`}
+            />
+          )
         ) : (
-          <View style={styles.emptyState}>
-            <View style={styles.emptyIcon}>
-              <Ionicons name="layers-outline" size={48} color={Colors.textMuted} />
-            </View>
-            <Text style={styles.emptyTitle}>No saved looks yet</Text>
-            <Text style={styles.emptySubtitle}>
-              Browse the Feed and save outfit looks{'\n'}to build your style collection
-            </Text>
-          </View>
-        )
-      ) : (
-        filteredWishlist.length > 0 ? (
-          <FlatList
-            data={filteredWishlist}
-            keyExtractor={item => item.id}
-            numColumns={2}
-            contentContainerStyle={styles.gridContent}
-            columnWrapperStyle={styles.gridRow}
-            showsVerticalScrollIndicator={false}
-            renderItem={({ item }) => (
-              <ProductCard
-                item={item}
-                onPress={() => navigation.navigate('ItemDetail', { itemId: item.id })}
-              />
-            )}
-            ListFooterComponent={
-              <View style={styles.emptyFooter}>
-                <Text style={styles.footerHint}>
-                  ♡ items while browsing to add them here
-                </Text>
-              </View>
-            }
-          />
-        ) : (
-          <View style={styles.emptyState}>
-            <View style={styles.emptyIcon}>
-              <Ionicons name="heart-outline" size={48} color={Colors.textMuted} />
-            </View>
-            <Text style={styles.emptyTitle}>Your wishlist is empty</Text>
-            <Text style={styles.emptySubtitle}>
-              Tap ♡ on items you love and{'\n'}they'll appear here
-            </Text>
-          </View>
-        )
-      )}
+          filteredWishlist.length > 0 ? (
+            <AnimatedFlatList
+              data={filteredWishlist}
+              keyExtractor={(item: any) => item.id}
+              numColumns={2}
+              contentContainerStyle={styles.gridContent}
+              columnWrapperStyle={styles.gridRow}
+              showsVerticalScrollIndicator={false}
+              onScroll={scrollHandler}
+              scrollEventThrottle={16}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={handleRefresh}
+                  tintColor="transparent"
+                  colors={['transparent']}
+                  progressBackgroundColor="transparent"
+                />
+              }
+              renderItem={({ item, index }: any) => (
+                <Reanimated.View entering={FadeInDown.delay(Math.min(index, 10) * 50).duration(400)}>
+                  <ProductCard
+                    item={item}
+                    onPress={() => navigation.navigate('ItemDetail', { itemId: item.id })}
+                  />
+                </Reanimated.View>
+              )}
+              ListFooterComponent={
+                <View style={styles.emptyFooter}>
+                  <Text style={styles.footerHint}>
+                    ♡ items while browsing to add them here
+                  </Text>
+                </View>
+              }
+            />
+          ) : (
+            <EmptyState
+              icon="heart-outline"
+              title="Your wishlist is empty"
+              subtitle={`Tap ♡ on items you love and\nthey'll appear here`}
+            />
+          )
+        )}
+      </View>
     </SafeAreaView>
   );
 }

@@ -11,7 +11,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useHaptic } from '../hooks/useHaptic';
 
 interface Props {
-  isFavourite: boolean;
+  isActive: boolean;
   onToggle: () => void;
   size?: number;
   activeColor?: string;
@@ -21,7 +21,7 @@ interface Props {
 const AnimatedIonicons = Reanimated.createAnimatedComponent(Ionicons as any);
 
 export function AnimatedHeart({
-  isFavourite,
+  isActive,
   onToggle,
   size = 24,
   activeColor = '#FF6B6B',
@@ -33,7 +33,7 @@ export function AnimatedHeart({
   const handleToggle = () => {
     haptic.medium();
     onToggle();
-    if (!isFavourite) {
+    if (!isActive) {
       // Filling — spring bounce up
       scale.value = withSequence(
         withSpring(1.35, { damping: 6, stiffness: 400 }),
@@ -56,9 +56,9 @@ export function AnimatedHeart({
     <TouchableOpacity onPress={handleToggle} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
       <Reanimated.View style={animStyle}>
         <Ionicons
-          name={isFavourite ? 'heart' : 'heart-outline'}
+          name={isActive ? 'heart' : 'heart-outline'}
           size={size}
-          color={isFavourite ? activeColor : inactiveColor}
+          color={isActive ? activeColor : inactiveColor}
         />
       </Reanimated.View>
     </TouchableOpacity>

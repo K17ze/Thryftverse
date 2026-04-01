@@ -7,12 +7,16 @@ export type RootStackParamList = {
   CategoryDetail: { categoryId: string };
   Browse: { categoryId: string; subcategoryId?: string; title: string };
   ItemDetail: { itemId: string };
+  PosterViewer: { posterId: string };
+  CreatePoster: undefined;
+  CreateAuction: undefined;
+  CreateSyndicate: undefined;
+  MarketLedger: undefined;
   Chat: { conversationId: string };
   UserProfile: { userId: string; isMe?: boolean };
   // Profile sub-screens
   Balance: undefined;
   MyOrders: undefined;
-  Favourites: undefined;
   Personalisation: undefined;
   Settings: undefined;
   EditProfile: undefined;
@@ -53,6 +57,7 @@ export type RootStackParamList = {
 
 export type TabParamList = {
   Home: undefined;
+  TradeHub: undefined;
   Search: undefined;
   Sell: undefined;
   Inbox: undefined;

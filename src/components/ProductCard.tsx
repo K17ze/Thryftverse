@@ -11,7 +11,9 @@ import { Colors } from '../constants/colors';
 import { Listing } from '../data/mockData';
 import { useStore } from '../store/useStore';
 import { AnimatedHeart } from './AnimatedHeart';
+import { AnimatedPressable } from './AnimatedPressable';
 import { useToast } from '../context/ToastContext';
+import Reanimated from 'react-native-reanimated';
 
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = (width - 48) / 2;
@@ -22,24 +24,26 @@ interface Props {
 }
 
 export function ProductCard({ item, onPress }: Props) {
-  const isFav = useStore((state) => state.isFavourite(item.id));
-  const toggleFav = useStore((state) => state.toggleFavourite);
+  const isFav = useStore((state) => state.isWishlisted(item.id));
+  const toggleFav = useStore((state) => state.toggleWishlist);
   const { show } = useToast();
 
   const handleToggle = () => {
     toggleFav(item.id);
     if (!isFav) {
-      show('Added to favourites ♥', 'success');
+      show('Added to wishlist ♥', 'success');
     }
   };
 
   return (
-    <TouchableOpacity style={styles.container} onPress={onPress} activeOpacity={0.9}>
+    <AnimatedPressable style={styles.container} onPress={onPress}>
       <View style={styles.imageContainer}>
-        <Image
+        <Reanimated.Image
           source={{ uri: item.images[0] }}
           style={styles.image}
           resizeMode="cover"
+          // @ts-ignore
+          sharedTransitionTag={`image-${item.id}-0`}
         />
         {/* Sold overlay */}
         {item.isSold && (
@@ -51,7 +55,7 @@ export function ProductCard({ item, onPress }: Props) {
         {/* Animated Favourite Button */}
         <View style={styles.favBtn}>
           <AnimatedHeart
-            isFavourite={isFav}
+            isActive={isFav}
             onToggle={handleToggle}
             size={20}
             activeColor={Colors.danger}
@@ -64,7 +68,7 @@ export function ProductCard({ item, onPress }: Props) {
         <Text style={styles.price}>£{item.price.toFixed(2)}</Text>
         <Text style={styles.brand} numberOfLines={1}>@{item.brand.toLowerCase()}</Text>
       </View>
-    </TouchableOpacity>
+    </AnimatedPressable>
   );
 }
 

@@ -8,6 +8,7 @@ import {
   Image,
   StatusBar,
   Alert,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,9 +18,10 @@ import { Colors } from '../constants/colors';
 import { MOCK_CONVERSATIONS, MOCK_USERS, MOCK_LISTINGS } from '../data/mockData';
 import { RootStackParamList } from '../navigation/types';
 import { Swipeable } from 'react-native-gesture-handler';
-import Reanimated, { FadeInDown } from 'react-native-reanimated';
+import Reanimated, { FadeInDown, useSharedValue, useAnimatedScrollHandler } from 'react-native-reanimated';
 import { EmptyState } from '../components/EmptyState';
 import { useToast } from '../context/ToastContext';
+import { RefreshIndicator } from '../components/RefreshIndicator';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 const TEAL = '#4ECDC4';
@@ -30,6 +32,21 @@ export default function InboxScreen() {
   const navigation = useNavigation<NavT>();
   const { show } = useToast();
   const [conversations, setConversations] = useState(MOCK_CONVERSATIONS);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const scrollY = useSharedValue(0);
+  const scrollHandler = useAnimatedScrollHandler({
+    onScroll: (e) => {
+      scrollY.value = e.contentOffset.y;
+    },
+  });
+
+  const handleRefresh = () => {
+    setRefreshing(true);
+    setTimeout(() => setRefreshing(false), 2000);
+  };
+
+  const AnimatedFlatList = Reanimated.createAnimatedComponent(FlatList);
 
   const handleDelete = useCallback((id: string) => {
     setConversations(prev => prev.filter(c => c.id !== id));
@@ -116,23 +133,38 @@ export default function InboxScreen() {
         <Text style={styles.hugeTitle}>Inbox</Text>
       </View>
 
-      <FlatList
-        data={conversations}
-        keyExtractor={(c) => c.id}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 120, flexGrow: 1 }}
-        ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
-        renderItem={renderItem}
-        ListEmptyComponent={
-          <EmptyState
-            icon="chatbubbles-outline"
-            title="All quiet here"
-            subtitle="Start a conversation by messaging a seller"
-            ctaLabel="Browse listings"
-            onCtaPress={() => navigation.navigate('MainTabs')}
-          />
-        }
-      />
+      <View style={{ flex: 1 }}>
+        <RefreshIndicator scrollY={scrollY} isRefreshing={refreshing} topInset={20} />
+        
+        <AnimatedFlatList
+          data={conversations}
+          keyExtractor={(c: any) => c.id}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 120, flexGrow: 1 }}
+          ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
+          renderItem={renderItem as any}
+          onScroll={scrollHandler}
+          scrollEventThrottle={16}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor="transparent"
+              colors={['transparent']}
+              progressBackgroundColor="transparent"
+            />
+          }
+          ListEmptyComponent={
+            <EmptyState
+              icon="chatbubbles-outline"
+              title="All quiet here"
+              subtitle="Start a conversation by messaging a seller"
+              ctaLabel="Browse listings"
+              onCtaPress={() => navigation.navigate('MainTabs')}
+            />
+          }
+        />
+      </View>
     </SafeAreaView>
   );
 }

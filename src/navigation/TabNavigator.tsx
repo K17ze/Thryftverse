@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
 import { View, StyleSheet, TouchableOpacity, Text, Platform } from 'react-native';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { createBottomTabNavigator, BottomTabBar, BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Reanimated, {
@@ -14,13 +14,16 @@ import Reanimated, {
 } from 'react-native-reanimated';
 import { TabParamList } from './types';
 import { Colors } from '../constants/colors';
+import { useTabScroll } from '../context/TabScrollContext';
 
 import HomeScreen from '../screens/HomeScreen';
+import TradeHubScreen from '../screens/TradeHubScreen';
 import SearchScreen from '../screens/SearchScreen';
 import SellScreen from '../screens/SellScreen';
 import InboxScreen from '../screens/InboxScreen';
 import MyProfileScreen from '../screens/MyProfileScreen';
 import { useHaptic } from '../hooks/useHaptic';
+import { AnimatedBadge } from '../components/AnimatedBadge';
 
 const Tab = createBottomTabNavigator<TabParamList>();
 
@@ -56,9 +59,10 @@ interface SpringIconProps {
   name: keyof typeof Ionicons.glyphMap;
   color: string;
   focused: boolean;
+  badgeCount?: number;
 }
 
-const SpringIcon = ({ name, color, focused }: SpringIconProps) => {
+const SpringIcon = ({ name, color, focused, badgeCount }: SpringIconProps) => {
   const scale = useSharedValue(1);
 
   useEffect(() => {
@@ -77,8 +81,35 @@ const SpringIcon = ({ name, color, focused }: SpringIconProps) => {
   }));
 
   return (
-    <Reanimated.View style={animStyle}>
-      <Ionicons name={name} size={22} color={color} />
+    <View>
+      <Reanimated.View style={animStyle}>
+        <Ionicons name={name} size={22} color={color} />
+      </Reanimated.View>
+      {badgeCount !== undefined && <AnimatedBadge count={badgeCount} />}
+    </View>
+  );
+};
+
+const AnimatedTabBar = (props: BottomTabBarProps) => {
+  const { tabBarVisible } = useTabScroll();
+  
+  const animatedStyle = useAnimatedStyle(() => {
+    return {
+      transform: [
+        { translateY: withTiming(tabBarVisible.value ? 0 : 120, { duration: 300 }) }
+      ],
+      opacity: withTiming(tabBarVisible.value ? 1 : 0, { duration: 300 }),
+      position: 'absolute',
+      bottom: 0,
+      left: 0,
+      right: 0,
+      zIndex: 100,
+    };
+  });
+
+  return (
+    <Reanimated.View style={animatedStyle}>
+      <BottomTabBar {...props} />
     </Reanimated.View>
   );
 };
@@ -90,6 +121,7 @@ export default function TabNavigator() {
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
       <Tab.Navigator
+        tabBar={(props) => <AnimatedTabBar {...props} />}
         screenOptions={{
           headerShown: false,
           tabBarShowLabel: true,
@@ -122,6 +154,16 @@ export default function TabNavigator() {
           }}
         />
         <Tab.Screen
+          name="TradeHub"
+          component={TradeHubScreen}
+          options={{
+            tabBarLabel: 'Trade',
+            tabBarIcon: ({ color, focused }) => (
+              <SpringIcon name={focused ? 'stats-chart' : 'stats-chart-outline'} color={color} focused={focused} />
+            ),
+          }}
+        />
+        <Tab.Screen
           name="Search"
           component={SearchScreen}
           options={{
@@ -146,7 +188,7 @@ export default function TabNavigator() {
           options={{
             tabBarLabel: 'Inbox',
             tabBarIcon: ({ color, focused }) => (
-              <SpringIcon name={focused ? 'chatbubbles' : 'chatbubbles-outline'} color={color} focused={focused} />
+              <SpringIcon name={focused ? 'chatbubbles' : 'chatbubbles-outline'} color={color} focused={focused} badgeCount={3} />
             ),
           }}
         />

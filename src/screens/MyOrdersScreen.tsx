@@ -1,10 +1,13 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, StatusBar, Image, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, StatusBar, Image, Dimensions, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Reanimated, { useSharedValue, useAnimatedScrollHandler, FadeInDown } from 'react-native-reanimated';
 import { Colors } from '../constants/colors';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { MOCK_LISTINGS, MOCK_USERS, Listing, User } from '../data/mockData';
+import { RefreshIndicator } from '../components/RefreshIndicator';
+import { EmptyState } from '../components/EmptyState';
 
 const { width } = Dimensions.get('window');
 
@@ -32,6 +35,22 @@ export default function MyOrdersScreen() {
   ];
 
   const activeOrders = activeTab === 'buying' ? buyingOrders : sellingOrders;
+
+  const [refreshing, setRefreshing] = useState(false);
+  const scrollY = useSharedValue(0);
+
+  const scrollHandler = useAnimatedScrollHandler({
+    onScroll: (e) => {
+      scrollY.value = e.contentOffset.y;
+    },
+  });
+
+  const handleRefresh = () => {
+    setRefreshing(true);
+    setTimeout(() => setRefreshing(false), 2000);
+  };
+
+  const AnimatedScrollView = Reanimated.createAnimatedComponent(ScrollView);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -81,37 +100,58 @@ export default function MyOrdersScreen() {
         </ScrollView>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {activeOrders.length === 0 ? (
-          <View style={styles.emptyState}>
-            <Ionicons name="cube-outline" size={48} color={Colors.textMuted} />
-            <Text style={styles.emptyTitle}>No tracking data</Text>
-            <Text style={styles.emptySub}>When you {activeTab === 'buying' ? 'buy' : 'sell'} items, you'll track them here.</Text>
-          </View>
-        ) : (
-          activeOrders.map((order) => (
-            <TouchableOpacity 
-              key={order.id} 
-              style={styles.cardGroup}
-              onPress={() => navigation.navigate('OrderDetail', { orderId: order.id })}
-              activeOpacity={0.9}
-            >
-              <View style={styles.orderRow}>
-                <Image source={{ uri: order.item.images[0] }} style={styles.orderThumb} />
-                <View style={styles.orderInfo}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <Text style={[styles.orderStatus, order.isDone && styles.orderStatusDone]}>{order.status}</Text>
-                    {order.buyer && <Text style={styles.buyerText}>to {order.buyer.username}</Text>}
+      <View style={{ flex: 1 }}>
+        <RefreshIndicator scrollY={scrollY} isRefreshing={refreshing} topInset={10} />
+        
+        <AnimatedScrollView 
+          contentContainerStyle={[styles.content, activeOrders.length === 0 && { flex: 1, justifyContent: 'center' }]} 
+          showsVerticalScrollIndicator={false}
+          onScroll={scrollHandler}
+          scrollEventThrottle={16}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor="transparent"
+              colors={['transparent']}
+              progressBackgroundColor="transparent"
+            />
+          }
+        >
+          {activeOrders.length === 0 ? (
+            <EmptyState
+              icon="cube-outline"
+              title="No tracking data"
+              subtitle={`When you ${activeTab === 'buying' ? 'buy' : 'sell'} items, you'll track them here.`}
+              ctaLabel={activeTab === 'buying' ? 'Start Browsing' : 'List an Item'}
+              onCtaPress={() => navigation.navigate(activeTab === 'buying' ? 'MainTabs' : 'Sell')}
+            />
+          ) : (
+            activeOrders.map((order, index) => (
+              <Reanimated.View key={order.id} entering={FadeInDown.delay(index * 60).duration(400)}>
+                <TouchableOpacity 
+                  style={styles.cardGroup}
+                  onPress={() => navigation.navigate('OrderDetail', { orderId: order.id })}
+                  activeOpacity={0.9}
+                >
+                  <View style={styles.orderRow}>
+                    <Image source={{ uri: order.item.images[0] }} style={styles.orderThumb} />
+                    <View style={styles.orderInfo}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Text style={[styles.orderStatus, order.isDone && styles.orderStatusDone]}>{order.status}</Text>
+                        {order.buyer && <Text style={styles.buyerText}>to {order.buyer.username}</Text>}
+                      </View>
+                      <Text style={styles.orderTitle} numberOfLines={1}>{order.item.title}</Text>
+                      <Text style={styles.orderPrice}>£{order.item.price.toFixed(2)}</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
                   </View>
-                  <Text style={styles.orderTitle} numberOfLines={1}>{order.item.title}</Text>
-                  <Text style={styles.orderPrice}>£{order.item.price.toFixed(2)}</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
-              </View>
-            </TouchableOpacity>
-          ))
-        )}
-      </ScrollView>
+                </TouchableOpacity>
+              </Reanimated.View>
+            ))
+          )}
+        </AnimatedScrollView>
+      </View>
 
     </SafeAreaView>
   );

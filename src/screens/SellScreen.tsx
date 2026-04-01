@@ -11,12 +11,15 @@ import {
   KeyboardAvoidingView,
   Platform
 } from 'react-native';
+import Reanimated, { useSharedValue, useAnimatedStyle, withSequence, withTiming, withSpring, FadeInUp, FadeOutUp, Layout } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { Colors } from '../constants/colors';
 import { Alert, Modal } from 'react-native';
 import { useStore } from '../store/useStore';
+import { SortablePhotoStrip } from '../components/SortablePhotoStrip';
+import { BottomSheetPicker } from '../components/BottomSheetPicker';
 
 const CONDITIONS = ['New with tags', 'Very good', 'Good', 'Satisfactory'];
 const SIZES = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', 'One size'];
@@ -27,41 +30,75 @@ const { width } = Dimensions.get('window');
 export default function SellScreen() {
   const navigation = useNavigation<any>();
   
+  const [pickerMode, setPickerMode] = useState<'Brand' | 'Size' | 'Condition' | null>(null);
+
   const [title, setTitle] = useState('');
   const [desc, setDesc] = useState('');
   const [price, setPrice] = useState('');
+  const [photos, setPhotos] = useState<string[]>([]);
+  const [errorMsg, setErrorMsg] = useState('');
   
   const sellDraft = useStore(state => state.sellDraft);
   const updateSellDraft = useStore(state => state.updateSellDraft);
 
+  const shakeOffset = useSharedValue(0);
+
+  const shake = () => {
+    shakeOffset.value = withSequence(
+      withTiming(-10, { duration: 50 }),
+      withTiming(10, { duration: 50 }),
+      withTiming(-10, { duration: 50 }),
+      withTiming(10, { duration: 50 }),
+      withSpring(0, { damping: 20, stiffness: 400 })
+    );
+  };
+
+  const shakeStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: shakeOffset.value }]
+  }));
+
+  const handleCameraPress = () => {
+    // Fake expo-image-picker by adding 3 mock product photos
+    setPhotos([
+      'https://images.unsplash.com/photo-1542272604-787c3835535d?w=400&q=80', // jeans
+      'https://images.unsplash.com/photo-1516257984-b1b4d707412e?w=400&q=80', // detail
+      'https://images.unsplash.com/photo-1550614000-4b95fcd7dbfc?w=400&q=80', // tag
+    ]);
+  };
+
   const handlePublish = () => {
     if (!title || !price || !sellDraft.categoryId) {
-      Alert.alert('Missing Details', 'Please provide a title, price, and category.');
+      setErrorMsg('Please provide a title, price, and category.');
+      shake();
       return;
     }
+    setErrorMsg('');
     // Fake publish
     navigation.replace('ListingSuccess');
   };
 
-  const pickCondition = () => {
-    Alert.alert('Select Condition', '', [
-      ...CONDITIONS.map(c => ({ text: c, onPress: () => updateSellDraft({ condition: c }) })),
-      { text: 'Cancel', style: 'cancel' as const },
-    ]);
+  const getPickerOptions = () => {
+    switch (pickerMode) {
+      case 'Condition': return CONDITIONS;
+      case 'Size': return SIZES;
+      case 'Brand': return BRANDS;
+      default: return [];
+    }
   };
 
-  const pickSize = () => {
-    Alert.alert('Select Size', '', [
-      ...SIZES.map(s => ({ text: s, onPress: () => updateSellDraft({ size: s }) })),
-      { text: 'Cancel', style: 'cancel' as const },
-    ]);
+  const getPickerSelected = () => {
+    switch (pickerMode) {
+      case 'Condition': return sellDraft.condition;
+      case 'Size': return sellDraft.size;
+      case 'Brand': return sellDraft.brand;
+      default: return undefined;
+    }
   };
 
-  const pickBrand = () => {
-    Alert.alert('Select Brand', '', [
-      ...BRANDS.map(b => ({ text: b, onPress: () => updateSellDraft({ brand: b }) })),
-      { text: 'Cancel', style: 'cancel' as const },
-    ]);
+  const handlePickerSelect = (val: string) => {
+    if (pickerMode === 'Condition') updateSellDraft({ condition: val });
+    if (pickerMode === 'Size') updateSellDraft({ size: val });
+    if (pickerMode === 'Brand') updateSellDraft({ brand: val });
   };
 
   return (
@@ -80,18 +117,26 @@ export default function SellScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Giant Camera-Centric Upload Box */}
-        <TouchableOpacity 
-          style={styles.giantCameraBox} 
-          activeOpacity={0.9}
-          onPress={() => Alert.alert('Camera', 'expo-image-picker integration would open here.')}
-        >
-          <View style={styles.cameraCircle}>
-            <Ionicons name="camera" size={40} color={Colors.background} />
-          </View>
-          <Text style={styles.cameraText}>Take a photo or upload</Text>
-          <Text style={styles.cameraSubtext}>Clear photos sell 3x faster</Text>
-        </TouchableOpacity>
+        {/* Giant Camera-Centric Upload Box or Photo Strip */}
+        {photos.length === 0 ? (
+          <TouchableOpacity 
+            style={styles.giantCameraBox} 
+            activeOpacity={0.9}
+            onPress={handleCameraPress}
+          >
+            <View style={styles.cameraCircle}>
+              <Ionicons name="camera" size={40} color={Colors.background} />
+            </View>
+            <Text style={styles.cameraText}>Take a photo or upload</Text>
+            <Text style={styles.cameraSubtext}>Clear photos sell 3x faster</Text>
+          </TouchableOpacity>
+        ) : (
+          <SortablePhotoStrip 
+            photos={photos} 
+            onReorder={setPhotos} 
+            onAddPhoto={() => Alert.alert('Add Photo', 'Picker opens here.')} 
+          />
+        )}
       </View>
 
       <KeyboardAvoidingView 
@@ -148,7 +193,7 @@ export default function SellScreen() {
             <TouchableOpacity 
               style={styles.pickerRow} 
               activeOpacity={0.7}
-              onPress={pickBrand}
+              onPress={() => setPickerMode('Brand')}
             >
               <Text style={styles.pickerLabel}>Brand</Text>
               <View style={styles.pickerValueArea}>
@@ -164,7 +209,7 @@ export default function SellScreen() {
             <TouchableOpacity 
               style={styles.pickerRow} 
               activeOpacity={0.7}
-              onPress={pickSize}
+              onPress={() => setPickerMode('Size')}
             >
               <Text style={styles.pickerLabel}>Size</Text>
               <View style={styles.pickerValueArea}>
@@ -180,7 +225,7 @@ export default function SellScreen() {
             <TouchableOpacity 
               style={styles.pickerRow} 
               activeOpacity={0.7}
-              onPress={pickCondition}
+              onPress={() => setPickerMode('Condition')}
             >
               <Text style={styles.pickerLabel}>Condition</Text>
               <View style={styles.pickerValueArea}>
@@ -213,10 +258,34 @@ export default function SellScreen() {
 
       {/* ── Huge Action Button ── */}
       <View style={styles.stickyFooter}>
-        <TouchableOpacity style={styles.uploadCta} activeOpacity={0.9} onPress={handlePublish}>
-          <Text style={styles.uploadCtaText}>Publish Item</Text>
-        </TouchableOpacity>
+        {!!errorMsg && (
+          <Reanimated.Text 
+            entering={FadeInUp.springify().damping(20).duration(400)} 
+            exiting={FadeOutUp}
+            layout={Layout.springify()}
+            style={styles.errorText}
+          >
+            {errorMsg}
+          </Reanimated.Text>
+        )}
+        <Reanimated.View style={[shakeStyle, { width: '100%' }]} layout={Layout.springify()}>
+          <TouchableOpacity style={styles.uploadCta} activeOpacity={0.9} onPress={handlePublish}>
+            <Text style={styles.uploadCtaText}>Publish Item</Text>
+          </TouchableOpacity>
+        </Reanimated.View>
       </View>
+
+      {pickerMode && (
+        <BottomSheetPicker
+          visible={!!pickerMode}
+          onClose={() => setPickerMode(null)}
+          title={`Select ${pickerMode}`}
+          options={getPickerOptions()}
+          selectedValue={getPickerSelected()}
+          onSelect={handlePickerSelect}
+          searchable={pickerMode === 'Brand'}
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -314,12 +383,14 @@ const styles = StyleSheet.create({
   stickyFooter: {
     position: 'absolute',
     bottom: 0, left: 0, right: 0,
-    padding: 20,
-    paddingBottom: Platform.OS === 'ios' ? 34 : 20,
-    backgroundColor: 'rgba(10,10,10,0.9)',
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: Platform.OS === 'ios' ? 34 : 24,
+    backgroundColor: 'rgba(10, 10, 10, 0.95)',
     borderTopWidth: 1,
     borderTopColor: '#1A1A1A',
   },
+  errorText: { color: Colors.danger, fontSize: 13, fontFamily: 'Inter_500Medium', textAlign: 'center', marginBottom: 12 },
   uploadCta: {
     backgroundColor: Colors.textPrimary,
     height: 60,

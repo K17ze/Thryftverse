@@ -17,6 +17,7 @@ export default function AccountSettingsScreen() {
   const [birthday, setBirthday] = useState('14/05/1996');
   const [holidayMode, setHolidayMode] = useState(false);
   const [privateProfile, setPrivateProfile] = useState(false);
+  const [twoFactor, setTwoFactor] = useState(false);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -102,16 +103,18 @@ export default function AccountSettingsScreen() {
             </View>
             <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
           </TouchableOpacity>
-          <TouchableOpacity 
-            style={styles.actionRow}
-            onPress={() => Alert.alert('Two-Factor Authentication', 'Opening 2FA setup flow...')}
-          >
+          <View style={[styles.actionRow, { paddingBottom: 0 }]}>
             <View>
               <Text style={styles.rowTitle}>Two-Factor Authentication</Text>
-              <Text style={styles.rowSub}>Off</Text>
+              <Text style={styles.rowSub}>App Authenticator</Text>
             </View>
-            <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
-          </TouchableOpacity>
+            <Switch 
+              value={twoFactor} 
+              onValueChange={setTwoFactor}
+              trackColor={{ false: '#333', true: Colors.success }}
+              thumbColor="#fff"
+            />
+          </View>
         </View>
 
         {/* Linked Accounts */}

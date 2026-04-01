@@ -1,18 +1,31 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, StatusBar } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView, StatusBar } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
 import { Colors } from '../constants/colors';
+import { useToast } from '../context/ToastContext';
+import { AnimatedPressable } from '../components/AnimatedPressable';
 
 export default function ChangePasswordScreen() {
-  const navigation = useNavigation<any>();
+  const navigation = useNavigation();
+  const { show } = useToast();
+  
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [isSecure, setIsSecure] = useState(true);
 
-  const handleChange = () => {
-    // Navigate back to settings
+  const handleUpdate = () => {
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      show('Please fill in all fields', 'error');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      show('New passwords do not match', 'error');
+      return;
+    }
+    show('Password updated successfully', 'success');
     navigation.goBack();
   };
 
@@ -21,59 +34,72 @@ export default function ChangePasswordScreen() {
       <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
       
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.8}>
           <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Change Password</Text>
-        <View style={{ width: 44 }} />
+        <Text style={styles.hugeTitle}>Change Password</Text>
       </View>
 
       <KeyboardAvoidingView 
-        style={styles.content} 
+        style={{ flex: 1 }} 
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <View style={styles.form}>
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Current Password</Text>
-            <TextInput 
-              style={styles.input} 
-              placeholder="Enter current password" 
-              placeholderTextColor={Colors.textMuted}
-              secureTextEntry
-              value={currentPassword}
-              onChangeText={setCurrentPassword}
-            />
-          </View>
+        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+          
+          <Text style={styles.sectionTitle}>Security</Text>
           
           <View style={styles.inputGroup}>
+            <Text style={styles.label}>Current Password</Text>
+            <View style={styles.pillInput}>
+              <TextInput 
+                style={styles.inputText} 
+                value={currentPassword} 
+                onChangeText={setCurrentPassword} 
+                secureTextEntry={isSecure}
+                placeholder="Enter current password"
+                placeholderTextColor={Colors.textMuted}
+              />
+              <TouchableOpacity onPress={() => setIsSecure(!isSecure)} hitSlop={10}>
+                <Ionicons name={isSecure ? "eye-off-outline" : "eye-outline"} size={20} color={Colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <View style={styles.inputGroup}>
             <Text style={styles.label}>New Password</Text>
-            <TextInput 
-              style={styles.input} 
-              placeholder="Enter new password" 
-              placeholderTextColor={Colors.textMuted}
-              secureTextEntry
-              value={newPassword}
-              onChangeText={setNewPassword}
-            />
+            <View style={styles.pillInput}>
+              <TextInput 
+                style={styles.inputText} 
+                value={newPassword} 
+                onChangeText={setNewPassword} 
+                secureTextEntry={isSecure}
+                placeholder="Enter new password"
+                placeholderTextColor={Colors.textMuted}
+              />
+            </View>
+            <Text style={styles.helperText}>Must be at least 8 characters</Text>
           </View>
 
           <View style={styles.inputGroup}>
             <Text style={styles.label}>Confirm New Password</Text>
-            <TextInput 
-              style={styles.input} 
-              placeholder="Confirm new password" 
-              placeholderTextColor={Colors.textMuted}
-              secureTextEntry
-              value={confirmPassword}
-              onChangeText={setConfirmPassword}
-            />
+            <View style={styles.pillInput}>
+              <TextInput 
+                style={styles.inputText} 
+                value={confirmPassword} 
+                onChangeText={setConfirmPassword} 
+                secureTextEntry={isSecure}
+                placeholder="Confirm new password"
+                placeholderTextColor={Colors.textMuted}
+              />
+            </View>
           </View>
-        </View>
+
+        </ScrollView>
 
         <View style={styles.footer}>
-          <TouchableOpacity style={styles.primaryBtn} onPress={handleChange} activeOpacity={0.9}>
-            <Text style={styles.primaryText}>Update Password</Text>
-          </TouchableOpacity>
+          <AnimatedPressable style={styles.saveBtn} onPress={handleUpdate}>
+            <Text style={styles.saveBtnText}>Update Password</Text>
+          </AnimatedPressable>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -82,34 +108,37 @@ export default function ChangePasswordScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  header: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    justifyContent: 'space-between',
-    paddingHorizontal: 20, 
-    paddingTop: 10, 
-    paddingBottom: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#1a1a1a',
-  },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 10, paddingBottom: 20, gap: 12 },
   backBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#111', alignItems: 'center', justifyContent: 'center' },
-  headerTitle: { fontSize: 18, fontFamily: 'Inter_700Bold', color: Colors.textPrimary },
+  hugeTitle: { fontSize: 28, fontFamily: 'Inter_700Bold', color: Colors.textPrimary, letterSpacing: -0.5 },
+  content: { paddingHorizontal: 20, paddingBottom: 40 },
   
-  content: { flex: 1, paddingHorizontal: 24, paddingTop: 32 },
+  sectionTitle: { fontSize: 13, fontFamily: 'Inter_600SemiBold', color: Colors.textSecondary, marginLeft: 6, marginTop: 24, marginBottom: 16, textTransform: 'uppercase', letterSpacing: 1 },
   
-  form: { flex: 1 },
-  inputGroup: { marginBottom: 24 },
-  label: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: Colors.textSecondary, marginBottom: 12 },
-  input: { 
-    height: 56, 
-    borderBottomWidth: 1, 
-    borderBottomColor: '#222', 
-    color: Colors.textPrimary, 
-    fontSize: 16, 
-    fontFamily: 'Inter_400Regular' 
+  inputGroup: { marginBottom: 20 },
+  label: { fontSize: 13, fontFamily: 'Inter_600SemiBold', color: Colors.textSecondary, marginBottom: 8, marginLeft: 6, textTransform: 'uppercase', letterSpacing: 1 },
+  pillInput: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#111', borderRadius: 24, paddingHorizontal: 20, height: 56 },
+  inputText: { flex: 1, color: Colors.textPrimary, fontFamily: 'Inter_500Medium', fontSize: 16 },
+  helperText: { fontSize: 11, fontFamily: 'Inter_400Regular', color: Colors.textMuted, marginLeft: 6, marginTop: 6 },
+
+  footer: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: Platform.OS === 'ios' ? 34 : 24,
+    backgroundColor: 'rgba(10, 10, 10, 0.95)',
+    borderTopWidth: 1,
+    borderTopColor: '#1A1A1A',
   },
-  
-  footer: { paddingBottom: 40 },
-  primaryBtn: { backgroundColor: Colors.textPrimary, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center' },
-  primaryText: { color: Colors.background, fontSize: 16, fontFamily: 'Inter_700Bold' },
+  saveBtn: {
+    backgroundColor: Colors.accent,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  saveBtnText: {
+    color: '#000',
+    fontSize: 16,
+    fontFamily: 'Inter_800ExtraBold',
+  },
 });

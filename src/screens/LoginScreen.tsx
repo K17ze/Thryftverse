@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, StatusBar } from 'react-native';
+import Reanimated, { useSharedValue, useAnimatedStyle, withSequence, withTiming, withSpring, FadeInUp, FadeOutUp, Layout } from 'react-native-reanimated';
 import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -11,9 +12,32 @@ export default function LoginScreen() {
   const navigation = useNavigation<any>();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
   const login = useStore(state => state.login);
 
+  const shakeOffset = useSharedValue(0);
+
+  const shake = () => {
+    shakeOffset.value = withSequence(
+      withTiming(-10, { duration: 50 }),
+      withTiming(10, { duration: 50 }),
+      withTiming(-10, { duration: 50 }),
+      withTiming(10, { duration: 50 }),
+      withSpring(0, { damping: 20, stiffness: 400 })
+    );
+  };
+
+  const shakeStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: shakeOffset.value }]
+  }));
+
   const handleLogin = () => {
+    if (!email || !password) {
+      setErrorMsg('Please fill in both email and password.');
+      shake();
+      return;
+    }
+    setErrorMsg('');
     // Navigate straight to MainTabs temporarily (dummy auth)
     login(MY_USER);
     navigation.replace('MainTabs');
@@ -70,9 +94,22 @@ export default function LoginScreen() {
         </View>
 
         <View style={styles.footer}>
-          <TouchableOpacity style={styles.primaryBtn} onPress={handleLogin} activeOpacity={0.9}>
-            <Text style={styles.primaryText}>Log In</Text>
-          </TouchableOpacity>
+          {!!errorMsg && (
+            <Reanimated.Text 
+              entering={FadeInUp.springify().damping(20).duration(400)} 
+              exiting={FadeOutUp}
+              layout={Layout.springify()}
+              style={styles.errorText}
+            >
+              {errorMsg}
+            </Reanimated.Text>
+          )}
+
+          <Reanimated.View style={shakeStyle} layout={Layout.springify()}>
+            <TouchableOpacity style={styles.primaryBtn} onPress={handleLogin} activeOpacity={0.9}>
+              <Text style={styles.primaryText}>Log In</Text>
+            </TouchableOpacity>
+          </Reanimated.View>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -102,7 +139,8 @@ const styles = StyleSheet.create({
   forgotBtn: { alignSelf: 'flex-start', marginTop: 8 },
   forgotText: { color: Colors.textSecondary, fontSize: 14, fontFamily: 'Inter_500Medium', textDecorationLine: 'underline' },
   
-  footer: { paddingBottom: 40 },
+  footer: { paddingBottom: 40, position: 'relative' },
+  errorText: { color: Colors.danger, fontSize: 13, fontFamily: 'Inter_500Medium', textAlign: 'center', marginBottom: 12 },
   primaryBtn: { backgroundColor: Colors.textPrimary, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center' },
   primaryText: { color: Colors.background, fontSize: 16, fontFamily: 'Inter_700Bold' },
 });

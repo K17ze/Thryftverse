@@ -16,7 +16,9 @@ import { View, ActivityIndicator } from 'react-native';
 import AppNavigator from './src/navigation/AppNavigator';
 import { Colors } from './src/constants/colors';
 import { ToastProvider } from './src/context/ToastContext';
+import { TabScrollProvider } from './src/context/TabScrollContext';
 import { ToastContainer } from './src/components/Toast';
+import { ErrorBoundary } from './src/components/ErrorBoundary';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -44,16 +46,20 @@ export default function App() {
   }
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaProvider>
-        <ToastProvider>
-          <NavigationContainer>
-            <StatusBar style="light" backgroundColor={Colors.background} />
-            <AppNavigator />
-          </NavigationContainer>
-          <ToastContainer />
-        </ToastProvider>
-      </SafeAreaProvider>
-    </GestureHandlerRootView>
+    <ErrorBoundary>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <SafeAreaProvider>
+          <ToastProvider>
+            <TabScrollProvider>
+              <NavigationContainer>
+                <StatusBar style="light" backgroundColor={Colors.background} />
+                <AppNavigator />
+              </NavigationContainer>
+            </TabScrollProvider>
+            <ToastContainer />
+          </ToastProvider>
+        </SafeAreaProvider>
+      </GestureHandlerRootView>
+    </ErrorBoundary>
   );
 }

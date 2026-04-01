@@ -48,7 +48,7 @@ export default function SettingsScreen({ navigation }: Props) {
   ];
 
   const notifItems: SettingItem[] = [
-    { icon: 'notifications-outline', title: 'Push Notifications', subtitle: 'Messages, offers, favourites', color: TEAL, onPress: () => navigation.navigate('PushNotifications') },
+    { icon: 'notifications-outline', title: 'Push Notifications', subtitle: 'Messages, offers, wishlist', color: TEAL, onPress: () => navigation.navigate('PushNotifications') },
     { icon: 'mail-outline', title: 'Email Notifications', subtitle: 'Newsletters and updates', color: '#64B5F6' },
   ];
 

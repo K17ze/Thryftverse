@@ -1,10 +1,12 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, StatusBar, Dimensions, Image } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, StatusBar, Dimensions, Image, ScrollView, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import Reanimated, { useSharedValue, useAnimatedScrollHandler, FadeInDown } from 'react-native-reanimated';
 import { Colors } from '../constants/colors';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { MOCK_LISTINGS } from '../data/mockData';
+import { RefreshIndicator } from '../components/RefreshIndicator';
 
 const { width } = Dimensions.get('window');
 const GRID_SPACING = 16;
@@ -21,6 +23,22 @@ export default function BrowseScreen() {
     : MOCK_LISTINGS;
 
   const dataToRender = listData.length > 0 ? listData : MOCK_LISTINGS;
+
+  const [refreshing, setRefreshing] = useState(false);
+  const scrollY = useSharedValue(0);
+
+  const scrollHandler = useAnimatedScrollHandler({
+    onScroll: (e) => {
+      scrollY.value = e.contentOffset.y;
+    },
+  });
+
+  const handleRefresh = () => {
+    setRefreshing(true);
+    setTimeout(() => setRefreshing(false), 2000);
+  };
+
+  const AnimatedFlatList = Reanimated.createAnimatedComponent(FlatList);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -63,19 +81,37 @@ export default function BrowseScreen() {
       </View>
 
       {/* Spacious 2-Column Grid */}
-      <FlatList
-        data={dataToRender}
-        keyExtractor={item => item.id}
-        numColumns={2}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.gridContent}
-        columnWrapperStyle={styles.rowWrapper}
-        renderItem={({ item, index }) => (
-          <TouchableOpacity 
-            style={[styles.gridItem, index % 2 === 0 ? { marginTop: 0 } : { marginTop: 24 }]} // Staggered masonry effect
-            activeOpacity={0.9}
-            onPress={() => navigation.navigate('ItemDetail', { itemId: item.id })}
-          >
+      <View style={{ flex: 1 }}>
+        <RefreshIndicator scrollY={scrollY} isRefreshing={refreshing} topInset={40} />
+        
+        <AnimatedFlatList
+          data={dataToRender}
+          keyExtractor={(item: any) => item.id}
+          numColumns={2}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.gridContent}
+          columnWrapperStyle={styles.rowWrapper}
+          onScroll={scrollHandler}
+          scrollEventThrottle={16}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor="transparent"
+              colors={['transparent']}
+              progressBackgroundColor="transparent"
+            />
+          }
+          renderItem={({ item, index }: any) => (
+            <Reanimated.View 
+              entering={FadeInDown.delay(Math.min(index, 10) * 50).duration(400)}
+              style={[styles.gridItem, index % 2 === 0 ? { marginTop: 0 } : { marginTop: 24 }]}
+            >
+              <TouchableOpacity 
+                style={{ flex: 1 }}
+                activeOpacity={0.9}
+                onPress={() => navigation.navigate('ItemDetail', { itemId: item.id })}
+              >
             <View style={styles.imageWrap}>
               <Image source={{ uri: item.images[0] }} style={styles.gridImage} resizeMode="cover" />
               <TouchableOpacity style={styles.likeBtn} activeOpacity={0.8}>
@@ -89,15 +125,14 @@ export default function BrowseScreen() {
               </View>
               <Text style={styles.sizeText}>{item.size} • {item.condition}</Text>
             </View>
-          </TouchableOpacity>
-        )}
-      />
+              </TouchableOpacity>
+            </Reanimated.View>
+          )}
+        />
+      </View>
     </SafeAreaView>
   );
 }
-
-// Need to import ScrollView for the filter bar
-import { ScrollView } from 'react-native';
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },

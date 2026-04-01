@@ -10,13 +10,17 @@ import TabNavigator from './TabNavigator';
 import CategoryDetailScreen from '../screens/CategoryDetailScreen';
 import BrowseScreen from '../screens/BrowseScreen';
 import ItemDetailScreen from '../screens/ItemDetailScreen';
+import PosterViewerScreen from '../screens/PosterViewerScreen';
+import CreatePosterScreen from '../screens/CreatePosterScreen';
+import CreateAuctionScreen from '../screens/CreateAuctionScreen';
+import CreateSyndicateScreen from '../screens/CreateSyndicateScreen';
+import MarketLedgerScreen from '../screens/MarketLedgerScreen';
 import ChatScreen from '../screens/ChatScreen';
 import UserProfileScreen from '../screens/UserProfileScreen';
 
 // Profile Subs
 import BalanceScreen from '../screens/BalanceScreen';
 import MyOrdersScreen from '../screens/MyOrdersScreen';
-import FavouritesScreen from '../screens/FavouritesScreen';
 import PersonalisationScreen from '../screens/PersonalisationScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 import EditProfileScreen from '../screens/EditProfileScreen';
@@ -79,11 +83,15 @@ export default function AppNavigator() {
       <Stack.Screen name="CategoryDetail" component={CategoryDetailScreen} />
       <Stack.Screen name="Browse" component={BrowseScreen} />
       <Stack.Screen name="ItemDetail" component={ItemDetailScreen} />
+      <Stack.Screen name="PosterViewer" component={PosterViewerScreen} options={{ presentation: 'modal' }} />
+      <Stack.Screen name="CreatePoster" component={CreatePosterScreen} options={{ presentation: 'modal' }} />
+      <Stack.Screen name="CreateAuction" component={CreateAuctionScreen} options={{ presentation: 'modal' }} />
+      <Stack.Screen name="CreateSyndicate" component={CreateSyndicateScreen} options={{ presentation: 'modal' }} />
+      <Stack.Screen name="MarketLedger" component={MarketLedgerScreen} />
       <Stack.Screen name="Chat" component={ChatScreen} />
       <Stack.Screen name="UserProfile" component={UserProfileScreen} />
       <Stack.Screen name="Balance" component={BalanceScreen} />
       <Stack.Screen name="MyOrders" component={MyOrdersScreen} />
-      <Stack.Screen name="Favourites" component={FavouritesScreen} />
       <Stack.Screen name="Personalisation" component={PersonalisationScreen} />
       <Stack.Screen name="Settings" component={SettingsScreen} />
       <Stack.Screen name="EditProfile" component={EditProfileScreen} />
@@ -117,7 +125,7 @@ export default function AppNavigator() {
       <Stack.Screen name="AddAddress" component={AddAddressScreen} />
 
       {/* Phase 25 new screens */}
-      <Stack.Screen name="Filter" component={FilterScreen} options={{ presentation: 'modal' }} />
+      <Stack.Screen name="Filter" component={FilterScreen} options={{ presentation: 'transparentModal', headerShown: false, cardOverlayEnabled: true, cardStyle: { backgroundColor: 'transparent' } }} />
       <Stack.Screen name="ListingSuccess" component={ListingSuccessScreen} />
 
       {/* Phase 27 new screens */}
