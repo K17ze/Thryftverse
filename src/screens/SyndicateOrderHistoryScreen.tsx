@@ -7,19 +7,25 @@ import {
   StyleSheet,
   StatusBar,
   FlatList,
-  ScrollView
+  ScrollView,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
-import { Colors } from '../constants/colors';
+import { ActiveTheme, Colors } from '../constants/colors';
 import { RootStackParamList } from '../navigation/types';
 import { useStore } from '../store/useStore';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { EmptyState } from '../components/EmptyState';
 import { getOrderHistoryForAsset } from '../data/mockSyndicateData';
 import { TradeOrder } from '../data/syndicateModels';
+import {
+  MarketHistoryCursor,
+  MarketHistoryItem,
+  listUserMarketHistory,
+} from '../services/marketApi';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 
@@ -38,11 +44,12 @@ interface HistoryEntry {
   status: 'pending' | 'filled' | 'partial' | 'cancelled';
   filledQuantity: number;
   createdAt: string;
-  source: 'seeded' | 'ledger';
+  source: 'seeded' | 'ledger' | 'backend';
 }
 
 const SIDE_FILTERS: SideFilter[] = ['all', 'buy', 'sell'];
 const DATE_FILTERS: DateFilter[] = ['all', '24h', '7d', '30d'];
+const PAGE_SIZE = 80;
 
 function toHistoryEntry(order: TradeOrder): HistoryEntry {
   return {
@@ -83,7 +90,7 @@ function statusPillStyle(status: HistoryEntry['status']) {
       return {
         borderColor: '#2f4944',
         backgroundColor: '#152520',
-        textColor: '#8de5dc',
+        textColor: '#e8dcc8',
       };
     case 'pending':
       return {
@@ -107,14 +114,131 @@ function statusPillStyle(status: HistoryEntry['status']) {
   }
 }
 
+function sortHistoryEntriesDesc(a: HistoryEntry, b: HistoryEntry) {
+  const tsDiff = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+  if (tsDiff !== 0) {
+    return tsDiff;
+  }
+
+  return b.id.localeCompare(a.id);
+}
+
+function mapRemoteHistoryToEntries(history: MarketHistoryItem[]): HistoryEntry[] {
+  return history
+    .filter(
+      (item) =>
+        item.channel === 'syndicate' &&
+        (item.action === 'buy-units' || item.action === 'sell-units')
+    )
+    .map<HistoryEntry>((item) => {
+      const quantity = Math.max(0, item.units ?? 0);
+      const pricePerShare =
+        item.unitPriceGbp ??
+        (quantity > 0 ? Number((item.amountGbp / quantity).toFixed(4)) : 0);
+      const status =
+        item.status === 'filled'
+          ? 'filled'
+          : item.status === 'rejected'
+            ? 'cancelled'
+            : 'filled';
+
+      return {
+        id: item.id,
+        assetId: item.referenceId,
+        side: item.action === 'buy-units' ? 'buy' : 'sell',
+        type: 'market',
+        quantity,
+        pricePerShare,
+        totalAmount: item.amountGbp,
+        fee: item.feeGbp ?? Number((item.amountGbp * 0.005).toFixed(2)),
+        status,
+        filledQuantity: status === 'filled' ? quantity : 0,
+        createdAt: item.timestamp,
+        source: 'backend',
+      };
+    })
+    .sort(sortHistoryEntriesDesc);
+}
+
 export default function SyndicateOrderHistoryScreen() {
   const navigation = useNavigation<NavT>();
   const marketLedger = useStore((state) => state.marketLedger);
+  const currentUser = useStore((state) => state.currentUser);
   const { formatFromFiat } = useFormattedPrice();
+  const viewerId = currentUser?.id ?? 'u1';
 
   const [sideFilter, setSideFilter] = React.useState<SideFilter>('all');
   const [dateFilter, setDateFilter] = React.useState<DateFilter>('all');
   const [assetFilter, setAssetFilter] = React.useState<string>('all');
+  const [remoteEntries, setRemoteEntries] = React.useState<HistoryEntry[]>([]);
+  const [isSyncingRemote, setIsSyncingRemote] = React.useState(false);
+  const [isRemoteAvailable, setIsRemoteAvailable] = React.useState(false);
+  const [hasMoreRemote, setHasMoreRemote] = React.useState(false);
+  const [nextCursor, setNextCursor] = React.useState<MarketHistoryCursor | null>(null);
+  const [isLoadingMore, setIsLoadingMore] = React.useState(false);
+
+  const syncRemoteHistory = React.useCallback(async () => {
+    setIsSyncingRemote(true);
+
+    try {
+      const page = await listUserMarketHistory(viewerId, {
+        channel: 'syndicate',
+        limit: PAGE_SIZE,
+      });
+
+      setRemoteEntries(mapRemoteHistoryToEntries(page.items));
+      setIsRemoteAvailable(true);
+      setHasMoreRemote(page.pageInfo.hasMore);
+      setNextCursor(page.pageInfo.nextCursor ?? null);
+    } catch {
+      setIsRemoteAvailable(false);
+      setRemoteEntries([]);
+      setHasMoreRemote(false);
+      setNextCursor(null);
+    } finally {
+      setIsSyncingRemote(false);
+    }
+  }, [viewerId]);
+
+  const loadMoreRemoteHistory = React.useCallback(async () => {
+    if (!isRemoteAvailable || !hasMoreRemote || !nextCursor || isLoadingMore || isSyncingRemote) {
+      return;
+    }
+
+    setIsLoadingMore(true);
+    try {
+      const page = await listUserMarketHistory(viewerId, {
+        channel: 'syndicate',
+        limit: PAGE_SIZE,
+        cursorTs: nextCursor.cursorTs,
+        cursorId: nextCursor.cursorId,
+      });
+
+      const pageEntries = mapRemoteHistoryToEntries(page.items);
+      setRemoteEntries((previous) => {
+        const merged = [...previous, ...pageEntries];
+        const deduped = new Map<string, HistoryEntry>();
+
+        for (const item of merged) {
+          deduped.set(item.id, item);
+        }
+
+        return [...deduped.values()].sort(sortHistoryEntriesDesc);
+      });
+
+      setHasMoreRemote(page.pageInfo.hasMore);
+      setNextCursor(page.pageInfo.nextCursor ?? null);
+    } catch {
+      setHasMoreRemote(false);
+      setNextCursor(null);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [hasMoreRemote, isLoadingMore, isRemoteAvailable, isSyncingRemote, nextCursor, viewerId]);
+
+  React.useEffect(() => {
+    void syncRemoteHistory();
+  }, [syncRemoteHistory]);
 
   const seededOrders = React.useMemo(() => getOrderHistoryForAsset().map(toHistoryEntry), []);
 
@@ -143,11 +267,17 @@ export default function SyndicateOrderHistoryScreen() {
       });
   }, [marketLedger]);
 
-  const allEntries = React.useMemo(() => {
-    return [...ledgerOrders, ...seededOrders].sort(
-      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    );
+  const fallbackEntries = React.useMemo(() => {
+    return [...ledgerOrders, ...seededOrders].sort(sortHistoryEntriesDesc);
   }, [ledgerOrders, seededOrders]);
+
+  const allEntries = React.useMemo(() => {
+    if (isRemoteAvailable) {
+      return remoteEntries;
+    }
+
+    return fallbackEntries;
+  }, [fallbackEntries, isRemoteAvailable, remoteEntries]);
 
   const assetOptions = React.useMemo(() => {
     const ids = Array.from(new Set(allEntries.map((entry) => entry.assetId)));
@@ -203,7 +333,7 @@ export default function SyndicateOrderHistoryScreen() {
           <Ionicons
             name={isBuy ? 'arrow-down-outline' : 'arrow-up-outline'}
             size={15}
-            color={isBuy ? '#8de5dc' : '#ff9d9d'}
+            color={isBuy ? '#e8dcc8' : '#ff9d9d'}
           />
         </View>
 
@@ -232,7 +362,7 @@ export default function SyndicateOrderHistoryScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
       <View style={styles.header}>
         <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
@@ -241,6 +371,8 @@ export default function SyndicateOrderHistoryScreen() {
         <Text style={styles.headerTitle}>Syndicate Orders</Text>
         <View style={{ width: 40 }} />
       </View>
+
+      {isSyncingRemote ? <Text style={styles.syncHint}>Syncing backend order fills...</Text> : null}
 
       <View style={styles.filterRow}>
         {SIDE_FILTERS.map((item) => {
@@ -298,7 +430,27 @@ export default function SyndicateOrderHistoryScreen() {
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.content}
         renderItem={renderItem}
+        onEndReachedThreshold={0.35}
+        onEndReached={() => {
+          void loadMoreRemoteHistory();
+        }}
+        refreshControl={
+          <RefreshControl
+            refreshing={isSyncingRemote}
+            onRefresh={() => {
+              void syncRemoteHistory();
+            }}
+            tintColor="#e8dcc8"
+            colors={['#e8dcc8']}
+            progressBackgroundColor="#161616"
+          />
+        }
         ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
+        ListFooterComponent={
+          isRemoteAvailable && (isLoadingMore || hasMoreRemote) ? (
+            <Text style={styles.footerHint}>{isLoadingMore ? 'Loading more orders...' : 'Scroll for more order history'}</Text>
+          ) : null
+        }
         ListEmptyComponent={
           <EmptyState
             icon="receipt-outline"
@@ -347,6 +499,22 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 8,
   },
+  syncHint: {
+    marginTop: -2,
+    marginBottom: 8,
+    paddingHorizontal: 16,
+    color: Colors.textMuted,
+    fontSize: 12,
+    fontFamily: 'Inter_500Medium',
+  },
+  footerHint: {
+    marginTop: 4,
+    marginBottom: 6,
+    color: Colors.textMuted,
+    fontSize: 11,
+    textAlign: 'center',
+    fontFamily: 'Inter_500Medium',
+  },
   assetFilterRow: {
     paddingHorizontal: 16,
     gap: 8,
@@ -361,7 +529,7 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   filterChipActive: {
-    borderColor: '#4ECDC4',
+    borderColor: '#e8dcc8',
     backgroundColor: '#17302b',
   },
   filterText: {
@@ -371,7 +539,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   filterTextActive: {
-    color: '#8de5dc',
+    color: '#e8dcc8',
   },
   assetChip: {
     borderRadius: 10,
@@ -382,7 +550,7 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   assetChipActive: {
-    borderColor: '#4ECDC4',
+    borderColor: '#e8dcc8',
     backgroundColor: '#17302b',
   },
   assetChipText: {
@@ -392,7 +560,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.45,
   },
   assetChipTextActive: {
-    color: '#8de5dc',
+    color: '#e8dcc8',
   },
   content: {
     paddingHorizontal: 16,
@@ -471,6 +639,6 @@ const styles = StyleSheet.create({
     color: '#ff9d9d',
   },
   rowAmountSell: {
-    color: '#8de5dc',
+    color: '#e8dcc8',
   },
 });

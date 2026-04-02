@@ -14,7 +14,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
-import { Colors } from '../constants/colors';
+import { ActiveTheme, Colors } from '../constants/colors';
 import { RootStackParamList } from '../navigation/types';
 import { getFreshPosters } from '../data/posters';
 import { useStore } from '../store/useStore';
@@ -119,10 +119,16 @@ export default function PosterViewerScreen() {
 
   const minutesSincePosted = Math.max(1, Math.floor((Date.now() - activePoster.createdAtMs) / (60 * 1000)));
   const postedTimeLabel = minutesSincePosted < 60 ? `${minutesSincePosted}m` : `${Math.floor(minutesSincePosted / 60)}h`;
+  const storyOverlayPositionStyle =
+    activePoster.storyOverlay?.position === 'top'
+      ? styles.storyOverlayTop
+      : activePoster.storyOverlay?.position === 'center'
+        ? styles.storyOverlayCenter
+        : styles.storyOverlayBottom;
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#000" />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor="#000" />
 
       <Image source={{ uri: activePoster.image }} style={styles.posterImage} resizeMode="cover" />
       <View style={styles.backdropOverlay} />
@@ -160,6 +166,14 @@ export default function PosterViewerScreen() {
               <Ionicons name="trash-outline" size={14} color="#ffd4d4" />
               <Text style={styles.deleteBtnText}>Delete Poster</Text>
             </AnimatedPressable>
+          </View>
+        ) : null}
+
+        {activePoster.storyOverlay?.text ? (
+          <View style={[styles.storyOverlayWrap, storyOverlayPositionStyle]}>
+            <Text style={[styles.storyOverlayText, { color: activePoster.storyOverlay.color }]} numberOfLines={2}>
+              {activePoster.storyOverlay.text}
+            </Text>
           </View>
         ) : null}
 
@@ -306,6 +320,31 @@ const styles = StyleSheet.create({
     marginTop: 'auto',
     paddingBottom: 22,
   },
+  storyOverlayWrap: {
+    position: 'absolute',
+    left: 20,
+    right: 20,
+    alignItems: 'center',
+    zIndex: 2,
+  },
+  storyOverlayTop: {
+    top: 120,
+  },
+  storyOverlayCenter: {
+    top: '44%',
+  },
+  storyOverlayBottom: {
+    bottom: 180,
+  },
+  storyOverlayText: {
+    fontSize: 24,
+    lineHeight: 30,
+    fontFamily: 'Inter_700Bold',
+    textAlign: 'center',
+    textShadowColor: 'rgba(0,0,0,0.65)',
+    textShadowRadius: 8,
+    letterSpacing: 0.3,
+  },
   sharedFromPill: {
     alignSelf: 'flex-start',
     flexDirection: 'row',
@@ -318,7 +357,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   sharedFromText: {
-    color: Colors.accent,
+    color: '#e8dcc8',
     fontSize: 11,
     fontFamily: 'Inter_600SemiBold',
   },
@@ -367,7 +406,11 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_700Bold',
   },
   tapLayer: {
-    ...StyleSheet.absoluteFillObject,
+    position: 'absolute',
+    top: 70,
+    bottom: 110,
+    left: 0,
+    right: 0,
     flexDirection: 'row',
   },
   tapLeft: {

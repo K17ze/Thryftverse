@@ -13,7 +13,7 @@ import { View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Reanimated, { useSharedValue, useAnimatedScrollHandler, FadeInDown } from 'react-native-reanimated';
-import { Colors } from '../constants/colors';
+import { ActiveTheme, Colors } from '../constants/colors';
 import { Ionicons } from '@expo/vector-icons';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { RefreshIndicator } from '../components/RefreshIndicator';
@@ -181,7 +181,7 @@ export default function BrowseScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
       
       {/* Heavy Typography Header */}
       <View style={styles.header}>
@@ -344,7 +344,7 @@ const styles = StyleSheet.create({
   },
   hugeTitle: { 
     fontSize: 44, 
-    fontFamily: 'Inter_800ExtraBold', 
+    fontFamily: 'Inter_700Bold', 
     color: Colors.textPrimary, 
     letterSpacing: -1.5,
     textTransform: 'uppercase',

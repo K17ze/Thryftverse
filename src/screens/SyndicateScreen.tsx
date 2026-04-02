@@ -14,7 +14,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
-import { Colors } from '../constants/colors';
+import { ActiveTheme, Colors } from '../constants/colors';
 import { RootStackParamList } from '../navigation/types';
 import {
   formatCompact,
@@ -26,11 +26,27 @@ import {
 import { useToast } from '../context/ToastContext';
 import { EmptyState } from '../components/EmptyState';
 import { useStore } from '../store/useStore';
+import { useCurrencyContext } from '../context/CurrencyContext';
+import { useFormattedPrice } from '../hooks/useFormattedPrice';
+import { formatIzeAmount, toIze } from '../utils/currency';
+import { listSyndicateAssets, placeSyndicateOrder } from '../services/marketApi';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 type SyndicateView = 'MARKET' | 'HOLDINGS';
 
-const STABLE_COIN = 'TVUSD';
+const STABLE_COIN = '1ze';
+const IS_LIGHT = ActiveTheme === 'light';
+const BRAND = IS_LIGHT ? '#2f251b' : '#e8dcc8';
+const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111111';
+const PANEL_SOFT_BG = IS_LIGHT ? '#f7f4ef' : '#161616';
+const PANEL_MUTED_BG = IS_LIGHT ? '#f1ede6' : '#151515';
+const PANEL_BORDER = IS_LIGHT ? '#d8d1c6' : '#2f2f2f';
+const PANEL_BORDER_STRONG = IS_LIGHT ? '#cec5b8' : '#3a342b';
+const PANEL_TINT_BG = IS_LIGHT ? '#ece4d8' : '#2f291f';
+const PANEL_TINT_BORDER = IS_LIGHT ? '#d0c3af' : '#4f4638';
+const POSITIVE_BG = IS_LIGHT ? '#ece4d8' : '#14302a';
+const NEGATIVE_BG = IS_LIGHT ? '#f3dddd' : '#301919';
+
 const COUNTRY_OPTIONS = [
   { code: 'GB', label: 'United Kingdom' },
   { code: 'EU', label: 'European Union' },
@@ -41,9 +57,9 @@ const COUNTRY_OPTIONS = [
 ] as const;
 
 const settlementLabelMap: Record<'GBP' | 'TVUSD' | 'HYBRID', string> = {
-  GBP: 'GBP only',
-  TVUSD: 'TVUSD only',
-  HYBRID: 'GBP + TVUSD',
+  GBP: '1ze settlement',
+  TVUSD: '1ze settlement',
+  HYBRID: '1ze settlement',
 };
 
 type ComposerMode = 'buy' | 'sell';
@@ -56,6 +72,8 @@ function formatSigned(value: number) {
 export default function SyndicateScreen() {
   const navigation = useNavigation<NavT>();
   const { show } = useToast();
+  const { goldRates } = useCurrencyContext();
+  const { formatFromFiat, formatFromIze } = useFormattedPrice();
   const currentUser = useStore((state) => state.currentUser);
   const customSyndicates = useStore((state) => state.customSyndicates);
   const syndicateRuntime = useStore((state) => state.syndicateRuntime);
@@ -74,13 +92,66 @@ export default function SyndicateScreen() {
   const [composerMode, setComposerMode] = React.useState<ComposerMode>('buy');
   const [selectedAsset, setSelectedAsset] = React.useState<SyndicateAsset | null>(null);
   const [unitsInput, setUnitsInput] = React.useState('1');
+  const [remoteAssets, setRemoteAssets] = React.useState<SyndicateAsset[]>([]);
+  const [isSyncingAssets, setIsSyncingAssets] = React.useState(false);
+  const [isSubmittingOrder, setIsSubmittingOrder] = React.useState(false);
 
-  const handleRefresh = () => {
+  const syncSyndicateAssets = React.useCallback(async () => {
+    setIsSyncingAssets(true);
+    try {
+      const items = await listSyndicateAssets({ limit: 120 });
+      const mapped: SyndicateAsset[] = items.map((item) => ({
+        id: item.id,
+        listingId: item.listingId,
+        issuerId: item.issuerId,
+        title: item.title,
+        image: item.imageUrl ?? `https://picsum.photos/seed/${item.id}/500/700`,
+        totalUnits: item.totalUnits,
+        availableUnits: item.availableUnits,
+        unitPriceGBP: item.unitPriceGbp,
+        unitPriceStable: item.unitPriceStable,
+        settlementMode: item.settlementMode,
+        issuerJurisdiction: item.issuerJurisdiction ?? undefined,
+        marketMovePct24h: item.marketMovePct24h,
+        holders: item.holders,
+        volume24hGBP: item.volume24hGbp,
+        yourUnits: 0,
+        isOpen: item.isOpen,
+      }));
+
+      setRemoteAssets(mapped);
+    } catch {
+      // Keep existing local market state when backend sync is unavailable.
+    } finally {
+      setIsSyncingAssets(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    void syncSyndicateAssets();
+  }, [syncSyndicateAssets]);
+
+  const handleRefresh = async () => {
     setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 650);
+    await syncSyndicateAssets();
+    setRefreshing(false);
   };
 
-  const baseAssets = React.useMemo(() => getSyndicateMarket(customSyndicates), [customSyndicates, refreshing]);
+  const mergedAssets = React.useMemo(() => {
+    const merged = new Map<string, SyndicateAsset>();
+
+    for (const item of remoteAssets) {
+      merged.set(item.id, item);
+    }
+
+    for (const item of customSyndicates) {
+      merged.set(item.id, item);
+    }
+
+    return [...merged.values()];
+  }, [customSyndicates, remoteAssets]);
+
+  const baseAssets = React.useMemo(() => getSyndicateMarket(mergedAssets), [mergedAssets]);
 
   const marketAssets = React.useMemo(
     () =>
@@ -169,8 +240,12 @@ export default function SyndicateScreen() {
     setUnitsInput('1');
   };
 
-  const submitUnitsOrder = () => {
+  const submitUnitsOrder = async () => {
     if (!selectedAsset) {
+      return;
+    }
+
+    if (isSubmittingOrder) {
       return;
     }
 
@@ -180,20 +255,49 @@ export default function SyndicateScreen() {
       return;
     }
 
-    const result = composerMode === 'buy'
-      ? buySyndicateUnits(selectedAsset, actingUserId, units)
-      : sellSyndicateUnits(selectedAsset, actingUserId, units);
+    setIsSubmittingOrder(true);
 
-    if (!result.ok) {
-      show(result.message ?? 'Unable to purchase units', 'error');
-      if (result.message?.toLowerCase().includes('kyc') || result.message?.toLowerCase().includes('country')) {
-        setComplianceModalVisible(true);
+    try {
+      let backendSynced = false;
+
+      try {
+        await placeSyndicateOrder(selectedAsset.id, {
+          userId: actingUserId,
+          side: composerMode,
+          units,
+        });
+        backendSynced = true;
+        await syncSyndicateAssets();
+      } catch {
+        backendSynced = false;
       }
-      return;
-    }
 
-    show(result.message ?? `${composerMode === 'buy' ? 'Purchased' : 'Sold'} units`, 'success');
-    closeUnitsComposer();
+      const localResult = composerMode === 'buy'
+        ? buySyndicateUnits(selectedAsset, actingUserId, units)
+        : sellSyndicateUnits(selectedAsset, actingUserId, units);
+
+      if (!backendSynced && !localResult.ok) {
+        show(localResult.message ?? 'Unable to submit order', 'error');
+        if (localResult.message?.toLowerCase().includes('kyc') || localResult.message?.toLowerCase().includes('country')) {
+          setComplianceModalVisible(true);
+        }
+        return;
+      }
+
+      const fallbackSuccessLabel = `${composerMode === 'buy' ? 'Purchased' : 'Sold'} units`;
+      const successMessage = localResult.ok
+        ? localResult.message ?? fallbackSuccessLabel
+        : 'Order submitted and filled';
+
+      closeUnitsComposer();
+      show(successMessage, backendSynced ? 'success' : 'info');
+
+      if (localResult.deliveryTriggered && localResult.deliveryListingId) {
+        navigation.navigate('Checkout', { itemId: localResult.deliveryListingId });
+      }
+    } finally {
+      setIsSubmittingOrder(false);
+    }
   };
 
   const renderHeader = () => (
@@ -230,7 +334,7 @@ export default function SyndicateScreen() {
 
       <AnimatedPressable style={styles.complianceCard} activeOpacity={0.9} onPress={() => setComplianceModalVisible(true)}>
         <View style={styles.complianceTopRow}>
-          <Ionicons name="shield-checkmark-outline" size={16} color="#4ECDC4" />
+          <Ionicons name="shield-checkmark-outline" size={16} color={BRAND} />
           <Text style={styles.complianceTitle}>Regulatory Guardrails</Text>
           <Ionicons name="chevron-forward" size={14} color={Colors.textMuted} />
         </View>
@@ -265,15 +369,6 @@ export default function SyndicateScreen() {
         <AnimatedPressable
           style={styles.quickActionChip}
           activeOpacity={0.9}
-          onPress={() => navigation.navigate('SyndicateHub')}
-        >
-          <Ionicons name="grid-outline" size={13} color={Colors.textSecondary} />
-          <Text style={styles.quickActionText}>Hub</Text>
-        </AnimatedPressable>
-
-        <AnimatedPressable
-          style={styles.quickActionChip}
-          activeOpacity={0.9}
           onPress={() => navigation.navigate('Portfolio')}
         >
           <Ionicons name="pie-chart-outline" size={13} color={Colors.textSecondary} />
@@ -305,7 +400,14 @@ export default function SyndicateScreen() {
 
       <View style={styles.sectionRow}>
         <Text style={styles.sectionTitle}>{activeView === 'MARKET' ? 'Open Syndicates' : 'Your Holdings'}</Text>
-        <Text style={styles.sectionHint}>Settles in local GBP, {STABLE_COIN}, or hybrid rails</Text>
+        <Text style={styles.sectionHint}>{isSyncingAssets ? 'Syncing backend pools...' : 'Settles in 1ze only with local previews'}</Text>
+      </View>
+
+      <View style={styles.pegCard}>
+        <Ionicons name="sparkles-outline" size={14} color={BRAND} />
+        <Text style={styles.pegCardText}>
+          1 {STABLE_COIN} = 1 gram of gold. Live local value: {formatFromIze(1, { displayMode: 'fiat' })}.
+        </Text>
       </View>
     </View>
   );
@@ -316,6 +418,7 @@ export default function SyndicateScreen() {
     const isHoldingsMode = activeView === 'HOLDINGS';
     const avgEntry = item.avgEntryPriceGBP ?? item.unitPriceGBP;
     const unrealized = item.yourUnits > 0 ? (item.unitPriceGBP - avgEntry) * item.yourUnits : 0;
+    const unitPriceIze = toIze(item.unitPriceGBP, 'GBP', goldRates);
     const eligibility = checkSyndicateEligibility(item.settlementMode);
     const primaryDisabled = isHoldingsMode
       ? item.yourUnits === 0
@@ -336,7 +439,7 @@ export default function SyndicateScreen() {
               <Ionicons
                 name={moveIsPositive ? 'trending-up-outline' : 'trending-down-outline'}
                 size={12}
-                color={moveIsPositive ? '#8de5dc' : '#ff9797'}
+                color={moveIsPositive ? BRAND : '#ff9797'}
               />
               <Text style={[styles.moveText, moveIsPositive ? styles.moveTextUp : styles.moveTextDown]}>
                 {moveIsPositive ? '+' : ''}{item.marketMovePct24h.toFixed(1)}%
@@ -358,8 +461,8 @@ export default function SyndicateScreen() {
           </View>
 
           <View style={styles.priceRow}>
-            <Text style={styles.pricePrimary}>{formatMoney(item.unitPriceGBP)} / unit</Text>
-            <Text style={styles.priceSecondary}>{item.unitPriceStable.toFixed(2)} {STABLE_COIN}</Text>
+            <Text style={styles.pricePrimary}>{formatIzeAmount(unitPriceIze)} / unit</Text>
+            <Text style={styles.priceSecondary}>{formatFromFiat(item.unitPriceGBP, 'GBP', { displayMode: 'fiat' })}</Text>
           </View>
 
           <View style={styles.progressTrack}>
@@ -382,7 +485,7 @@ export default function SyndicateScreen() {
 
           <View style={styles.ctaRow}>
             <AnimatedPressable
-              style={[styles.buyBtn, primaryDisabled && styles.buyBtnDisabled]}
+              style={[styles.buyBtn, (primaryDisabled || isSubmittingOrder) && styles.buyBtnDisabled]}
               onPress={() => {
                 if (isHoldingsMode) {
                   openUnitsComposer(item, 'sell');
@@ -402,13 +505,14 @@ export default function SyndicateScreen() {
                 }
               }}
               activeOpacity={0.9}
+              disabled={primaryDisabled || isSubmittingOrder}
             >
               <Ionicons
                 name={isHoldingsMode ? 'cash-outline' : 'wallet-outline'}
                 size={13}
-                color={!primaryDisabled ? Colors.background : Colors.textMuted}
+                color={!(primaryDisabled || isSubmittingOrder) ? Colors.background : Colors.textMuted}
               />
-              <Text style={[styles.buyBtnText, primaryDisabled && styles.buyBtnTextDisabled]}>
+              <Text style={[styles.buyBtnText, (primaryDisabled || isSubmittingOrder) && styles.buyBtnTextDisabled]}>
                 {isHoldingsMode ? 'Book Profit' : 'Buy Units'}
               </Text>
             </AnimatedPressable>
@@ -436,9 +540,7 @@ export default function SyndicateScreen() {
     const estimatedQuote = normalizedUnits > 0
       ? normalizedUnits * selectedAsset.unitPriceGBP
       : 0;
-    const estimatedStable = normalizedUnits > 0
-      ? normalizedUnits * selectedAsset.unitPriceStable
-      : 0;
+    const estimatedIze = toIze(estimatedQuote, 'GBP', goldRates);
     const estimatedRealized = composerMode === 'sell'
       ? normalizedUnits * (selectedAsset.unitPriceGBP - (selectedAsset.avgEntryPriceGBP ?? selectedAsset.unitPriceGBP))
       : 0;
@@ -488,9 +590,9 @@ export default function SyndicateScreen() {
             </View>
 
             <Text style={styles.unitsSpendText}>
-              {composerMode === 'buy' ? 'Estimated spend' : 'Estimated receive'} {formatMoney(estimatedQuote)}
+              {composerMode === 'buy' ? 'Estimated spend' : 'Estimated receive'} {formatIzeAmount(estimatedIze)}
             </Text>
-            <Text style={styles.unitsSpendSubText}>Approx. {estimatedStable.toFixed(2)} {STABLE_COIN}</Text>
+            <Text style={styles.unitsSpendSubText}>Approx. {formatFromFiat(estimatedQuote, 'GBP', { displayMode: 'fiat' })}</Text>
             {composerMode === 'sell' ? (
               <Text style={[styles.unitsSpendSubText, estimatedRealized >= 0 ? styles.pnlUp : styles.pnlDown]}>
                 Realized P/L preview {formatSigned(estimatedRealized)}
@@ -498,12 +600,24 @@ export default function SyndicateScreen() {
             ) : null}
 
             <View style={styles.unitsModalActions}>
-              <AnimatedPressable style={styles.unitsCancelBtn} onPress={closeUnitsComposer} activeOpacity={0.9}>
+              <AnimatedPressable
+                style={styles.unitsCancelBtn}
+                onPress={closeUnitsComposer}
+                activeOpacity={0.9}
+                disabled={isSubmittingOrder}
+              >
                 <Text style={styles.unitsCancelText}>Cancel</Text>
               </AnimatedPressable>
 
-              <AnimatedPressable style={styles.unitsSubmitBtn} onPress={submitUnitsOrder} activeOpacity={0.9}>
-                <Text style={styles.unitsSubmitText}>{composerMode === 'buy' ? 'Buy Units' : 'Sell Units'}</Text>
+              <AnimatedPressable
+                style={[styles.unitsSubmitBtn, isSubmittingOrder && styles.buyBtnDisabled]}
+                onPress={() => void submitUnitsOrder()}
+                activeOpacity={0.9}
+                disabled={isSubmittingOrder}
+              >
+                <Text style={styles.unitsSubmitText}>
+                  {isSubmittingOrder ? 'Submitting...' : composerMode === 'buy' ? 'Buy Units' : 'Sell Units'}
+                </Text>
               </AnimatedPressable>
             </View>
           </View>
@@ -652,9 +766,9 @@ export default function SyndicateScreen() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={handleRefresh}
-            tintColor="#4ECDC4"
-            colors={['#4ECDC4']}
-            progressBackgroundColor="#161616"
+            tintColor={BRAND}
+            colors={[BRAND]}
+            progressBackgroundColor={PANEL_SOFT_BG}
           />
         }
       />
@@ -682,10 +796,10 @@ const styles = StyleSheet.create({
   },
   metricCard: {
     flex: 1,
-    backgroundColor: '#121212',
+    backgroundColor: PANEL_BG,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#242424',
+    borderColor: PANEL_BORDER,
     paddingVertical: 12,
     paddingHorizontal: 10,
     alignItems: 'center',
@@ -704,10 +818,10 @@ const styles = StyleSheet.create({
   },
   metricCardWide: {
     flex: 1,
-    backgroundColor: '#11151b',
+    backgroundColor: PANEL_TINT_BG,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#27313a',
+    borderColor: PANEL_TINT_BORDER,
     paddingVertical: 10,
     paddingHorizontal: 10,
   },
@@ -723,7 +837,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_700Bold',
   },
   pnlUp: {
-    color: '#8de5dc',
+    color: BRAND,
   },
   pnlDown: {
     color: '#ff9797',
@@ -731,10 +845,10 @@ const styles = StyleSheet.create({
   complianceCard: {
     marginHorizontal: 16,
     marginBottom: 14,
-    backgroundColor: '#10151b',
+    backgroundColor: PANEL_TINT_BG,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#22303a',
+    borderColor: PANEL_TINT_BORDER,
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
@@ -745,7 +859,7 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   complianceTitle: {
-    color: '#4ECDC4',
+    color: BRAND,
     fontSize: 12,
     fontFamily: 'Inter_700Bold',
   },
@@ -757,7 +871,7 @@ const styles = StyleSheet.create({
   },
   complianceOkText: {
     marginTop: 6,
-    color: '#8de5dc',
+    color: BRAND,
     fontSize: 11,
     fontFamily: 'Inter_600SemiBold',
   },
@@ -772,8 +886,8 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#2d3031',
-    backgroundColor: '#121414',
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
     paddingHorizontal: 12,
     paddingVertical: 10,
     flexDirection: 'row',
@@ -815,8 +929,8 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#2f2f2f',
-    backgroundColor: '#141414',
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
     paddingVertical: 9,
     alignItems: 'center',
     justifyContent: 'center',
@@ -831,10 +945,10 @@ const styles = StyleSheet.create({
   switcherWrap: {
     marginHorizontal: 16,
     marginBottom: 12,
-    backgroundColor: '#111111',
+    backgroundColor: PANEL_BG,
     borderRadius: 24,
     borderWidth: 1,
-    borderColor: '#282828',
+    borderColor: PANEL_BORDER,
     padding: 4,
     flexDirection: 'row',
     gap: 4,
@@ -864,6 +978,26 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
+  pegCard: {
+    marginHorizontal: 16,
+    marginBottom: 10,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: PANEL_TINT_BORDER,
+    backgroundColor: PANEL_TINT_BG,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  pegCardText: {
+    flex: 1,
+    color: BRAND,
+    fontSize: 12,
+    lineHeight: 16,
+    fontFamily: 'Inter_600SemiBold',
+  },
   sectionTitle: {
     color: Colors.textPrimary,
     fontSize: 15,
@@ -882,8 +1016,8 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#232323',
-    backgroundColor: '#111111',
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
   },
   assetImage: {
     width: '100%',
@@ -913,17 +1047,17 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   movePillUp: {
-    backgroundColor: '#14302a',
+    backgroundColor: POSITIVE_BG,
   },
   movePillDown: {
-    backgroundColor: '#301919',
+    backgroundColor: NEGATIVE_BG,
   },
   moveText: {
     fontSize: 11,
     fontFamily: 'Inter_700Bold',
   },
   moveTextUp: {
-    color: '#8de5dc',
+    color: BRAND,
   },
   moveTextDown: {
     color: '#ff9797',
@@ -943,12 +1077,12 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingHorizontal: 8,
     paddingVertical: 4,
-    backgroundColor: '#14231f',
+    backgroundColor: PANEL_TINT_BG,
     borderWidth: 1,
-    borderColor: '#2e4440',
+    borderColor: PANEL_TINT_BORDER,
   },
   assetBadgeText: {
-    color: '#8de5dc',
+    color: BRAND,
     fontSize: 10,
     fontFamily: 'Inter_700Bold',
     letterSpacing: 0.3,
@@ -957,9 +1091,9 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingHorizontal: 8,
     paddingVertical: 4,
-    backgroundColor: '#151515',
+    backgroundColor: PANEL_MUTED_BG,
     borderWidth: 1,
-    borderColor: '#2e2e2e',
+    borderColor: PANEL_BORDER,
   },
   assetBadgeTextMuted: {
     color: Colors.textMuted,
@@ -979,7 +1113,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_700Bold',
   },
   priceSecondary: {
-    color: '#8de5dc',
+    color: BRAND,
     fontSize: 12,
     fontFamily: 'Inter_600SemiBold',
   },
@@ -987,13 +1121,13 @@ const styles = StyleSheet.create({
     marginTop: 8,
     height: 5,
     borderRadius: 4,
-    backgroundColor: '#1e1e1e',
+    backgroundColor: IS_LIGHT ? '#ddd4c7' : '#1e1e1e',
     overflow: 'hidden',
   },
   progressFill: {
     height: '100%',
     borderRadius: 4,
-    backgroundColor: '#4ECDC4',
+    backgroundColor: BRAND,
   },
   metaRow: {
     marginTop: 8,
@@ -1032,9 +1166,9 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   buyBtnDisabled: {
-    backgroundColor: '#1a1a1a',
+    backgroundColor: PANEL_SOFT_BG,
     borderWidth: 1,
-    borderColor: '#303030',
+    borderColor: PANEL_BORDER,
   },
   buyBtnText: {
     color: Colors.background,
@@ -1048,7 +1182,7 @@ const styles = StyleSheet.create({
     width: 88,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#323232',
+    borderColor: PANEL_BORDER,
     paddingVertical: 10,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1070,13 +1204,13 @@ const styles = StyleSheet.create({
   unitsModalCard: {
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
-    backgroundColor: '#111111',
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
     paddingHorizontal: 14,
     paddingVertical: 14,
   },
   unitsModalLabel: {
-    color: '#4ECDC4',
+    color: BRAND,
     fontSize: 10,
     fontFamily: 'Inter_700Bold',
     letterSpacing: 0.8,
@@ -1096,9 +1230,9 @@ const styles = StyleSheet.create({
   unitsInputWrap: {
     marginTop: 12,
     borderWidth: 1,
-    borderColor: '#2f2f2f',
+    borderColor: PANEL_BORDER,
     borderRadius: 12,
-    backgroundColor: '#161616',
+    backgroundColor: PANEL_SOFT_BG,
     paddingHorizontal: 10,
     height: 44,
     flexDirection: 'row',
@@ -1125,13 +1259,13 @@ const styles = StyleSheet.create({
   unitsQuickChip: {
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#304044',
-    backgroundColor: '#131c1e',
+    borderColor: PANEL_TINT_BORDER,
+    backgroundColor: PANEL_TINT_BG,
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
   unitsQuickText: {
-    color: '#8de5dc',
+    color: BRAND,
     fontSize: 11,
     fontFamily: 'Inter_700Bold',
   },
@@ -1156,11 +1290,11 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#313131',
+    borderColor: PANEL_BORDER,
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 10,
-    backgroundColor: '#161616',
+    backgroundColor: PANEL_SOFT_BG,
   },
   unitsCancelText: {
     color: Colors.textSecondary,
@@ -1192,13 +1326,13 @@ const styles = StyleSheet.create({
   complianceModalCard: {
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
-    backgroundColor: '#111111',
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
     paddingHorizontal: 14,
     paddingVertical: 14,
   },
   complianceModalLabel: {
-    color: '#4ECDC4',
+    color: BRAND,
     fontSize: 10,
     fontFamily: 'Inter_700Bold',
     letterSpacing: 0.8,
@@ -1233,14 +1367,14 @@ const styles = StyleSheet.create({
   countryChip: {
     borderRadius: 11,
     borderWidth: 1,
-    borderColor: '#313131',
-    backgroundColor: '#161616',
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_SOFT_BG,
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
   countryChipActive: {
-    borderColor: '#4ECDC4',
-    backgroundColor: '#17302b',
+    borderColor: PANEL_TINT_BORDER,
+    backgroundColor: PANEL_TINT_BG,
   },
   countryChipText: {
     color: Colors.textSecondary,
@@ -1248,14 +1382,14 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_700Bold',
   },
   countryChipTextActive: {
-    color: '#8de5dc',
+    color: BRAND,
   },
   complianceToggleRow: {
     marginTop: 10,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#2c2c2c',
-    backgroundColor: '#161616',
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_SOFT_BG,
     paddingHorizontal: 10,
     paddingVertical: 9,
     flexDirection: 'row',
@@ -1270,14 +1404,14 @@ const styles = StyleSheet.create({
   complianceToggleBtn: {
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#353535',
-    backgroundColor: '#121212',
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
     paddingHorizontal: 10,
     paddingVertical: 5,
   },
   complianceToggleBtnActive: {
-    borderColor: '#4ECDC4',
-    backgroundColor: '#17302b',
+    borderColor: PANEL_TINT_BORDER,
+    backgroundColor: PANEL_TINT_BG,
   },
   complianceToggleBtnText: {
     color: Colors.textSecondary,
@@ -1286,7 +1420,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   complianceToggleBtnTextActive: {
-    color: '#8de5dc',
+    color: BRAND,
   },
   complianceStatusBanner: {
     marginTop: 12,
@@ -1296,8 +1430,8 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   complianceStatusOk: {
-    borderColor: '#2d4a45',
-    backgroundColor: '#152420',
+    borderColor: PANEL_TINT_BORDER,
+    backgroundColor: PANEL_TINT_BG,
   },
   complianceStatusError: {
     borderColor: '#4a2b2b',
@@ -1308,7 +1442,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_600SemiBold',
   },
   complianceStatusTextOk: {
-    color: '#8de5dc',
+    color: BRAND,
   },
   complianceStatusTextError: {
     color: '#ff9797',

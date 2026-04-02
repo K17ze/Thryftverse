@@ -74,4 +74,25 @@ describe('syndicate trade lifecycle smoke', () => {
     expect(result.ok).toBe(false);
     expect(result.message?.toLowerCase()).toContain('kyc');
   });
+
+  it('initiates delivery when buyer reaches full ownership', () => {
+    const nearFullAsset: SyndicateAsset = {
+      ...SAMPLE_ASSET,
+      id: 's_smoke_full',
+      listingId: 'l_full_delivery',
+      totalUnits: 20,
+      availableUnits: 5,
+      yourUnits: 15,
+      holders: 2,
+    };
+
+    const result = useStore.getState().buySyndicateUnits(nearFullAsset, 'u_buyer', 5);
+    expect(result.ok).toBe(true);
+    expect(result.deliveryTriggered).toBe(true);
+    expect(result.deliveryListingId).toBe('l_full_delivery');
+
+    const runtime = useStore.getState().syndicateRuntime[nearFullAsset.id];
+    expect(runtime.availableUnits).toBe(0);
+    expect(runtime.yourUnits).toBe(20);
+  });
 });

@@ -28,16 +28,20 @@ interface BrowseFilterState {
 }
 
 interface SavedAddress {
+  id?: number;
   name: string;
   street: string;
   city: string;
   postcode: string;
+  isDefault?: boolean;
 }
 
 interface SavedPaymentMethod {
+  id?: number;
   type: 'card' | 'bank_account';
   label: string;
   details?: string;
+  isDefault?: boolean;
 }
 
 interface SyndicateComplianceProfile {
@@ -55,6 +59,8 @@ type SyndicateEligibilityResult = {
 type TradeActionResult = {
   ok: boolean;
   message?: string;
+  deliveryTriggered?: boolean;
+  deliveryListingId?: string;
 };
 
 interface AuctionRuntimeState {
@@ -386,7 +392,7 @@ export const useStore = create<StoreState>((set, get) => ({
     if ((settlementMode === 'TVUSD' || settlementMode === 'HYBRID') && !profile.stableCoinWalletConnected) {
       return {
         ok: false,
-        message: 'Connect your TVUSD wallet to trade this settlement mode.',
+        message: 'Connect your 1ze wallet to trade this settlement mode.',
       };
     }
 
@@ -458,6 +464,7 @@ export const useStore = create<StoreState>((set, get) => ({
       avgEntryPriceGBP: nextAvgEntry,
       realizedProfitGBP: runtime.realizedProfitGBP,
     };
+    const deliveryTriggered = nextRuntime.availableUnits === 0 && nextYourUnits >= totalUnits;
 
     set({
       syndicateRuntime: {
@@ -479,7 +486,11 @@ export const useStore = create<StoreState>((set, get) => ({
 
     return {
       ok: true,
-      message: `Purchased ${requestedUnits} unit${requestedUnits === 1 ? '' : 's'}`,
+      message: deliveryTriggered
+        ? `Purchased ${requestedUnits} unit${requestedUnits === 1 ? '' : 's'} · You now own 100% and delivery has been initiated`
+        : `Purchased ${requestedUnits} unit${requestedUnits === 1 ? '' : 's'}`,
+      deliveryTriggered,
+      deliveryListingId: deliveryTriggered ? asset.listingId : undefined,
     };
   },
   sellSyndicateUnits: (asset, sellerId, units) => {

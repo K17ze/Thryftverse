@@ -1,26 +1,15 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import { View,
-  StyleSheet,
-  Text,
-  Platform
+  StyleSheet
 } from 'react-native';
-import { createBottomTabNavigator, BottomTabBar, BottomTabBarProps } from '@react-navigation/bottom-tabs';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Reanimated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withRepeat,
-  withTiming,
-  withSequence,
-  Easing,
-  withSpring,
-} from 'react-native-reanimated';
 import { TabParamList } from './types';
 import { Colors } from '../constants/colors';
-import { useTabScroll } from '../context/TabScrollContext';
+import { Typography } from '../constants/typography';
 
 import HomeScreen from '../screens/HomeScreen';
 import TradeHubScreen from '../screens/TradeHubScreen';
@@ -35,28 +24,11 @@ const Tab = createBottomTabNavigator<TabParamList>();
 
 // Custom Middle Circular Button
 const SellButton = ({ onPress }: { onPress: () => void }) => {
-  const scale = useSharedValue(1);
-
-  useEffect(() => {
-    scale.value = withRepeat(
-      withSequence(
-        withTiming(1.08, { duration: 1500, easing: Easing.inOut(Easing.ease) }),
-        withTiming(1, { duration: 1500, easing: Easing.inOut(Easing.ease) })
-      ),
-      -1,
-      true
-    );
-  }, []);
-
-  const animStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
-  }));
-
   return (
     <AnimatedPressable style={styles.sellBtnWrap} onPress={onPress} activeOpacity={0.85}>
-      <Reanimated.View style={[styles.sellBtnInner, animStyle]}>
+      <View style={styles.sellBtnInner}>
         <Ionicons name="add" size={28} color={Colors.textInverse} />
-      </Reanimated.View>
+      </View>
     </AnimatedPressable>
   );
 };
@@ -64,59 +36,15 @@ const SellButton = ({ onPress }: { onPress: () => void }) => {
 interface SpringIconProps {
   name: keyof typeof Ionicons.glyphMap;
   color: string;
-  focused: boolean;
   badgeCount?: number;
 }
 
-const SpringIcon = ({ name, color, focused, badgeCount }: SpringIconProps) => {
-  const scale = useSharedValue(1);
-
-  useEffect(() => {
-    if (focused) {
-      scale.value = withSequence(
-        withSpring(1.2, { damping: 12 }),
-        withSpring(1)
-      );
-    } else {
-      scale.value = withTiming(1, { duration: 200 });
-    }
-  }, [focused]);
-
-  const animStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
-  }));
-
+const TabIcon = ({ name, color, badgeCount }: SpringIconProps) => {
   return (
     <View>
-      <Reanimated.View style={animStyle}>
-        <Ionicons name={name} size={22} color={color} />
-      </Reanimated.View>
+      <Ionicons name={name} size={22} color={color} />
       {badgeCount !== undefined && <AnimatedBadge count={badgeCount} />}
     </View>
-  );
-};
-
-const AnimatedTabBar = (props: BottomTabBarProps) => {
-  const { tabBarVisible } = useTabScroll();
-  
-  const animatedStyle = useAnimatedStyle(() => {
-    return {
-      transform: [
-        { translateY: withTiming(tabBarVisible.value ? 0 : 120, { duration: 300 }) }
-      ],
-      opacity: withTiming(tabBarVisible.value ? 1 : 0, { duration: 300 }),
-      position: 'absolute',
-      bottom: 0,
-      left: 0,
-      right: 0,
-      zIndex: 100,
-    };
-  });
-
-  return (
-    <Reanimated.View style={animatedStyle}>
-      <BottomTabBar {...props} />
-    </Reanimated.View>
   );
 };
 
@@ -127,20 +55,23 @@ export default function TabNavigator() {
   return (
     <View style={{ flex: 1, backgroundColor: Colors.background }}>
       <Tab.Navigator
-        tabBar={(props) => <AnimatedTabBar {...props} />}
         screenOptions={{
           headerShown: false,
           tabBarShowLabel: true,
+          tabBarHideOnKeyboard: true,
           tabBarStyle: {
-            ...styles.floatingTabBar,
-            bottom: Math.max(insets.bottom, 16),
+            ...styles.fixedTabBar,
+            height: 62 + Math.max(insets.bottom, 8),
+            paddingBottom: Math.max(insets.bottom, 8),
           },
           tabBarActiveTintColor: Colors.tabActive,
           tabBarInactiveTintColor: Colors.tabInactive,
           tabBarLabelStyle: {
-            fontSize: 10,
-            fontFamily: 'Inter_500Medium',
-            marginTop: 2,
+            fontSize: 11,
+            fontFamily: Typography.family.semibold,
+            letterSpacing: 0.2,
+            marginTop: 1,
+            marginBottom: 2,
           },
         }}
         screenListeners={{
@@ -155,7 +86,7 @@ export default function TabNavigator() {
           options={{
             tabBarLabel: 'Feed',
             tabBarIcon: ({ color, focused }) => (
-              <SpringIcon name={focused ? 'documents' : 'documents-outline'} color={color} focused={focused} />
+              <TabIcon name={focused ? 'documents' : 'documents-outline'} color={color} />
             ),
           }}
         />
@@ -163,9 +94,9 @@ export default function TabNavigator() {
           name="TradeHub"
           component={TradeHubScreen}
           options={{
-            tabBarLabel: 'Trade',
+            tabBarLabel: 'Trade Hub',
             tabBarIcon: ({ color, focused }) => (
-              <SpringIcon name={focused ? 'stats-chart' : 'stats-chart-outline'} color={color} focused={focused} />
+              <TabIcon name={focused ? 'stats-chart' : 'stats-chart-outline'} color={color} />
             ),
           }}
         />
@@ -175,7 +106,7 @@ export default function TabNavigator() {
           options={{
             tabBarLabel: 'Closet',
             tabBarIcon: ({ color, focused }) => (
-              <SpringIcon name={focused ? 'bookmark' : 'bookmark-outline'} color={color} focused={focused} />
+              <TabIcon name={focused ? 'bookmark' : 'bookmark-outline'} color={color} />
             ),
           }}
         />
@@ -194,7 +125,7 @@ export default function TabNavigator() {
           options={{
             tabBarLabel: 'Inbox',
             tabBarIcon: ({ color, focused }) => (
-              <SpringIcon name={focused ? 'chatbubbles' : 'chatbubbles-outline'} color={color} focused={focused} badgeCount={3} />
+              <TabIcon name={focused ? 'chatbubbles' : 'chatbubbles-outline'} color={color} badgeCount={3} />
             ),
           }}
         />
@@ -204,7 +135,7 @@ export default function TabNavigator() {
           options={{
             tabBarLabel: 'Profile',
             tabBarIcon: ({ color, focused }) => (
-              <SpringIcon name={focused ? 'person' : 'person-outline'} color={color} focused={focused} />
+              <TabIcon name={focused ? 'person' : 'person-outline'} color={color} />
             ),
           }}
         />
@@ -214,35 +145,34 @@ export default function TabNavigator() {
 }
 
 const styles = StyleSheet.create({
-  floatingTabBar: {
+  fixedTabBar: {
     position: 'absolute',
-    left: 20,
-    right: 20,
-    height: 64,
-    backgroundColor: '#0a0a0ad0',
-    borderRadius: 32,
-    borderTopWidth: 0,
-    elevation: 10,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: Colors.surface,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+    elevation: 22,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.5,
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.34,
     shadowRadius: 10,
-    paddingBottom: 0,
-    paddingHorizontal: 8,
+    paddingHorizontal: 14,
   },
   sellBtnWrap: {
-    top: -8,
+    top: -4,
     justifyContent: 'center',
     alignItems: 'center',
   },
   sellBtnInner: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 54,
+    height: 54,
+    borderRadius: 27,
     backgroundColor: Colors.accent,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#4ECDC4',
+    shadowColor: '#e8dcc8',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.3,
     shadowRadius: 12,

@@ -13,9 +13,13 @@ import Reanimated, { useSharedValue, useAnimatedStyle, withSequence, withTiming,
 import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors } from '../constants/colors';
+import { ActiveTheme, Colors } from '../constants/colors';
+import { Typography } from '../constants/typography';
 import { useStore } from '../store/useStore';
 import { MY_USER } from '../data/mockData';
+
+const IS_LIGHT = ActiveTheme === 'light';
+const PANEL_BG = IS_LIGHT ? '#ffffff' : Colors.surface;
 
 export default function LoginScreen() {
   const navigation = useNavigation<any>();
@@ -69,7 +73,7 @@ export default function LoginScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
       
       <View style={styles.header}>
         <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
@@ -143,28 +147,28 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   header: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: 20 },
-  backBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#111', alignItems: 'center', justifyContent: 'center' },
+  backBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: PANEL_BG, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: Colors.border },
   
   content: { flex: 1, paddingHorizontal: 24, justifyContent: 'center' },
-  title: { fontSize: 44, fontFamily: 'Inter_700Bold', color: Colors.textPrimary, lineHeight: 48, letterSpacing: -1, marginBottom: 40 },
+  title: { fontSize: 44, fontFamily: Typography.family.bold, color: Colors.textPrimary, lineHeight: 48, letterSpacing: -0.9, marginBottom: 40 },
   
   form: { marginBottom: 40 },
   inputGroup: { marginBottom: 24 },
-  label: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: Colors.textSecondary, marginBottom: 12 },
+  label: { fontSize: 14, fontFamily: Typography.family.semibold, color: Colors.textSecondary, marginBottom: 12 },
   input: { 
     height: 56, 
     borderBottomWidth: 1, 
-    borderBottomColor: '#222', 
+    borderBottomColor: Colors.border, 
     color: Colors.textPrimary, 
     fontSize: 16, 
-    fontFamily: 'Inter_400Regular' 
+    fontFamily: Typography.family.regular 
   },
   
   forgotBtn: { alignSelf: 'flex-start', marginTop: 8 },
-  forgotText: { color: Colors.textSecondary, fontSize: 14, fontFamily: 'Inter_500Medium', textDecorationLine: 'underline' },
+  forgotText: { color: Colors.textSecondary, fontSize: 14, fontFamily: Typography.family.medium, textDecorationLine: 'underline' },
   
   footer: { paddingBottom: 40, position: 'relative' },
-  errorText: { color: Colors.danger, fontSize: 13, fontFamily: 'Inter_500Medium', textAlign: 'center', marginBottom: 12 },
+  errorText: { color: Colors.danger, fontSize: 13, fontFamily: Typography.family.medium, textAlign: 'center', marginBottom: 12 },
   primaryBtn: { backgroundColor: Colors.textPrimary, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center' },
-  primaryText: { color: Colors.background, fontSize: 16, fontFamily: 'Inter_700Bold' },
+  primaryText: { color: Colors.background, fontSize: 16, fontFamily: Typography.family.semibold },
 });

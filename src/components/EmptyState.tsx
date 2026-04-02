@@ -3,6 +3,7 @@ import { View, Text, StyleSheet } from 'react-native';
 import Reanimated, { FadeIn } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../constants/colors';
+import { Typography } from '../constants/typography';
 import { AnimatedPressable } from './AnimatedPressable';
 
 interface Props {
@@ -14,7 +15,7 @@ interface Props {
   iconColor?: string;
 }
 
-export function EmptyState({ icon, title, subtitle, ctaLabel, onCtaPress, iconColor = '#4ECDC4' }: Props) {
+export function EmptyState({ icon, title, subtitle, ctaLabel, onCtaPress, iconColor = '#e8dcc8' }: Props) {
   return (
     <Reanimated.View entering={FadeIn.duration(600)} style={styles.container}>
       <View style={[styles.iconRing, { borderColor: iconColor + '30' }]}>
@@ -51,28 +52,31 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   title: {
-    fontSize: 20,
-    fontFamily: 'Inter_700Bold',
+    fontSize: 22,
+    fontFamily: Typography.family.semibold,
+    letterSpacing: -0.2,
     color: Colors.textPrimary,
     textAlign: 'center',
   },
   subtitle: {
     fontSize: 14,
-    fontFamily: 'Inter_400Regular',
+    fontFamily: Typography.family.regular,
+    letterSpacing: 0.1,
     color: Colors.textMuted,
     textAlign: 'center',
-    lineHeight: 22,
+    lineHeight: 21,
   },
   cta: {
     marginTop: 12,
-    backgroundColor: '#4ECDC4',
+    backgroundColor: '#e8dcc8',
     paddingHorizontal: 32,
     paddingVertical: 14,
     borderRadius: 30,
   },
   ctaText: {
-    fontSize: 15,
-    fontFamily: 'Inter_700Bold',
+    fontSize: 14,
+    fontFamily: Typography.family.semibold,
+    letterSpacing: 0.2,
     color: '#0a0a0a',
   },
 });

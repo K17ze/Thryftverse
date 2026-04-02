@@ -12,7 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import Reanimated, { FadeInDown, FadeOutUp } from 'react-native-reanimated';
-import { Colors } from '../constants/colors';
+import { ActiveTheme, Colors } from '../constants/colors';
 import { RootStackParamList } from '../navigation/types';
 
 type NavT = StackNavigationProp<RootStackParamList>;
@@ -58,7 +58,7 @@ export default function SyndicateOnboardingScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
       <View style={styles.headerRow}>
         <AnimatedPressable onPress={() => navigation.goBack()} style={styles.headerBtn}>
@@ -77,7 +77,7 @@ export default function SyndicateOnboardingScreen() {
           style={styles.heroSlide}
         >
           <View style={styles.iconRing}>
-            <Ionicons name={slide.icon} size={64} color="#4ECDC4" />
+            <Ionicons name={slide.icon} size={64} color="#e8dcc8" />
           </View>
           <Text style={styles.title}>{slide.title}</Text>
           <Text style={styles.body}>{slide.body}</Text>
@@ -150,7 +150,7 @@ const styles = StyleSheet.create({
     marginTop: 22,
     color: Colors.textPrimary,
     fontSize: 30,
-    fontFamily: 'Inter_800ExtraBold',
+    fontFamily: 'Inter_700Bold',
     letterSpacing: -0.8,
     textAlign: 'center',
   },
@@ -180,7 +180,7 @@ const styles = StyleSheet.create({
   },
   dotActive: {
     width: 24,
-    backgroundColor: '#4ECDC4',
+    backgroundColor: '#e8dcc8',
   },
   primaryBtn: {
     borderRadius: 14,

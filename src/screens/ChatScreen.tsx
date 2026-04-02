@@ -22,15 +22,21 @@ import Reanimated, {
 import { Ionicons } from '@expo/vector-icons';
 import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
+import { ActiveTheme, Colors } from '../constants/colors';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 
 type Props = StackScreenProps<RootStackParamList, 'Chat'>;
 
-const TEAL = '#4ECDC4';
-const BG = '#0a0a0a';
-const CARD = '#111111';
-const MUTED = '#888888';
-const TEXT = '#FFFFFF';
+const IS_LIGHT = ActiveTheme === 'light';
+const TEAL = IS_LIGHT ? '#2f251b' : '#e8dcc8';
+const BG = Colors.background;
+const CARD = IS_LIGHT ? '#ffffff' : '#111111';
+const CARD_ALT = IS_LIGHT ? '#f3eee7' : '#1a1a1a';
+const BORDER = IS_LIGHT ? '#d8d1c6' : '#2a2a2a';
+const MUTED = Colors.textMuted;
+const TEXT = Colors.textPrimary;
+const HEADER_BG = IS_LIGHT ? 'rgba(247,245,241,0.96)' : 'rgba(10, 10, 10, 0.95)';
+const FOOTER_BG = IS_LIGHT ? 'rgba(236,234,230,0.96)' : 'rgba(10,10,10,0.95)';
 
 type MsgType = 'text' | 'offer' | 'offer_declined' | 'purchase_status';
 
@@ -174,7 +180,7 @@ export default function ChatScreen({ navigation }: Props) {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={BG} />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={BG} />
       
       {/* Editorial Header */}
       <View style={styles.header}>
@@ -244,11 +250,11 @@ export default function ChatScreen({ navigation }: Props) {
               onChangeText={setInput}
               onSubmitEditing={sendMessage}
               returnKeyType="send"
-              selectionColor={TEAL}
+              selectionColor={Colors.accent}
             />
             {input.length > 0 && (
               <AnimatedPressable onPress={sendMessage} style={styles.sendBtn}>
-                <Ionicons name="arrow-up" size={20} color={BG} />
+                <Ionicons name="arrow-up" size={20} color={Colors.textInverse} />
               </AnimatedPressable>
             )}
           </View>
@@ -268,14 +274,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 10,
     paddingBottom: 20,
-    backgroundColor: 'rgba(10, 10, 10, 0.95)',
+    borderBottomWidth: 1,
+    borderBottomColor: BORDER,
+    backgroundColor: HEADER_BG,
     zIndex: 10,
   },
   headerIconBtn: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#111',
+    borderWidth: 1,
+    borderColor: BORDER,
+    backgroundColor: CARD,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -290,6 +300,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: BORDER,
     borderRadius: 20,
     padding: 16,
     gap: 14,
@@ -298,7 +310,9 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 16,
-    backgroundColor: '#1a1a1a',
+    borderWidth: 1,
+    borderColor: BORDER,
+    backgroundColor: CARD_ALT,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -313,13 +327,17 @@ const styles = StyleSheet.create({
     gap: 14,
     padding: 16,
     backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: BORDER,
     borderRadius: 20,
   },
   smallAvatar2: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#1a1a1a',
+    borderWidth: 1,
+    borderColor: BORDER,
+    backgroundColor: CARD_ALT,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -332,12 +350,12 @@ const styles = StyleSheet.create({
   dateLabelText: { fontSize: 12, fontFamily: 'Inter_600SemiBold', color: MUTED, textTransform: 'uppercase', letterSpacing: 1 },
   
   statusBlock: {
-    backgroundColor: '#141414',
+    backgroundColor: CARD,
     borderRadius: 16,
     padding: 20,
     marginVertical: 8,
     borderWidth: 1,
-    borderColor: '#222',
+    borderColor: BORDER,
   },
   statusTitle: { fontSize: 16, fontFamily: 'Inter_700Bold', color: TEXT, marginBottom: 8 },
   statusBody: { fontSize: 14, fontFamily: 'Inter_400Regular', color: MUTED, lineHeight: 22 },
@@ -348,6 +366,8 @@ const styles = StyleSheet.create({
   
   textBubble: {
     backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: BORDER,
     borderRadius: 24,
     borderBottomLeftRadius: 6,
     paddingHorizontal: 18,
@@ -355,12 +375,12 @@ const styles = StyleSheet.create({
     maxWidth: '80%',
   },
   textBubbleMe: {
-    backgroundColor: TEXT,
+    backgroundColor: Colors.accent,
     borderBottomLeftRadius: 24,
     borderBottomRightRadius: 6,
   },
   bubbleText: { fontSize: 15, fontFamily: 'Inter_500Medium', color: TEXT, lineHeight: 22 },
-  bubbleTextMe: { color: BG },
+  bubbleTextMe: { color: Colors.textInverse },
   
   offerBubble: {
     backgroundColor: CARD,
@@ -369,11 +389,11 @@ const styles = StyleSheet.create({
     padding: 20,
     maxWidth: '85%',
     borderWidth: 1,
-    borderColor: '#222',
+    borderColor: BORDER,
   },
   offerBubbleMe: { borderBottomLeftRadius: 24, borderBottomRightRadius: 6 },
   offerTextRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8, marginBottom: 4 },
-  offerPrice: { fontSize: 28, fontFamily: 'Inter_800ExtraBold', color: TEXT, letterSpacing: -1 },
+  offerPrice: { fontSize: 28, fontFamily: 'Inter_700Bold', color: TEXT, letterSpacing: -1 },
   offerOriginal: { fontSize: 16, fontFamily: 'Inter_500Medium', color: MUTED },
   strikethrough: { textDecorationLine: 'line-through' },
   
@@ -390,7 +410,9 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 12,
     borderRadius: 20,
-    backgroundColor: '#1a1a1a',
+    borderWidth: 1,
+    borderColor: BORDER,
+    backgroundColor: CARD_ALT,
     alignItems: 'center',
   },
   offerDeclineText: { color: TEXT, fontSize: 14, fontFamily: 'Inter_600SemiBold' },
@@ -398,21 +420,25 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 12,
     borderRadius: 20,
-    backgroundColor: TEAL,
+    backgroundColor: Colors.accent,
     alignItems: 'center',
   },
-  offerAcceptText: { color: BG, fontSize: 14, fontFamily: 'Inter_700Bold' },
+  offerAcceptText: { color: Colors.textInverse, fontSize: 14, fontFamily: 'Inter_700Bold' },
 
   inputContainer: {
     paddingHorizontal: 16,
     paddingVertical: 12,
     paddingBottom: Platform.OS === 'ios' ? 34 : 20,
-    backgroundColor: BG,
+    borderTopWidth: 1,
+    borderTopColor: BORDER,
+    backgroundColor: FOOTER_BG,
   },
   inputFloatingPill: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: BORDER,
     borderRadius: 30,
     paddingLeft: 6,
     paddingRight: 6,
@@ -430,7 +456,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: TEXT,
+    backgroundColor: Colors.accent,
     alignItems: 'center',
     justifyContent: 'center',
   },

@@ -9,6 +9,11 @@ export interface Poster {
   createdAt: string;
   expiryHours: number;
   sharedFromUserId?: string;
+  storyOverlay?: {
+    text: string;
+    color: string;
+    position: 'top' | 'center' | 'bottom';
+  };
 }
 
 export interface PosterViewModel extends Poster {

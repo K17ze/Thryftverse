@@ -9,11 +9,11 @@ import {
   Image,
   StatusBar
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
-import { Colors } from '../constants/colors';
+import { ActiveTheme, Colors } from '../constants/colors';
 import { RootStackParamList } from '../navigation/types';
 import { formatCompact, getSyndicateMarket } from '../data/tradeHub';
 import { useStore } from '../store/useStore';
@@ -25,10 +25,21 @@ type RouteT = RouteProp<RootStackParamList, 'AssetDetail'>;
 type NavT = StackNavigationProp<RootStackParamList>;
 
 const RANGE_OPTIONS: ChartRange[] = ['1H', '1D', '1W', '1M', 'ALL'];
+const IS_LIGHT = ActiveTheme === 'light';
+const BRAND = IS_LIGHT ? '#2f251b' : '#e8dcc8';
+const PANEL_BG = IS_LIGHT ? '#ffffff' : '#121212';
+const PANEL_SOFT_BG = IS_LIGHT ? '#f7f4ef' : '#161616';
+const PANEL_BORDER = IS_LIGHT ? '#d8d1c6' : '#2a2a2a';
+const PANEL_TINT_BG = IS_LIGHT ? '#ece4d8' : '#17302b';
+const PANEL_TINT_BORDER = IS_LIGHT ? '#d0c3af' : '#35574d';
+const CHART_BG = IS_LIGHT ? '#f1ede6' : '#10171d';
+const CHART_BORDER = IS_LIGHT ? '#d6cec1' : '#26343f';
+const FOOTER_BG = IS_LIGHT ? 'rgba(236,234,230,0.97)' : 'rgba(10,10,10,0.95)';
 
 export default function AssetDetailScreen() {
   const navigation = useNavigation<NavT>();
   const route = useRoute<RouteT>();
+  const insets = useSafeAreaInsets();
   const customSyndicates = useStore((state) => state.customSyndicates);
   const syndicateRuntime = useStore((state) => state.syndicateRuntime);
   const { formatFromFiat } = useFormattedPrice();
@@ -86,7 +97,7 @@ export default function AssetDetailScreen() {
   if (!asset) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
-        <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+        <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
         <View style={styles.fallbackHeader}>
           <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
             <Ionicons name="arrow-back" size={22} color={Colors.textPrimary} />
@@ -109,7 +120,7 @@ export default function AssetDetailScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
       <View style={styles.header}>
         <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
@@ -159,7 +170,7 @@ export default function AssetDetailScreen() {
                   styles.chartBar,
                   {
                     height: 24 + point.level * 68,
-                    backgroundColor: delta >= 0 ? '#4ECDC4' : '#ef6f6f',
+                    backgroundColor: delta >= 0 ? BRAND : Colors.danger,
                     opacity: 0.32 + point.level * 0.68,
                   },
                 ]}
@@ -217,7 +228,7 @@ export default function AssetDetailScreen() {
         <View style={{ height: 120 }} />
       </ScrollView>
 
-      <View style={styles.footer}>
+      <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 14) }]}>
         <AnimatedPressable
           style={[styles.ctaBtn, styles.ctaBuy]}
           activeOpacity={0.9}
@@ -266,9 +277,9 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#121212',
+    backgroundColor: PANEL_SOFT_BG,
     borderWidth: 1,
-    borderColor: '#272727',
+    borderColor: PANEL_BORDER,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -276,9 +287,9 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#121212',
+    backgroundColor: PANEL_SOFT_BG,
     borderWidth: 1,
-    borderColor: '#272727',
+    borderColor: PANEL_BORDER,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -318,7 +329,7 @@ const styles = StyleSheet.create({
   pricePrimary: {
     color: Colors.textPrimary,
     fontSize: 30,
-    fontFamily: 'Inter_800ExtraBold',
+    fontFamily: 'Inter_700Bold',
     letterSpacing: -0.8,
   },
   deltaText: {
@@ -326,10 +337,10 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_700Bold',
   },
   deltaUp: {
-    color: '#8de5dc',
+    color: BRAND,
   },
   deltaDown: {
-    color: '#ff9d9d',
+    color: Colors.danger,
   },
   rangeRow: {
     marginTop: 10,
@@ -339,14 +350,14 @@ const styles = StyleSheet.create({
   rangeChip: {
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: '#2d2d2d',
-    backgroundColor: '#161616',
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
     paddingHorizontal: 12,
     paddingVertical: 6,
   },
   rangeChipActive: {
-    borderColor: '#4ECDC4',
-    backgroundColor: '#17302b',
+    borderColor: PANEL_TINT_BORDER,
+    backgroundColor: PANEL_TINT_BG,
   },
   rangeChipText: {
     color: Colors.textSecondary,
@@ -354,14 +365,14 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_700Bold',
   },
   rangeChipTextActive: {
-    color: '#8de5dc',
+    color: BRAND,
   },
   chartCard: {
     marginTop: 12,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#26343f',
-    backgroundColor: '#10171d',
+    borderColor: CHART_BORDER,
+    backgroundColor: CHART_BG,
     paddingHorizontal: 10,
     paddingVertical: 12,
   },
@@ -396,8 +407,8 @@ const styles = StyleSheet.create({
     width: '48.8%',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
-    backgroundColor: '#121212',
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
     paddingHorizontal: 10,
     paddingVertical: 10,
   },
@@ -416,8 +427,8 @@ const styles = StyleSheet.create({
     marginTop: 12,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
-    backgroundColor: '#101010',
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
     paddingHorizontal: 10,
     paddingVertical: 10,
   },
@@ -448,10 +459,10 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_600SemiBold',
   },
   orderBid: {
-    color: '#8de5dc',
+    color: BRAND,
   },
   orderAsk: {
-    color: '#ff9d9d',
+    color: Colors.danger,
   },
   footer: {
     position: 'absolute',
@@ -463,7 +474,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 10,
     paddingBottom: 24,
-    backgroundColor: 'rgba(10,10,10,0.95)',
+    borderTopWidth: 1,
+    borderTopColor: PANEL_BORDER,
+    backgroundColor: FOOTER_BG,
   },
   ctaBtn: {
     flex: 1,
@@ -478,17 +491,17 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.accent,
   },
   ctaSell: {
-    backgroundColor: '#1a1a1a',
+    backgroundColor: PANEL_SOFT_BG,
     borderWidth: 1,
-    borderColor: '#303030',
+    borderColor: PANEL_BORDER,
   },
   ctaBuyout: {
-    backgroundColor: '#101822',
+    backgroundColor: PANEL_TINT_BG,
     borderWidth: 1,
-    borderColor: '#29475a',
+    borderColor: PANEL_TINT_BORDER,
   },
   ctaBuyText: {
-    color: Colors.background,
+    color: Colors.textInverse,
     fontSize: 13,
     fontFamily: 'Inter_700Bold',
   },

@@ -12,15 +12,18 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
+import { ActiveTheme, Colors } from '../constants/colors';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 
 type Props = StackScreenProps<RootStackParamList, 'BalanceHistory'>;
 
-const TEAL = '#4ECDC4';
-const BG = '#0a0a0a';
-const CARD = '#111111';
-const MUTED = '#888888';
-const TEXT = '#FFFFFF';
+const IS_LIGHT = ActiveTheme === 'light';
+const TEAL = IS_LIGHT ? '#2f251b' : '#e8dcc8';
+const BG = Colors.background;
+const CARD = IS_LIGHT ? '#ffffff' : '#111111';
+const BORDER = IS_LIGHT ? '#d8d1c6' : '#1c1c1c';
+const MUTED = Colors.textMuted;
+const TEXT = Colors.textPrimary;
 
 type TxType = 'sale' | 'withdrawal' | 'refund' | 'purchase';
 
@@ -68,10 +71,10 @@ const iconForType = (type: TxType) => {
 
 const colorForType = (type: TxType) => {
   switch (type) {
-    case 'sale': return '#4ECDC4';
-    case 'withdrawal': return '#FF6B6B';
+    case 'sale': return TEAL;
+    case 'withdrawal': return Colors.danger;
     case 'refund': return '#FFE66D';
-    case 'purchase': return '#888888';
+    case 'purchase': return Colors.textSecondary;
   }
 };
 
@@ -80,7 +83,7 @@ export default function BalanceHistoryScreen({ navigation }: Props) {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={BG} />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={BG} />
       <View style={styles.header}>
         <AnimatedPressable onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={TEXT} />
@@ -106,7 +109,7 @@ export default function BalanceHistoryScreen({ navigation }: Props) {
                     </View>
                     <Text style={[
                       styles.txAmount,
-                      { color: tx.amount > 0 ? TEAL : '#FF6B6B' }
+                      { color: tx.amount > 0 ? TEAL : Colors.danger }
                     ]}>
                       {tx.amount > 0 ? '+' : ''}{formatFromFiat(Math.abs(tx.amount), 'GBP', { displayMode: 'fiat' })}
                     </Text>
@@ -133,13 +136,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#1a1a1a',
+    borderBottomColor: BORDER,
   },
   headerTitle: { fontSize: 17, fontWeight: '700', color: TEXT },
   content: { padding: 20 },
   group: { marginBottom: 24 },
   monthLabel: { fontSize: 13, fontWeight: '700', color: MUTED, marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.8 },
-  card: { backgroundColor: CARD, borderRadius: 16, overflow: 'hidden' },
+  card: { backgroundColor: CARD, borderWidth: 1, borderColor: BORDER, borderRadius: 16, overflow: 'hidden' },
   txRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -151,6 +154,6 @@ const styles = StyleSheet.create({
   txLabel: { fontSize: 14, fontWeight: '500', color: TEXT, marginBottom: 2 },
   txDate: { fontSize: 12, color: MUTED },
   txAmount: { fontSize: 15, fontWeight: '700' },
-  divider: { height: 1, backgroundColor: '#1c1c1c', marginHorizontal: 18 },
+  divider: { height: 1, backgroundColor: BORDER, marginHorizontal: 18 },
   footerNote: { fontSize: 12, color: MUTED, textAlign: 'center', marginTop: 8 },
 });

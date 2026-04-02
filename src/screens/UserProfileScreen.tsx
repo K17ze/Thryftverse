@@ -15,17 +15,21 @@ import { Ionicons } from '@expo/vector-icons';
 import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
 import { Alert, Image } from 'react-native';
+import { ActiveTheme, Colors } from '../constants/colors';
 import { Listing } from '../data/mockData';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useBackendData } from '../context/BackendDataContext';
 
 type Props = StackScreenProps<RootStackParamList, 'UserProfile'>;
 
-const TEAL = '#4ECDC4';
-const BG = '#0a0a0a';
-const CARD = '#111111';
-const MUTED = '#888888';
-const TEXT = '#FFFFFF';
+const IS_LIGHT = ActiveTheme === 'light';
+const TEAL = IS_LIGHT ? '#2f251b' : '#e8dcc8';
+const BG = Colors.background;
+const CARD = IS_LIGHT ? '#ffffff' : '#111111';
+const CARD_ALT = IS_LIGHT ? '#f3eee7' : '#1a1a1a';
+const BORDER = IS_LIGHT ? '#d8d1c6' : '#2a2a2a';
+const MUTED = Colors.textMuted;
+const TEXT = Colors.textPrimary;
 const { width } = Dimensions.get('window');
 
 // 2-column grid spacing (aligns with Phase 21 BrowseScreen)
@@ -93,10 +97,8 @@ export default function UserProfileScreen({ navigation, route }: Props) {
         </View>
       </View>
       <View style={styles.gridInfo}>
-        <View style={styles.priceRow}>
-          <Text style={styles.gridPrice}>{formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}</Text>
-          <Text style={styles.gridBrand}>{item.brand}</Text>
-        </View>
+        <Text style={styles.gridPrice}>{formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}</Text>
+        <Text style={styles.gridBrand} numberOfLines={1} ellipsizeMode="tail">{item.brand}</Text>
         <Text style={styles.gridSizeCondition}>{item.size} • {item.condition}</Text>
       </View>
     </AnimatedPressable>
@@ -104,7 +106,7 @@ export default function UserProfileScreen({ navigation, route }: Props) {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor={BG} />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={BG} />
 
       {/* Hero Header */}
       <View style={styles.header}>
@@ -292,8 +294,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 10,
     paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: BORDER,
   },
-  headerTitle: { fontSize: 18, fontFamily: 'Inter_800ExtraBold', color: TEXT, textTransform: 'uppercase', letterSpacing: 1 },
+  headerTitle: { fontSize: 18, fontFamily: 'Inter_700Bold', color: TEXT, textTransform: 'uppercase', letterSpacing: 1 },
   backBtn: { width: 44, height: 44, justifyContent: 'center', alignItems: 'center' },
   
   tabBarContainer: {
@@ -307,47 +311,52 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 24,
     borderWidth: 1,
-    borderColor: '#222',
+    borderColor: BORDER,
+    backgroundColor: CARD,
     alignItems: 'center',
   },
-  tabPillActive: { backgroundColor: TEXT, borderColor: TEXT },
+  tabPillActive: { backgroundColor: Colors.accent, borderColor: Colors.accent },
   tabText: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: MUTED },
-  tabTextActive: { color: BG, fontFamily: 'Inter_700Bold' },
+  tabTextActive: { color: Colors.textInverse, fontFamily: 'Inter_700Bold' },
 
   // Grid / Listings
   profileHeader: { paddingHorizontal: 20, paddingBottom: 32 },
   heroRow: { flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 24 },
   avatarLarge: {
     width: 80, height: 80, borderRadius: 40,
-    backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: BORDER,
+    backgroundColor: CARD_ALT,
     alignItems: 'center', justifyContent: 'center',
   },
   heroInfo: { flex: 1 },
-  heroUsername: { fontSize: 24, fontFamily: 'Inter_800ExtraBold', color: TEXT, letterSpacing: -0.5, marginBottom: 6 },
+  heroUsername: { fontSize: 24, fontFamily: 'Inter_700Bold', color: TEXT, letterSpacing: -0.5, marginBottom: 6 },
   heroRatingRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   heroReviewCount: { fontSize: 14, fontFamily: 'Inter_500Medium', color: MUTED },
   
   statsCard: {
     flexDirection: 'row',
     backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: BORDER,
     borderRadius: 20,
     paddingVertical: 16,
     marginBottom: 24,
   },
   statCol: { flex: 1, alignItems: 'center' },
-  statValue: { fontSize: 20, fontFamily: 'Inter_800ExtraBold', color: TEXT, marginBottom: 2 },
+  statValue: { fontSize: 20, fontFamily: 'Inter_700Bold', color: TEXT, marginBottom: 2 },
   statLabel: { fontSize: 12, fontFamily: 'Inter_500Medium', color: MUTED },
-  statDivider: { width: 1, backgroundColor: '#222' },
+  statDivider: { width: 1, backgroundColor: BORDER },
   
   followCta: {
-    backgroundColor: TEAL,
+    backgroundColor: Colors.accent,
     borderRadius: 30,
     paddingVertical: 16,
     alignItems: 'center',
   },
-  followCtaActive: { backgroundColor: CARD },
-  followCtaText: { fontSize: 16, fontFamily: 'Inter_700Bold', color: BG },
-  followCtaTextActive: { color: TEAL },
+  followCtaActive: { backgroundColor: CARD, borderWidth: 1, borderColor: BORDER },
+  followCtaText: { fontSize: 16, fontFamily: 'Inter_700Bold', color: Colors.textInverse },
+  followCtaTextActive: { color: TEXT },
 
   gridListContent: { paddingBottom: 100 },
   rowWrapper: { justifyContent: 'space-between', marginBottom: 32, paddingHorizontal: 20 },
@@ -358,6 +367,8 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     overflow: 'hidden',
     backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: BORDER,
     marginBottom: 12,
   },
   gridImagePlaceholder: { flex: 1, alignItems: 'center', justifyContent: 'center' },
@@ -368,35 +379,36 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.3)',
     alignItems: 'center', justifyContent: 'center',
   },
-  gridInfo: { paddingHorizontal: 4 },
-  priceRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 4 },
-  gridPrice: { color: TEXT, fontSize: 18, fontFamily: 'Inter_700Bold' },
-  gridBrand: { color: TEXT, fontSize: 12, fontFamily: 'Inter_700Bold', textTransform: 'uppercase' },
+  gridInfo: { paddingHorizontal: 4, minHeight: 56 },
+  gridPrice: { color: TEXT, fontSize: 18, fontFamily: 'Inter_700Bold', marginBottom: 2 },
+  gridBrand: { color: Colors.textSecondary, fontSize: 11, fontFamily: 'Inter_700Bold', textTransform: 'uppercase', letterSpacing: 0.25, marginBottom: 3 },
   gridSizeCondition: { color: MUTED, fontSize: 13, fontFamily: 'Inter_500Medium' },
 
   // Reviews Tab
   reviewsContent: { paddingBottom: 40 },
   ratingHero: { alignItems: 'center', paddingVertical: 40 },
-  ratingBigNumber: { fontSize: 72, fontFamily: 'Inter_800ExtraBold', color: TEXT, letterSpacing: -2, lineHeight: 80 },
+  ratingBigNumber: { fontSize: 72, fontFamily: 'Inter_700Bold', color: TEXT, letterSpacing: -2, lineHeight: 80 },
   ratingTotalText: { fontSize: 15, fontFamily: 'Inter_500Medium', color: MUTED, marginTop: 12 },
   
   reviewsFilterRow: { paddingHorizontal: 20, marginBottom: 24 },
-  filterChip: { paddingHorizontal: 20, paddingVertical: 12, borderRadius: 24, borderWidth: 1, borderColor: '#333' },
-  filterChipActive: { backgroundColor: TEXT, borderColor: TEXT },
+  filterChip: { paddingHorizontal: 20, paddingVertical: 12, borderRadius: 24, borderWidth: 1, borderColor: BORDER, backgroundColor: CARD },
+  filterChipActive: { backgroundColor: Colors.accent, borderColor: Colors.accent },
   filterChipText: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: MUTED },
-  filterChipTextActive: { color: BG, fontFamily: 'Inter_700Bold' },
+  filterChipTextActive: { color: Colors.textInverse, fontFamily: 'Inter_700Bold' },
   
   reviewsList: { paddingHorizontal: 20 },
   reviewBlock: {
     flexDirection: 'row',
     backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: BORDER,
     borderRadius: 20,
     padding: 20,
     gap: 14,
   },
-  reviewerAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#222', alignItems: 'center', justifyContent: 'center' },
+  reviewerAvatar: { width: 44, height: 44, borderRadius: 22, borderWidth: 1, borderColor: BORDER, backgroundColor: CARD_ALT, alignItems: 'center', justifyContent: 'center' },
   reviewerAvatarAuto: { width: 44, height: 44, borderRadius: 22, backgroundColor: TEAL, alignItems: 'center', justifyContent: 'center' },
-  reviewerAvatarAutoText: { fontSize: 18, fontFamily: 'Inter_800ExtraBold', color: BG },
+  reviewerAvatarAutoText: { fontSize: 18, fontFamily: 'Inter_700Bold', color: Colors.textInverse },
   reviewBlockInfo: { flex: 1 },
   reviewSenderRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
   reviewSenderName: { fontSize: 15, fontFamily: 'Inter_700Bold', color: TEXT },
@@ -408,15 +420,19 @@ const styles = StyleSheet.create({
   aboutBannerImage: {
     height: 180,
     backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: BORDER,
     borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 24,
   },
-  aboutBigName: { fontSize: 32, fontFamily: 'Inter_800ExtraBold', color: TEXT, letterSpacing: -1, marginBottom: 32 },
+  aboutBigName: { fontSize: 32, fontFamily: 'Inter_700Bold', color: TEXT, letterSpacing: -1, marginBottom: 32 },
   
   aboutInfoCard: {
     backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: BORDER,
     borderRadius: 20,
     padding: 24,
     marginBottom: 16,

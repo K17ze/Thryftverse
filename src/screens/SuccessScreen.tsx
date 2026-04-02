@@ -9,7 +9,7 @@ import { View,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors } from '../constants/colors';
+import { ActiveTheme, Colors } from '../constants/colors';
 import { Confetti } from '../components/Confetti';
 
 export default function SuccessScreen() {
@@ -17,7 +17,7 @@ export default function SuccessScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
       <Confetti />
       
       <View style={styles.centerContent}>

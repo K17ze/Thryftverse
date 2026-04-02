@@ -11,6 +11,7 @@ import Reanimated, {
   Easing,
 } from 'react-native-reanimated';
 import { Colors } from '../constants/colors';
+import { Typography } from '../constants/typography';
 
 interface BrandedSplashProps {
   onFinish: () => void;
@@ -81,15 +82,15 @@ const styles = StyleSheet.create({
   },
   brandLetter: {
     color: Colors.textPrimary,
-    fontFamily: 'Inter_800ExtraBold',
-    fontSize: 28,
-    letterSpacing: 0.8,
+    fontFamily: Typography.family.bold,
+    fontSize: 27,
+    letterSpacing: 0.42,
   },
   tagline: {
     marginTop: 14,
-    color: '#8de5dc',
-    fontFamily: 'Inter_500Medium',
+    color: '#e8dcc8',
+    fontFamily: Typography.family.medium,
     fontSize: 13,
-    letterSpacing: 0.4,
+    letterSpacing: 0.22,
   },
 });

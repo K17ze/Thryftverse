@@ -8,13 +8,14 @@ import {
   StatusBar,
   TextInput,
   Image,
-  FlatList
+  FlatList,
+  ScrollView
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
-import { Colors } from '../constants/colors';
+import { ActiveTheme, Colors } from '../constants/colors';
 import { RootStackParamList } from '../navigation/types';
 import { MOCK_LISTINGS, MOCK_USERS, Listing } from '../data/mockData';
 import type { SyndicateAsset } from '../data/tradeHub';
@@ -30,8 +31,15 @@ import { useBackendData } from '../context/BackendDataContext';
 type NavT = StackNavigationProp<RootStackParamList>;
 type RouteT = RouteProp<RootStackParamList, 'CreateSyndicate'>;
 
-const STABLE_COIN = 'TVUSD';
+const STABLE_COIN = '1ze';
 const COUNTRY_OPTIONS = ['GB', 'EU', 'SG', 'AE', 'US', 'CA'] as const;
+const IS_LIGHT = ActiveTheme === 'light';
+const BRAND = IS_LIGHT ? '#2f251b' : '#e8dcc8';
+const PANEL_BG = IS_LIGHT ? '#ffffff' : '#121212';
+const PANEL_SOFT_BG = IS_LIGHT ? '#f7f4ef' : '#151515';
+const PANEL_BORDER = IS_LIGHT ? '#d8d1c6' : '#2d2d2d';
+const PANEL_TINT_BG = IS_LIGHT ? '#ece4d8' : '#152520';
+const PANEL_TINT_BORDER = IS_LIGHT ? '#d0c3af' : '#2f4944';
 const SETTLEMENT_MODES: Array<{ key: 'GBP' | 'TVUSD' | 'HYBRID' }> = [
   { key: 'GBP' },
   { key: 'TVUSD' },
@@ -195,7 +203,7 @@ export default function CreateSyndicateScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
       <View style={styles.header}>
         <AnimatedPressable style={styles.closeBtn} onPress={() => navigation.goBack()} activeOpacity={0.85}>
@@ -212,7 +220,7 @@ export default function CreateSyndicateScreen() {
         </AnimatedPressable>
       </View>
 
-      <View style={styles.content}>
+      <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
         <View style={styles.previewCard}>
           <Image source={{ uri: previewImage }} style={styles.previewImage} />
           <View style={styles.previewOverlay}>
@@ -225,7 +233,7 @@ export default function CreateSyndicateScreen() {
 
         {prefill?.offeringWindowHours ? (
           <View style={styles.prefillBanner}>
-            <Ionicons name="sparkles-outline" size={14} color="#8de5dc" />
+            <Ionicons name="sparkles-outline" size={14} color={BRAND} />
             <Text style={styles.prefillBannerText}>
               Imported from Sell flow · {prefill.offeringWindowHours}h offer window · {prefill.authPhotos?.length ?? 0} auth photos
             </Text>
@@ -335,6 +343,7 @@ export default function CreateSyndicateScreen() {
             keyboardType="number-pad"
             placeholder="1000"
             placeholderTextColor={Colors.textMuted}
+            selectionColor={Colors.accent}
           />
 
           <Text style={styles.inputLabel}>Unit Price ({currencyCode})</Text>
@@ -345,6 +354,7 @@ export default function CreateSyndicateScreen() {
             keyboardType="decimal-pad"
             placeholder="0.00"
             placeholderTextColor={Colors.textMuted}
+            selectionColor={Colors.accent}
           />
 
           <Text style={styles.inputLabel}>Unit Price ({STABLE_COIN})</Text>
@@ -355,6 +365,7 @@ export default function CreateSyndicateScreen() {
             keyboardType="decimal-pad"
             placeholder="0.00"
             placeholderTextColor={Colors.textMuted}
+            selectionColor={Colors.accent}
           />
         </View>
 
@@ -373,7 +384,7 @@ export default function CreateSyndicateScreen() {
             contentContainerStyle={styles.listingsContent}
           />
         </View>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -391,7 +402,7 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#1c1c1c',
+    borderBottomColor: PANEL_BORDER,
   },
   closeBtn: {
     width: 36,
@@ -399,10 +410,12 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#151515',
+    backgroundColor: PANEL_SOFT_BG,
+    borderWidth: 1,
+    borderColor: PANEL_BORDER,
   },
   headerLabel: {
-    color: '#4ECDC4',
+    color: BRAND,
     fontSize: 10,
     letterSpacing: 1,
     fontFamily: 'Inter_600SemiBold',
@@ -421,23 +434,26 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   issueBtnText: {
-    color: Colors.background,
+    color: Colors.textInverse,
     fontSize: 12,
     fontFamily: 'Inter_700Bold',
   },
   content: {
     flex: 1,
+  },
+  contentContainer: {
     paddingHorizontal: 16,
     paddingTop: 14,
+    paddingBottom: 28,
   },
   previewCard: {
     height: 188,
     borderRadius: 16,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#2a2a2a',
+    borderColor: PANEL_BORDER,
     marginBottom: 16,
-    backgroundColor: '#121212',
+    backgroundColor: PANEL_BG,
   },
   previewImage: {
     width: '100%',
@@ -459,7 +475,7 @@ const styles = StyleSheet.create({
   },
   previewMeta: {
     marginTop: 3,
-    color: '#8fdcd4',
+    color: BRAND,
     fontSize: 11,
     fontFamily: 'Inter_600SemiBold',
   },
@@ -467,8 +483,8 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     borderRadius: 11,
     borderWidth: 1,
-    borderColor: '#2f4944',
-    backgroundColor: '#152520',
+    borderColor: PANEL_TINT_BORDER,
+    backgroundColor: PANEL_TINT_BG,
     paddingHorizontal: 10,
     paddingVertical: 8,
     flexDirection: 'row',
@@ -477,7 +493,7 @@ const styles = StyleSheet.create({
   },
   prefillBannerText: {
     flex: 1,
-    color: '#8de5dc',
+    color: BRAND,
     fontSize: 11,
     fontFamily: 'Inter_600SemiBold',
   },
@@ -510,14 +526,14 @@ const styles = StyleSheet.create({
   chipBtn: {
     borderRadius: 11,
     borderWidth: 1,
-    borderColor: '#2e2e2e',
-    backgroundColor: '#151515',
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_SOFT_BG,
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
   chipBtnActive: {
-    borderColor: '#4ECDC4',
-    backgroundColor: '#17302b',
+    borderColor: BRAND,
+    backgroundColor: PANEL_TINT_BG,
   },
   chipBtnText: {
     color: Colors.textSecondary,
@@ -525,13 +541,13 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_700Bold',
   },
   chipBtnTextActive: {
-    color: '#8de5dc',
+    color: BRAND,
   },
   toggleRow: {
     borderRadius: 11,
     borderWidth: 1,
-    borderColor: '#2c2c2c',
-    backgroundColor: '#161616',
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_SOFT_BG,
     paddingHorizontal: 10,
     paddingVertical: 8,
     marginBottom: 8,
@@ -547,14 +563,14 @@ const styles = StyleSheet.create({
   toggleBtn: {
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#333333',
-    backgroundColor: '#121212',
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
     paddingHorizontal: 10,
     paddingVertical: 4,
   },
   toggleBtnActive: {
-    borderColor: '#4ECDC4',
-    backgroundColor: '#17302b',
+    borderColor: BRAND,
+    backgroundColor: PANEL_TINT_BG,
   },
   toggleText: {
     color: Colors.textSecondary,
@@ -563,7 +579,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   toggleTextActive: {
-    color: '#8de5dc',
+    color: BRAND,
   },
   inputLabel: {
     color: Colors.textSecondary,
@@ -574,12 +590,12 @@ const styles = StyleSheet.create({
   input: {
     height: 42,
     borderWidth: 1,
-    borderColor: '#2d2d2d',
+    borderColor: PANEL_BORDER,
     borderRadius: 12,
     paddingHorizontal: 12,
     color: Colors.textPrimary,
     fontFamily: 'Inter_600SemiBold',
-    backgroundColor: '#111111',
+    backgroundColor: PANEL_BG,
     marginBottom: 10,
   },
   listingsContent: {
@@ -590,12 +606,12 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#2d2d2d',
-    backgroundColor: '#121212',
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
   },
   listingCardSelected: {
-    borderColor: '#4ECDC4',
-    backgroundColor: '#15201f',
+    borderColor: BRAND,
+    backgroundColor: PANEL_TINT_BG,
   },
   listingImage: {
     width: '100%',

@@ -15,6 +15,7 @@ interface CurrencyContextValue {
   currencyCode: SupportedCurrencyCode;
   displayMode: CurrencyDisplayMode;
   goldRates: GoldRates;
+  rateUpdatedAt: number;
   setCurrencyCode: (code: SupportedCurrencyCode) => void;
   setDisplayMode: (mode: CurrencyDisplayMode) => void;
   cycleDisplayMode: () => void;
@@ -28,6 +29,8 @@ const CURRENCY_PREF_STORAGE_KEY = 'thryftverse:currency-pref:v1';
 export function CurrencyProvider({ children }: { children: React.ReactNode }) {
   const [currencyCode, setCurrencyCode] = React.useState<SupportedCurrencyCode>(DEFAULT_CURRENCY_CODE);
   const [displayMode, setDisplayMode] = React.useState<CurrencyDisplayMode>('both');
+  const [goldRates, setGoldRates] = React.useState<GoldRates>(DEFAULT_GOLD_RATES);
+  const [rateUpdatedAt, setRateUpdatedAt] = React.useState<number>(Date.now());
   const [isHydrated, setIsHydrated] = React.useState(false);
 
   React.useEffect(() => {
@@ -92,16 +95,41 @@ export function CurrencyProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  React.useEffect(() => {
+    const interval = setInterval(() => {
+      const driftSeed = Math.sin(Date.now() / 60000) * 0.0007;
+
+      setGoldRates((current) => {
+        const nextEntries = (Object.keys(current) as SupportedCurrencyCode[]).map((code) => {
+          const base = DEFAULT_GOLD_RATES[code];
+          const randomNudge = (Math.random() - 0.5) * 0.0016;
+          const candidate = current[code] * (1 + driftSeed + randomNudge);
+          const floor = base * 0.94;
+          const ceil = base * 1.08;
+          const clamped = Math.min(ceil, Math.max(floor, candidate));
+          return [code, Number(clamped.toFixed(4))] as const;
+        });
+
+        return Object.fromEntries(nextEntries) as GoldRates;
+      });
+
+      setRateUpdatedAt(Date.now());
+    }, 20000);
+
+    return () => clearInterval(interval);
+  }, []);
+
   const value = React.useMemo<CurrencyContextValue>(
     () => ({
       currencyCode,
       displayMode,
-      goldRates: DEFAULT_GOLD_RATES,
+      goldRates,
+      rateUpdatedAt,
       setCurrencyCode,
       setDisplayMode,
       cycleDisplayMode,
     }),
-    [currencyCode, displayMode, cycleDisplayMode]
+    [currencyCode, displayMode, goldRates, rateUpdatedAt, cycleDisplayMode]
   );
 
   return <CurrencyContext.Provider value={value}>{children}</CurrencyContext.Provider>;

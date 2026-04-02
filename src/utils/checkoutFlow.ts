@@ -1,14 +1,18 @@
 export interface CheckoutSavedAddress {
+  id?: number;
   name: string;
   street: string;
   city: string;
   postcode: string;
+  isDefault?: boolean;
 }
 
 export interface CheckoutSavedPaymentMethod {
+  id?: number;
   type: 'card' | 'bank_account';
   label: string;
   details?: string;
+  isDefault?: boolean;
 }
 
 export function isCheckoutReady(

@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors } from '../constants/colors';
+import { ActiveTheme, Colors } from '../constants/colors';
 import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
 import { Confetti } from '../components/Confetti';
@@ -19,7 +19,7 @@ import { useFormattedPrice } from '../hooks/useFormattedPrice';
 
 type Props = StackScreenProps<RootStackParamList, 'ListingSuccess'>;
 
-const TEAL = '#4ECDC4';
+const TEAL = '#e8dcc8';
 
 export default function ListingSuccessScreen({ navigation }: Props) {
   const { formatFromFiat } = useFormattedPrice();
@@ -27,7 +27,7 @@ export default function ListingSuccessScreen({ navigation }: Props) {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
       <Confetti />
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -111,7 +111,7 @@ const styles = StyleSheet.create({
   },
   heroBigText: {
     fontSize: 48,
-    fontFamily: 'Inter_800ExtraBold',
+    fontFamily: 'Inter_700Bold',
     color: Colors.textPrimary,
     letterSpacing: -2,
     marginBottom: 8,

@@ -13,13 +13,15 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
-import { Colors } from '../constants/colors';
+import { ActiveTheme, Colors } from '../constants/colors';
 import { RootStackParamList } from '../navigation/types';
 import { getSyndicateMarket } from '../data/tradeHub';
 import { useStore } from '../store/useStore';
 import { resolveAssetMarketState } from '../data/mockSyndicateData';
+import { useCurrencyContext } from '../context/CurrencyContext';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useToast } from '../context/ToastContext';
+import { formatIzeAmount, toIze } from '../utils/currency';
 import {
   buildTradeQuote,
   evaluateTradeSubmit,
@@ -29,9 +31,19 @@ import {
   TradeOrderMode,
   TradeSide,
 } from '../utils/tradeFlow';
+import { placeSyndicateOrder } from '../services/marketApi';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 type RouteT = RouteProp<RootStackParamList, 'Trade'>;
+const IS_LIGHT = ActiveTheme === 'light';
+const BRAND = IS_LIGHT ? '#2f251b' : '#e8dcc8';
+const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111111';
+const PANEL_SOFT_BG = IS_LIGHT ? '#f7f4ef' : '#161616';
+const PANEL_BORDER = IS_LIGHT ? '#d8d1c6' : '#2f2f2f';
+const PANEL_TINT_BG = IS_LIGHT ? '#ece4d8' : '#2f291f';
+const PANEL_TINT_BORDER = IS_LIGHT ? '#d0c3af' : '#4f4638';
+const ALERT_BG = IS_LIGHT ? '#f4e0e0' : '#221515';
+const ALERT_BORDER = IS_LIGHT ? '#d9b5b5' : '#4a2d2d';
 
 export default function TradeScreen() {
   const navigation = useNavigation<NavT>();
@@ -44,13 +56,15 @@ export default function TradeScreen() {
   const buySyndicateUnits = useStore((state) => state.buySyndicateUnits);
   const sellSyndicateUnits = useStore((state) => state.sellSyndicateUnits);
   const checkSyndicateEligibility = useStore((state) => state.checkSyndicateEligibility);
+  const { goldRates } = useCurrencyContext();
 
-  const { formatFromFiat } = useFormattedPrice();
+  const { formatFromIze } = useFormattedPrice();
 
   const [side, setSide] = React.useState<TradeSide>(route.params.side);
   const [orderMode, setOrderMode] = React.useState<TradeOrderMode>('market');
   const [quantityInput, setQuantityInput] = React.useState('1');
   const [limitPriceInput, setLimitPriceInput] = React.useState('');
+  const [isSubmittingOrder, setIsSubmittingOrder] = React.useState(false);
 
   const baseAssets = React.useMemo(() => getSyndicateMarket(customSyndicates), [customSyndicates]);
   const marketAssets = React.useMemo(
@@ -59,7 +73,7 @@ export default function TradeScreen() {
   );
 
   const asset = marketAssets.find((item) => item.id === route.params.assetId);
-  const marketPrice = asset?.unitPriceGBP ?? 0;
+  const marketPrice = asset ? toIze(asset.unitPriceGBP, 'GBP', goldRates) : 0;
 
   const quote = React.useMemo(
     () => buildTradeQuote({
@@ -80,7 +94,11 @@ export default function TradeScreen() {
     quote,
   });
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
+    if (isSubmittingOrder) {
+      return;
+    }
+
     const decision = evaluateTradeSubmit({
       orderMode,
       side,
@@ -108,24 +126,49 @@ export default function TradeScreen() {
       return;
     }
 
-    const actingUserId = currentUser?.id ?? 'u1';
-    const result = side === 'buy'
-      ? buySyndicateUnits(asset, actingUserId, quote.quantity)
-      : sellSyndicateUnits(asset, actingUserId, quote.quantity);
+    setIsSubmittingOrder(true);
 
-    if (!result.ok) {
-      show(result.message ?? 'Order failed', 'error');
-      return;
+    try {
+      const actingUserId = currentUser?.id ?? 'u1';
+      let backendSynced = false;
+
+      try {
+        await placeSyndicateOrder(asset.id, {
+          userId: actingUserId,
+          side,
+          units: quote.quantity,
+        });
+        backendSynced = true;
+      } catch {
+        backendSynced = false;
+      }
+
+      const result = side === 'buy'
+        ? buySyndicateUnits(asset, actingUserId, quote.quantity)
+        : sellSyndicateUnits(asset, actingUserId, quote.quantity);
+
+      if (!backendSynced && !result.ok) {
+        show(result.message ?? 'Order failed', 'error');
+        return;
+      }
+
+      show(result.message ?? 'Order filled', backendSynced ? 'success' : 'info');
+
+      if (result.deliveryTriggered && result.deliveryListingId) {
+        navigation.navigate('Checkout', { itemId: result.deliveryListingId });
+        return;
+      }
+
+      navigation.goBack();
+    } finally {
+      setIsSubmittingOrder(false);
     }
-
-    show(result.message ?? 'Order filled', 'success');
-    navigation.goBack();
   };
 
   if (!asset) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
-        <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+        <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
         <View style={styles.header}>
           <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
             <Ionicons name="arrow-back" size={22} color={Colors.textPrimary} />
@@ -142,7 +185,7 @@ export default function TradeScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
       <View style={styles.header}>
         <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
@@ -154,7 +197,16 @@ export default function TradeScreen() {
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <Text style={styles.assetTitle}>{asset.title}</Text>
-        <Text style={styles.assetMeta}>Market {formatFromFiat(asset.unitPriceGBP, 'GBP')} · {asset.availableUnits} available</Text>
+        <Text style={styles.assetMeta}>
+          Market {formatIzeAmount(marketPrice)} · {formatFromIze(marketPrice, { displayMode: 'fiat' })} · {asset.availableUnits} available
+        </Text>
+
+        <View style={styles.pegCard}>
+          <Ionicons name="sparkles-outline" size={14} color={BRAND} />
+          <Text style={styles.pegCardText}>
+            Syndicate trades settle in 1ze only. 1 1ze = 1 gram of gold. Current local value is {formatFromIze(1, { displayMode: 'fiat' })}.
+          </Text>
+        </View>
 
         <View style={styles.segmentRow}>
           {(['buy', 'sell'] as TradeSide[]).map((value) => {
@@ -188,7 +240,7 @@ export default function TradeScreen() {
 
         {!eligibility.ok && (
           <View style={styles.alertCard}>
-            <Ionicons name="alert-circle-outline" size={16} color="#ff9d9d" />
+            <Ionicons name="alert-circle-outline" size={16} color={Colors.danger} />
             <Text style={styles.alertText}>{eligibility.message}</Text>
           </View>
         )}
@@ -205,13 +257,13 @@ export default function TradeScreen() {
 
         {orderMode === 'limit' && (
           <>
-            <Text style={styles.label}>Limit price (GBP)</Text>
+            <Text style={styles.label}>Limit price (1ze)</Text>
             <TextInput
               style={styles.input}
               value={limitPriceInput}
               onChangeText={(value) => setLimitPriceInput(sanitizeTradePriceInput(value))}
               keyboardType="decimal-pad"
-              placeholder={marketPrice.toFixed(2)}
+              placeholder={marketPrice.toFixed(6)}
               placeholderTextColor={Colors.textMuted}
             />
           </>
@@ -220,29 +272,31 @@ export default function TradeScreen() {
         <View style={styles.summaryCard}>
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Execution price</Text>
-            <Text style={styles.summaryValue}>{formatFromFiat(quote.executionPrice, 'GBP', { displayMode: 'fiat' })}</Text>
+            <Text style={styles.summaryValue}>{formatIzeAmount(quote.executionPrice)}</Text>
           </View>
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Gross</Text>
-            <Text style={styles.summaryValue}>{formatFromFiat(quote.grossValue, 'GBP', { displayMode: 'fiat' })}</Text>
+            <Text style={styles.summaryValue}>{formatIzeAmount(quote.grossValue)} · {formatFromIze(quote.grossValue, { displayMode: 'fiat' })}</Text>
           </View>
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Fee (0.5%)</Text>
-            <Text style={styles.summaryValue}>{formatFromFiat(quote.fee, 'GBP', { displayMode: 'fiat' })}</Text>
+            <Text style={styles.summaryValue}>{formatIzeAmount(quote.fee)} · {formatFromIze(quote.fee, { displayMode: 'fiat' })}</Text>
           </View>
           <View style={[styles.summaryRow, styles.summaryRowTotal]}>
             <Text style={styles.summaryTotalLabel}>{side === 'buy' ? 'Total Cost' : 'Net Receive'}</Text>
-            <Text style={styles.summaryTotalValue}>{formatFromFiat(quote.netValue, 'GBP')}</Text>
+            <Text style={styles.summaryTotalValue}>{formatIzeAmount(quote.netValue)} · {formatFromIze(quote.netValue, { displayMode: 'fiat' })}</Text>
           </View>
         </View>
 
         <AnimatedPressable
-          style={[styles.submitBtn, !canSubmit && styles.submitBtnDisabled]}
-          disabled={!canSubmit}
-          onPress={handleSubmit}
+          style={[styles.submitBtn, (!canSubmit || isSubmittingOrder) && styles.submitBtnDisabled]}
+          disabled={!canSubmit || isSubmittingOrder}
+          onPress={() => void handleSubmit()}
           activeOpacity={0.9}
         >
-          <Text style={styles.submitText}>{orderMode === 'limit' ? 'Place Limit Order' : `Execute ${side.toUpperCase()}`}</Text>
+          <Text style={styles.submitText}>
+            {isSubmittingOrder ? 'Submitting...' : orderMode === 'limit' ? 'Place Limit Order' : `Execute ${side.toUpperCase()}`}
+          </Text>
         </AnimatedPressable>
       </ScrollView>
     </SafeAreaView>
@@ -267,8 +321,8 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#272727',
-    backgroundColor: '#121212',
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_SOFT_BG,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -292,6 +346,25 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: 'Inter_500Medium',
   },
+  pegCard: {
+    marginTop: 10,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: PANEL_TINT_BORDER,
+    backgroundColor: PANEL_TINT_BG,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  pegCardText: {
+    flex: 1,
+    color: BRAND,
+    fontSize: 12,
+    lineHeight: 17,
+    fontFamily: 'Inter_600SemiBold',
+  },
   segmentRow: {
     marginTop: 12,
     flexDirection: 'row',
@@ -301,15 +374,15 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#2f2f2f',
-    backgroundColor: '#151515',
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 9,
   },
   segmentBtnActive: {
-    borderColor: '#4ECDC4',
-    backgroundColor: '#17302b',
+    borderColor: PANEL_TINT_BORDER,
+    backgroundColor: PANEL_TINT_BG,
   },
   segmentText: {
     color: Colors.textSecondary,
@@ -317,14 +390,14 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_700Bold',
   },
   segmentTextActive: {
-    color: '#8de5dc',
+    color: BRAND,
   },
   alertCard: {
     marginTop: 12,
     borderRadius: 11,
     borderWidth: 1,
-    borderColor: '#4a2d2d',
-    backgroundColor: '#221515',
+    borderColor: ALERT_BORDER,
+    backgroundColor: ALERT_BG,
     paddingHorizontal: 10,
     paddingVertical: 9,
     flexDirection: 'row',
@@ -333,7 +406,7 @@ const styles = StyleSheet.create({
   },
   alertText: {
     flex: 1,
-    color: '#ff9d9d',
+    color: Colors.danger,
     fontSize: 12,
     fontFamily: 'Inter_600SemiBold',
   },
@@ -349,8 +422,8 @@ const styles = StyleSheet.create({
   input: {
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#2e2e2e',
-    backgroundColor: '#111111',
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
     color: Colors.textPrimary,
     fontSize: 16,
     fontFamily: 'Inter_600SemiBold',
@@ -361,8 +434,8 @@ const styles = StyleSheet.create({
     marginTop: 14,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
-    backgroundColor: '#101010',
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
@@ -380,11 +453,13 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
     fontSize: 12,
     fontFamily: 'Inter_700Bold',
+    textAlign: 'right',
+    maxWidth: '62%',
   },
   summaryRowTotal: {
     marginTop: 4,
     borderTopWidth: 1,
-    borderTopColor: '#242424',
+    borderTopColor: PANEL_BORDER,
     paddingTop: 10,
   },
   summaryTotalLabel: {
@@ -394,8 +469,10 @@ const styles = StyleSheet.create({
   },
   summaryTotalValue: {
     color: Colors.textPrimary,
-    fontSize: 14,
-    fontFamily: 'Inter_800ExtraBold',
+    fontSize: 13,
+    fontFamily: 'Inter_700Bold',
+    textAlign: 'right',
+    maxWidth: '62%',
   },
   submitBtn: {
     marginTop: 14,
@@ -409,7 +486,7 @@ const styles = StyleSheet.create({
     opacity: 0.45,
   },
   submitText: {
-    color: Colors.background,
+    color: Colors.textInverse,
     fontSize: 13,
     fontFamily: 'Inter_700Bold',
   },

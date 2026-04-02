@@ -14,9 +14,10 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
-import { Colors } from '../constants/colors';
+import { ActiveTheme, Colors } from '../constants/colors';
 import { RootStackParamList } from '../navigation/types';
 import {
+  AuctionMarketItem,
   AuctionViewModel,
   formatCompact,
   formatCountdown,
@@ -34,8 +35,18 @@ import {
   getSuggestedBidDisplayAmount,
   sanitizeDecimalInput,
 } from '../utils/currencyAuthoringFlows';
+import { listAuctions, placeAuctionBid as placeAuctionBidRemote } from '../services/marketApi';
 
 type NavT = StackNavigationProp<RootStackParamList>;
+const IS_LIGHT = ActiveTheme === 'light';
+const BRAND = IS_LIGHT ? '#2f251b' : '#e8dcc8';
+const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111111';
+const PANEL_SOFT_BG = IS_LIGHT ? '#f7f4ef' : '#161616';
+const PANEL_MUTED_BG = IS_LIGHT ? '#f1ede6' : '#151515';
+const PANEL_BORDER = IS_LIGHT ? '#d8d1c6' : '#2f2f2f';
+const PANEL_BORDER_STRONG = IS_LIGHT ? '#cec5b8' : '#3a342b';
+const PANEL_TINT_BG = IS_LIGHT ? '#ece4d8' : '#1b1712';
+const PANEL_TINT_BORDER = IS_LIGHT ? '#d0c3af' : '#4f4638';
 
 export default function AuctionsScreen() {
   const navigation = useNavigation<NavT>();
@@ -46,8 +57,8 @@ export default function AuctionsScreen() {
   const customPosters = useStore((state) => state.customPosters);
   const customAuctions = useStore((state) => state.customAuctions);
   const auctionRuntime = useStore((state) => state.auctionRuntime);
-  const placeAuctionBid = useStore((state) => state.placeAuctionBid);
-  const buyNowAuction = useStore((state) => state.buyNowAuction);
+  const placeAuctionBidLocal = useStore((state) => state.placeAuctionBid);
+  const buyNowAuctionLocal = useStore((state) => state.buyNowAuction);
   const settleExpiredAuctions = useStore((state) => state.settleExpiredAuctions);
 
   const actingUserId = currentUser?.id ?? 'u1';
@@ -57,19 +68,67 @@ export default function AuctionsScreen() {
   const [bidComposerVisible, setBidComposerVisible] = React.useState(false);
   const [selectedBidAuction, setSelectedBidAuction] = React.useState<AuctionViewModel | null>(null);
   const [bidInput, setBidInput] = React.useState('');
+  const [remoteAuctions, setRemoteAuctions] = React.useState<AuctionMarketItem[]>([]);
+  const [isSyncingAuctions, setIsSyncingAuctions] = React.useState(false);
+  const [isSubmittingBid, setIsSubmittingBid] = React.useState(false);
+  const [buyNowAuctionId, setBuyNowAuctionId] = React.useState<string | null>(null);
+
+  const syncAuctions = React.useCallback(async () => {
+    setIsSyncingAuctions(true);
+    try {
+      const items = await listAuctions({ limit: 120 });
+      const mapped: AuctionMarketItem[] = items.map((item) => ({
+        id: item.id,
+        listingId: item.listingId,
+        sellerId: item.sellerId,
+        title: item.title,
+        image: item.imageUrl ?? `https://picsum.photos/seed/${item.id}/500/700`,
+        startsAt: item.startsAt,
+        endsAt: item.endsAt,
+        startingBid: item.startingBidGbp,
+        currentBid: item.currentBidGbp,
+        bidCount: item.bidCount,
+        buyNowPrice: item.buyNowPriceGbp ?? undefined,
+      }));
+      setRemoteAuctions(mapped);
+    } catch {
+      // Keep local market state when backend sync is unavailable.
+    } finally {
+      setIsSyncingAuctions(false);
+    }
+  }, []);
 
   React.useEffect(() => {
     const intervalId = setInterval(() => setNowTs(Date.now()), 1000);
     return () => clearInterval(intervalId);
   }, []);
 
-  const handleRefresh = () => {
+  React.useEffect(() => {
+    void syncAuctions();
+  }, [syncAuctions]);
+
+  const handleRefresh = async () => {
     setRefreshing(true);
     setNowTs(Date.now());
-    setTimeout(() => setRefreshing(false), 600);
+    await syncAuctions();
+    setRefreshing(false);
   };
 
-  const marketAuctions = React.useMemo(() => getAuctionMarket(nowTs, customAuctions), [customAuctions, nowTs]);
+  const baseAuctions = React.useMemo(() => {
+    const merged = new Map<string, AuctionMarketItem>();
+
+    for (const item of remoteAuctions) {
+      merged.set(item.id, item);
+    }
+
+    for (const item of customAuctions) {
+      merged.set(item.id, item);
+    }
+
+    return [...merged.values()];
+  }, [customAuctions, remoteAuctions]);
+
+  const marketAuctions = React.useMemo(() => getAuctionMarket(nowTs, baseAuctions), [baseAuctions, nowTs]);
 
   const auctions = React.useMemo(
     () =>
@@ -144,8 +203,12 @@ export default function AuctionsScreen() {
     setBidInput(nextValue.toFixed(2));
   };
 
-  const submitBid = () => {
+  const submitBid = async () => {
     if (!selectedBidAuction) {
+      return;
+    }
+
+    if (isSubmittingBid) {
       return;
     }
 
@@ -170,29 +233,75 @@ export default function AuctionsScreen() {
     }
 
     const roundedAmount = Number(amountInGbp.toFixed(2));
-    const result = placeAuctionBid(selectedBidAuction, actingUserId, roundedAmount);
+    setIsSubmittingBid(true);
 
-    if (!result.ok) {
-      show(result.message ?? 'Unable to place bid', 'error');
-      return;
+    try {
+      try {
+        await placeAuctionBidRemote(selectedBidAuction.id, {
+          bidderId: actingUserId,
+          amountGbp: roundedAmount,
+        });
+        await syncAuctions();
+        setNowTs(Date.now());
+        show(
+          `Bid placed on ${selectedBidAuction.title} at ${formatFromFiat(roundedAmount, 'GBP', { displayMode: 'fiat' })}`,
+          'success'
+        );
+        closeBidComposer();
+        return;
+      } catch {
+        const result = placeAuctionBidLocal(selectedBidAuction, actingUserId, roundedAmount);
+        if (!result.ok) {
+          show(result.message ?? 'Unable to place bid', 'error');
+          return;
+        }
+
+        show(
+          `Bid placed on ${selectedBidAuction.title}. Backend sync unavailable.`,
+          'info'
+        );
+        closeBidComposer();
+      }
+    } finally {
+      setIsSubmittingBid(false);
     }
-
-    show(
-      `Bid placed on ${selectedBidAuction.title} at ${formatFromFiat(roundedAmount, 'GBP', { displayMode: 'fiat' })}`,
-      'success'
-    );
-    closeBidComposer();
   };
 
-  const handleBuyNow = (auction: AuctionViewModel) => {
-    const result = buyNowAuction(auction, actingUserId);
-    if (!result.ok) {
-      show(result.message ?? 'Unable to buy now', 'error');
+  const handleBuyNow = async (auction: AuctionViewModel) => {
+    if (!auction.buyNowPrice || buyNowAuctionId) {
       return;
     }
 
-    show(`You won ${auction.title}`, 'success');
-    navigation.navigate('Checkout', { itemId: auction.listingId });
+    setBuyNowAuctionId(auction.id);
+
+    try {
+      let backendSynced = false;
+
+      try {
+        await placeAuctionBidRemote(auction.id, {
+          bidderId: actingUserId,
+          amountGbp: Number(auction.buyNowPrice.toFixed(2)),
+        });
+        backendSynced = true;
+        await syncAuctions();
+      } catch {
+        backendSynced = false;
+      }
+
+      const localResult = buyNowAuctionLocal(auction, actingUserId);
+      if (!backendSynced && !localResult.ok) {
+        show(localResult.message ?? 'Unable to buy now', 'error');
+        return;
+      }
+
+      show(
+        backendSynced ? `You won ${auction.title}` : `You won ${auction.title}. Backend sync unavailable.`,
+        backendSynced ? 'success' : 'info'
+      );
+      navigation.navigate('Checkout', { itemId: auction.listingId });
+    } finally {
+      setBuyNowAuctionId(null);
+    }
   };
 
   const renderPosterAds = () => {
@@ -290,8 +399,8 @@ export default function AuctionsScreen() {
       </View>
 
       <View style={styles.rulesCard}>
-        <Ionicons name="timer-outline" size={16} color="#4ECDC4" />
-        <Text style={styles.rulesText}>Every auction runs for exactly 6 hours. Highest valid bid at close wins.</Text>
+        <Ionicons name="timer-outline" size={16} color={BRAND} />
+        <Text style={styles.rulesText}>Auctions are timed fiat bidding windows (6h). For fractional 1ze trading, switch to Syndicate.</Text>
       </View>
 
       <View style={styles.launchRow}>
@@ -315,7 +424,7 @@ export default function AuctionsScreen() {
 
       <View style={styles.sectionTitleRow}>
         <Text style={styles.sectionTitle}>Live Auctions</Text>
-        <Text style={styles.sectionHint}>Auto-updates every second</Text>
+        <Text style={styles.sectionHint}>{isSyncingAuctions ? 'Syncing backend...' : 'Auto-updates every second'}</Text>
       </View>
     </View>
   );
@@ -359,14 +468,24 @@ export default function AuctionsScreen() {
         </View>
 
         <View style={styles.actionRow}>
-          <AnimatedPressable style={styles.bidBtn} onPress={() => openBidComposer(item)} activeOpacity={0.9}>
+          <AnimatedPressable
+            style={[styles.bidBtn, (isSubmittingBid || !!buyNowAuctionId) && styles.actionBtnDisabled]}
+            onPress={() => openBidComposer(item)}
+            activeOpacity={0.9}
+            disabled={isSubmittingBid || !!buyNowAuctionId}
+          >
             <Ionicons name="hammer-outline" size={14} color={Colors.background} />
             <Text style={styles.bidBtnText}>Place Bid</Text>
           </AnimatedPressable>
 
           {item.buyNowPrice ? (
-            <AnimatedPressable style={styles.buyBtn} onPress={() => handleBuyNow(item)} activeOpacity={0.9}>
-              <Text style={styles.buyBtnText}>Buy Now</Text>
+            <AnimatedPressable
+              style={[styles.buyBtn, buyNowAuctionId === item.id && styles.actionBtnDisabled]}
+              onPress={() => void handleBuyNow(item)}
+              activeOpacity={0.9}
+              disabled={buyNowAuctionId === item.id || isSubmittingBid}
+            >
+              <Text style={styles.buyBtnText}>{buyNowAuctionId === item.id ? 'Buying...' : 'Buy Now'}</Text>
             </AnimatedPressable>
           ) : (
             <AnimatedPressable style={styles.watchBtn} onPress={() => show('Watching auction', 'info')} activeOpacity={0.9}>
@@ -430,8 +549,13 @@ export default function AuctionsScreen() {
                 <Text style={styles.bidCancelText}>Cancel</Text>
               </AnimatedPressable>
 
-              <AnimatedPressable style={styles.bidSubmitBtn} onPress={submitBid} activeOpacity={0.9}>
-                <Text style={styles.bidSubmitText}>Submit Bid</Text>
+              <AnimatedPressable
+                style={[styles.bidSubmitBtn, isSubmittingBid && styles.actionBtnDisabled]}
+                onPress={() => void submitBid()}
+                activeOpacity={0.9}
+                disabled={isSubmittingBid}
+              >
+                <Text style={styles.bidSubmitText}>{isSubmittingBid ? 'Submitting...' : 'Submit Bid'}</Text>
               </AnimatedPressable>
             </View>
           </View>
@@ -461,9 +585,9 @@ export default function AuctionsScreen() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={handleRefresh}
-            tintColor="#4ECDC4"
-            colors={['#4ECDC4']}
-            progressBackgroundColor="#161616"
+            tintColor={BRAND}
+            colors={[BRAND]}
+            progressBackgroundColor={PANEL_SOFT_BG}
           />
         }
       />
@@ -484,10 +608,10 @@ const styles = StyleSheet.create({
   },
   metricCard: {
     flex: 1,
-    backgroundColor: '#121212',
+    backgroundColor: PANEL_BG,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#242424',
+    borderColor: PANEL_BORDER,
     paddingVertical: 12,
     paddingHorizontal: 10,
     alignItems: 'center',
@@ -506,10 +630,10 @@ const styles = StyleSheet.create({
   rulesCard: {
     marginHorizontal: 16,
     marginBottom: 14,
-    backgroundColor: '#11161a',
+    backgroundColor: PANEL_TINT_BG,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#203038',
+    borderColor: PANEL_TINT_BORDER,
     paddingHorizontal: 12,
     paddingVertical: 10,
     flexDirection: 'row',
@@ -528,8 +652,8 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#2d3031',
-    backgroundColor: '#121414',
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
     paddingHorizontal: 12,
     paddingVertical: 10,
     flexDirection: 'row',
@@ -590,9 +714,9 @@ const styles = StyleSheet.create({
     height: 126,
     borderRadius: 12,
     overflow: 'hidden',
-    backgroundColor: '#161616',
+    backgroundColor: Colors.surface,
     borderWidth: 1,
-    borderColor: '#2f3f48',
+    borderColor: PANEL_BORDER,
   },
   posterImage: {
     width: '100%',
@@ -614,7 +738,7 @@ const styles = StyleSheet.create({
   },
   posterTime: {
     marginTop: 2,
-    color: '#4ECDC4',
+    color: BRAND,
     fontSize: 10,
     fontFamily: 'Inter_600SemiBold',
   },
@@ -624,11 +748,11 @@ const styles = StyleSheet.create({
   },
   upcomingCard: {
     width: 208,
-    backgroundColor: '#121212',
+    backgroundColor: PANEL_BG,
     borderRadius: 14,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#252525',
+    borderColor: PANEL_BORDER,
   },
   upcomingImage: {
     width: '100%',
@@ -644,7 +768,7 @@ const styles = StyleSheet.create({
   },
   upcomingTimer: {
     marginTop: 6,
-    color: '#4ECDC4',
+    color: BRAND,
     fontSize: 12,
     fontFamily: 'Inter_700Bold',
   },
@@ -662,8 +786,8 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#232323',
-    backgroundColor: '#111111',
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
   },
   liveImage: {
     width: '100%',
@@ -681,7 +805,7 @@ const styles = StyleSheet.create({
   lifecyclePill: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#13251d',
+    backgroundColor: PANEL_TINT_BG,
     borderRadius: 12,
     paddingHorizontal: 8,
     paddingVertical: 4,
@@ -691,10 +815,10 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: '#4ECDC4',
+    backgroundColor: BRAND,
   },
   lifecycleText: {
-    color: '#4ECDC4',
+    color: BRAND,
     fontSize: 10,
     fontFamily: 'Inter_700Bold',
     letterSpacing: 0.4,
@@ -735,13 +859,13 @@ const styles = StyleSheet.create({
     marginTop: 8,
     height: 5,
     borderRadius: 4,
-    backgroundColor: '#1e1e1e',
+    backgroundColor: IS_LIGHT ? '#ddd4c7' : '#1e1e1e',
     overflow: 'hidden',
   },
   progressFill: {
     height: '100%',
     borderRadius: 4,
-    backgroundColor: '#4ECDC4',
+    backgroundColor: BRAND,
   },
   bidMeta: {
     color: Colors.textSecondary,
@@ -749,7 +873,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_500Medium',
   },
   buyNowMeta: {
-    color: '#9ad7d2',
+    color: BRAND,
     fontSize: 11,
     fontFamily: 'Inter_600SemiBold',
   },
@@ -759,9 +883,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
+  actionBtnDisabled: {
+    opacity: 0.5,
+  },
   bidBtn: {
     flex: 1,
-    backgroundColor: '#ffffff',
+    backgroundColor: Colors.textPrimary,
     borderRadius: 14,
     paddingVertical: 10,
     alignItems: 'center',
@@ -770,29 +897,29 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   bidBtnText: {
-    color: Colors.background,
+    color: Colors.textInverse,
     fontSize: 13,
     fontFamily: 'Inter_700Bold',
   },
   buyBtn: {
     flex: 1,
-    backgroundColor: '#1b2f31',
+    backgroundColor: Colors.accent,
     borderRadius: 14,
     paddingVertical: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
   buyBtnText: {
-    color: '#86d7cf',
+    color: Colors.textInverse,
     fontSize: 13,
     fontFamily: 'Inter_700Bold',
   },
   watchBtn: {
     flex: 1,
-    backgroundColor: '#1a1a1a',
+    backgroundColor: PANEL_SOFT_BG,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#333333',
+    borderColor: PANEL_BORDER,
     paddingVertical: 10,
     alignItems: 'center',
     justifyContent: 'center',
@@ -814,13 +941,13 @@ const styles = StyleSheet.create({
   bidModalCard: {
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
-    backgroundColor: '#111111',
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
     paddingHorizontal: 14,
     paddingVertical: 14,
   },
   bidModalLabel: {
-    color: '#4ECDC4',
+    color: BRAND,
     fontSize: 10,
     fontFamily: 'Inter_700Bold',
     letterSpacing: 0.8,
@@ -840,9 +967,9 @@ const styles = StyleSheet.create({
   bidInputWrap: {
     marginTop: 12,
     borderWidth: 1,
-    borderColor: '#2f2f2f',
+    borderColor: PANEL_BORDER,
     borderRadius: 12,
-    backgroundColor: '#161616',
+    backgroundColor: PANEL_SOFT_BG,
     paddingHorizontal: 10,
     height: 44,
     flexDirection: 'row',
@@ -869,13 +996,13 @@ const styles = StyleSheet.create({
   bumpChip: {
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#304044',
-    backgroundColor: '#131c1e',
+    borderColor: PANEL_TINT_BORDER,
+    backgroundColor: PANEL_TINT_BG,
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
   bumpChipText: {
-    color: '#8de5dc',
+    color: BRAND,
     fontSize: 11,
     fontFamily: 'Inter_700Bold',
   },
@@ -888,11 +1015,11 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#313131',
+    borderColor: PANEL_BORDER,
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 10,
-    backgroundColor: '#161616',
+    backgroundColor: PANEL_MUTED_BG,
   },
   bidCancelText: {
     color: Colors.textSecondary,

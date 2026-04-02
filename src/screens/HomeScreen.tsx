@@ -15,7 +15,8 @@ import {
 import Reanimated, { useSharedValue, useAnimatedScrollHandler, FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors } from '../constants/colors';
+import { ActiveTheme, Colors } from '../constants/colors';
+import { Typography } from '../constants/typography';
 import { MOCK_USERS } from '../data/mockData';
 import { getFreshPosters } from '../data/posters';
 import { useNavigation } from '@react-navigation/native';
@@ -30,7 +31,10 @@ import { useBackendData } from '../context/BackendDataContext';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const TEAL = '#4ECDC4';
+const TEAL = '#e8dcc8';
+const IS_LIGHT = ActiveTheme === 'light';
+const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111';
+const HEADER_BG = IS_LIGHT ? 'rgba(247,245,241,0.96)' : 'rgba(10, 10, 10, 0.95)';
 
 // ── Feed Mock Data ──────────────────────────────────────────
 interface FeedLook {
@@ -245,7 +249,7 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
       {/* ── Floating Header ── */}
       <View style={styles.header}>
@@ -299,23 +303,23 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 20,
     paddingVertical: 12,
-    backgroundColor: 'rgba(10, 10, 10, 0.95)',
+    backgroundColor: HEADER_BG,
     zIndex: 10,
     borderBottomWidth: 1,
-    borderBottomColor: '#1a1a1a',
+    borderBottomColor: Colors.border,
   },
   brandTitle: {
-    fontSize: 24,
-    fontFamily: 'Inter_800ExtraBold',
+    fontSize: 23,
+    fontFamily: Typography.family.bold,
     color: Colors.textPrimary,
-    letterSpacing: -1,
+    letterSpacing: -0.5,
   },
   headerRight: { flexDirection: 'row', gap: 12 },
   headerBtn: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#111',
+    backgroundColor: PANEL_BG,
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
@@ -340,7 +344,7 @@ const styles = StyleSheet.create({
   // Posters
   postersContainer: {
     borderBottomWidth: 1,
-    borderBottomColor: '#1a1a1a',
+    borderBottomColor: Colors.border,
     paddingTop: 14,
     paddingBottom: 16,
     marginBottom: 8,
@@ -354,12 +358,14 @@ const styles = StyleSheet.create({
   },
   postersTitle: {
     fontSize: 16,
-    fontFamily: 'Inter_700Bold',
+    fontFamily: Typography.family.semibold,
+    letterSpacing: 0.1,
     color: Colors.textPrimary,
   },
   postersHint: {
     fontSize: 11,
-    fontFamily: 'Inter_500Medium',
+    fontFamily: Typography.family.regular,
+    letterSpacing: 0.12,
     color: Colors.textMuted,
   },
   postersScroll: {
@@ -374,7 +380,7 @@ const styles = StyleSheet.create({
     height: 146,
     borderRadius: 14,
     overflow: 'hidden',
-    backgroundColor: '#161616',
+    backgroundColor: Colors.surface,
     marginBottom: 6,
     position: 'relative',
   },
@@ -384,7 +390,7 @@ const styles = StyleSheet.create({
   },
   posterTileSeen: {
     borderWidth: 1,
-    borderColor: '#2f2f2f',
+    borderColor: Colors.border,
   },
   posterCreateTile: {
     width: 116,
@@ -428,7 +434,7 @@ const styles = StyleSheet.create({
   posterOwnerName: {
     color: '#fff',
     fontSize: 10,
-    fontFamily: 'Inter_500Medium',
+    fontFamily: Typography.family.medium,
     flex: 1,
   },
   posterExpiryPill: {
@@ -457,8 +463,8 @@ const styles = StyleSheet.create({
   posterCaption: {
     color: '#fff',
     fontSize: 10,
-    lineHeight: 13,
-    fontFamily: 'Inter_500Medium',
+    lineHeight: 14,
+    fontFamily: Typography.family.medium,
   },
   sharedBadge: {
     marginTop: 5,
@@ -474,7 +480,7 @@ const styles = StyleSheet.create({
   },
   posterUserName: {
     fontSize: 11,
-    fontFamily: 'Inter_600SemiBold',
+    fontFamily: Typography.family.semibold,
     color: Colors.textPrimary,
   },
   posterCardMetaRow: {
@@ -495,7 +501,7 @@ const styles = StyleSheet.create({
   posterMeta: {
     marginTop: 2,
     fontSize: 10,
-    fontFamily: 'Inter_400Regular',
+    fontFamily: Typography.family.regular,
     color: Colors.textMuted,
   },
 
@@ -503,7 +509,7 @@ const styles = StyleSheet.create({
   exploreItemBox: {
     width: (SCREEN_WIDTH - 4) / 3,
     aspectRatio: 0.8,
-    backgroundColor: '#111',
+    backgroundColor: PANEL_BG,
     marginBottom: 2,
     position: 'relative',
   },
@@ -528,6 +534,7 @@ const styles = StyleSheet.create({
   exploreTagText: {
     color: '#fff',
     fontSize: 10,
-    fontFamily: 'Inter_700Bold',
+    fontFamily: Typography.family.semibold,
+    letterSpacing: 0.14,
   },
 });

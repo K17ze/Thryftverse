@@ -14,7 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import Reanimated, { FadeInDown } from 'react-native-reanimated';
-import { Colors } from '../constants/colors';
+import { ActiveTheme, Colors } from '../constants/colors';
 import { RootStackParamList } from '../navigation/types';
 import { getSyndicateMarket, SyndicateAsset } from '../data/tradeHub';
 import { useStore } from '../store/useStore';
@@ -103,7 +103,7 @@ export default function PortfolioScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
       <View style={styles.header}>
         <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
@@ -144,7 +144,7 @@ export default function PortfolioScreen() {
                       styles.mixBar,
                       {
                         width: `${Math.max(6, bar.ratio * 100)}%`,
-                        backgroundColor: idx % 2 === 0 ? '#4ECDC4' : '#9dd6ff',
+                        backgroundColor: idx % 2 === 0 ? '#e8dcc8' : '#9dd6ff',
                       },
                     ]}
                   />
@@ -236,7 +236,7 @@ const styles = StyleSheet.create({
     marginTop: 5,
     color: Colors.textPrimary,
     fontSize: 28,
-    fontFamily: 'Inter_800ExtraBold',
+    fontFamily: 'Inter_700Bold',
     letterSpacing: -0.7,
   },
   heroPnlRow: {
@@ -250,7 +250,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_700Bold',
   },
   pnlUp: {
-    color: '#8de5dc',
+    color: '#e8dcc8',
   },
   pnlDown: {
     color: '#ff9d9d',
@@ -290,7 +290,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_700Bold',
   },
   sectionLink: {
-    color: '#4ECDC4',
+    color: '#e8dcc8',
     fontSize: 12,
     fontFamily: 'Inter_600SemiBold',
   },

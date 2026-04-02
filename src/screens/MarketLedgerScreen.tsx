@@ -6,19 +6,38 @@ import {
   Text,
   StyleSheet,
   FlatList,
-  StatusBar
+  StatusBar,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
-import { Colors } from '../constants/colors';
+import { ActiveTheme, Colors } from '../constants/colors';
 import { RootStackParamList } from '../navigation/types';
 import { useStore } from '../store/useStore';
 import { formatMoney } from '../data/tradeHub';
+import {
+  MarketHistoryItem,
+  MarketHistoryCursor,
+  listUserMarketHistory,
+} from '../services/marketApi';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 type LedgerFilter = 'ALL' | 'AUCTION' | 'SYNDICATE';
+
+type LedgerEntry = {
+  id: string;
+  timestamp: string;
+  channel: 'auction' | 'syndicate';
+  action: 'bid' | 'win' | 'buy-units' | 'sell-units';
+  referenceId: string;
+  amountGBP: number;
+  units?: number;
+  note?: string;
+};
+
+const PAGE_SIZE = 80;
 
 function getEntryCashflow(entry: {
   action: 'bid' | 'win' | 'buy-units' | 'sell-units';
@@ -56,12 +75,113 @@ function relativeTime(isoTs: string) {
   return `${days}d ago`;
 }
 
+function sortLedgerEntriesDesc(a: LedgerEntry, b: LedgerEntry) {
+  const tsDiff = new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
+  if (tsDiff !== 0) {
+    return tsDiff;
+  }
+
+  return b.id.localeCompare(a.id);
+}
+
+function mapHistoryToLedgerEntries(items: MarketHistoryItem[]): LedgerEntry[] {
+  return items
+    .filter((item) => item.action === 'bid' || item.action === 'buy-units' || item.action === 'sell-units')
+    .map<LedgerEntry>((item) => ({
+      id: item.id,
+      timestamp: item.timestamp,
+      channel: item.channel,
+      action: item.action,
+      referenceId: item.referenceId,
+      amountGBP: item.amountGbp,
+      units: item.units ?? undefined,
+      note: item.note ?? undefined,
+    }))
+    .sort(sortLedgerEntriesDesc);
+}
+
 export default function MarketLedgerScreen() {
   const navigation = useNavigation<NavT>();
-  const entries = useStore((state) => state.marketLedger);
+  const localEntries = useStore((state) => state.marketLedger);
+  const currentUser = useStore((state) => state.currentUser);
   const syndicateRuntime = useStore((state) => state.syndicateRuntime);
+  const viewerId = currentUser?.id ?? 'u1';
 
   const [filter, setFilter] = React.useState<LedgerFilter>('ALL');
+  const [remoteEntries, setRemoteEntries] = React.useState<LedgerEntry[]>([]);
+  const [isSyncingLedger, setIsSyncingLedger] = React.useState(false);
+  const [isRemoteAvailable, setIsRemoteAvailable] = React.useState(false);
+  const [hasMoreRemote, setHasMoreRemote] = React.useState(false);
+  const [nextCursor, setNextCursor] = React.useState<MarketHistoryCursor | null>(null);
+  const [isLoadingMore, setIsLoadingMore] = React.useState(false);
+
+  const refreshRemoteLedger = React.useCallback(async () => {
+    setIsSyncingLedger(true);
+
+    try {
+      const page = await listUserMarketHistory(viewerId, {
+        channel: 'all',
+        limit: PAGE_SIZE,
+      });
+
+      setRemoteEntries(mapHistoryToLedgerEntries(page.items));
+      setIsRemoteAvailable(true);
+      setHasMoreRemote(page.pageInfo.hasMore);
+      setNextCursor(page.pageInfo.nextCursor ?? null);
+    } catch {
+      setIsRemoteAvailable(false);
+      setRemoteEntries([]);
+      setHasMoreRemote(false);
+      setNextCursor(null);
+    } finally {
+      setIsSyncingLedger(false);
+    }
+  }, [viewerId]);
+
+  const loadMoreRemoteLedger = React.useCallback(async () => {
+    if (!isRemoteAvailable || !hasMoreRemote || !nextCursor || isLoadingMore || isSyncingLedger) {
+      return;
+    }
+
+    setIsLoadingMore(true);
+    try {
+      const page = await listUserMarketHistory(viewerId, {
+        channel: 'all',
+        limit: PAGE_SIZE,
+        cursorTs: nextCursor.cursorTs,
+        cursorId: nextCursor.cursorId,
+      });
+
+      const pageEntries = mapHistoryToLedgerEntries(page.items);
+      setRemoteEntries((previous) => {
+        const merged = [...previous, ...pageEntries];
+        const deduped = new Map<string, LedgerEntry>();
+
+        for (const item of merged) {
+          deduped.set(item.id, item);
+        }
+
+        return [...deduped.values()].sort(sortLedgerEntriesDesc);
+      });
+
+      setHasMoreRemote(page.pageInfo.hasMore);
+      setNextCursor(page.pageInfo.nextCursor ?? null);
+    } catch {
+      setHasMoreRemote(false);
+      setNextCursor(null);
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [hasMoreRemote, isLoadingMore, isRemoteAvailable, isSyncingLedger, nextCursor, viewerId]);
+
+  React.useEffect(() => {
+    void refreshRemoteLedger();
+  }, [refreshRemoteLedger]);
+
+  const entries = React.useMemo(
+    () => (isRemoteAvailable ? remoteEntries : localEntries),
+    [isRemoteAvailable, localEntries, remoteEntries]
+  );
 
   const filteredEntries = React.useMemo(() => {
     if (filter === 'ALL') {
@@ -106,7 +226,7 @@ export default function MarketLedgerScreen() {
     return (
       <View style={styles.rowCard}>
         <View style={styles.rowIconWrap}>
-          <Ionicons name={iconName} size={16} color={isAuction ? '#8de5dc' : '#a9c9ff'} />
+          <Ionicons name={iconName} size={16} color={isAuction ? '#e8dcc8' : '#a9c9ff'} />
         </View>
 
         <View style={styles.rowBody}>
@@ -137,7 +257,7 @@ export default function MarketLedgerScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
       <View style={styles.header}>
         <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.85}>
@@ -157,6 +277,13 @@ export default function MarketLedgerScreen() {
       <View style={styles.metricsCard}>
         <Text style={styles.metricsTitle}>Tracked Volume</Text>
         <Text style={styles.metricsValue}>{formatMoney(totalVolume)}</Text>
+        <Text style={styles.metricsSyncText}>
+          {isSyncingLedger
+            ? 'Syncing backend ledger...'
+            : isRemoteAvailable
+              ? 'Live backend market events'
+              : 'Showing local ledger fallback'}
+        </Text>
 
         <View style={styles.metricsSubRow}>
           <View style={styles.metricsSubCol}>
@@ -198,8 +325,28 @@ export default function MarketLedgerScreen() {
         keyExtractor={(item) => item.id}
         renderItem={renderLedgerRow}
         ItemSeparatorComponent={() => <View style={styles.separator} />}
+        onEndReachedThreshold={0.35}
+        onEndReached={() => {
+          void loadMoreRemoteLedger();
+        }}
+        refreshControl={
+          <RefreshControl
+            refreshing={isSyncingLedger}
+            onRefresh={() => {
+              void refreshRemoteLedger();
+            }}
+            tintColor="#e8dcc8"
+            colors={['#e8dcc8']}
+            progressBackgroundColor="#161616"
+          />
+        }
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
+        ListFooterComponent={
+          isRemoteAvailable && (isLoadingMore || hasMoreRemote) ? (
+            <Text style={styles.footerHint}>{isLoadingMore ? 'Loading more ledger rows...' : 'Scroll for more history'}</Text>
+          ) : null
+        }
         ListEmptyComponent={
           <View style={styles.emptyState}>
             <View style={styles.emptyIcon}>
@@ -236,7 +383,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#111111',
   },
   headerLabel: {
-    color: '#4ECDC4',
+    color: '#e8dcc8',
     fontSize: 10,
     fontFamily: 'Inter_700Bold',
     letterSpacing: 1,
@@ -273,7 +420,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   metricsTitle: {
-    color: '#4ECDC4',
+    color: '#e8dcc8',
     fontSize: 11,
     fontFamily: 'Inter_700Bold',
     letterSpacing: 0.6,
@@ -283,6 +430,12 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
     fontSize: 20,
     fontFamily: 'Inter_700Bold',
+  },
+  metricsSyncText: {
+    marginTop: 4,
+    color: Colors.textMuted,
+    fontSize: 11,
+    fontFamily: 'Inter_500Medium',
   },
   metricsSubRow: {
     marginTop: 8,
@@ -318,7 +471,7 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   filterChipActive: {
-    borderColor: '#4ECDC4',
+    borderColor: '#e8dcc8',
     backgroundColor: '#15201f',
   },
   filterChipText: {
@@ -327,7 +480,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_700Bold',
   },
   filterChipTextActive: {
-    color: '#8de5dc',
+    color: '#e8dcc8',
   },
   listContent: {
     paddingHorizontal: 16,
@@ -387,12 +540,20 @@ const styles = StyleSheet.create({
     color: '#ff9797',
   },
   rowAmountPositive: {
-    color: '#8de5dc',
+    color: '#e8dcc8',
   },
   rowUnits: {
     marginTop: 2,
     color: Colors.textMuted,
     fontSize: 10,
+    fontFamily: 'Inter_500Medium',
+  },
+  footerHint: {
+    marginTop: 8,
+    marginBottom: 4,
+    color: Colors.textMuted,
+    fontSize: 11,
+    textAlign: 'center',
     fontFamily: 'Inter_500Medium',
   },
   emptyState: {

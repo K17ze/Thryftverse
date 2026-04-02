@@ -12,7 +12,7 @@ import { View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Reanimated, { useSharedValue, useAnimatedScrollHandler, FadeInDown } from 'react-native-reanimated';
-import { Colors } from '../constants/colors';
+import { ActiveTheme, Colors } from '../constants/colors';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { MOCK_LISTINGS, MOCK_USERS, Listing, User } from '../data/mockData';
@@ -20,6 +20,8 @@ import { RefreshIndicator } from '../components/RefreshIndicator';
 import { EmptyState } from '../components/EmptyState';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useBackendData } from '../context/BackendDataContext';
+import { useStore } from '../store/useStore';
+import { listUserOrders } from '../services/commerceApi';
 
 const { width } = Dimensions.get('window');
 
@@ -35,9 +37,37 @@ export default function MyOrdersScreen() {
   const navigation = useNavigation<any>();
   const { formatFromFiat } = useFormattedPrice();
   const { listings, refreshListings } = useBackendData();
+  const currentUser = useStore((state) => state.currentUser);
+  const viewerId = currentUser?.id ?? 'u1';
   const [activeTab, setActiveTab] = useState<'buying' | 'selling'>('buying');
+  const [backendOrders, setBackendOrders] = useState<
+    Array<{
+      id: string;
+      buyerId: string;
+      sellerId: string;
+      listingId: string;
+      listingTitle: string;
+      listingImageUrl: string | null;
+      status: string;
+      totalGbp: number;
+      createdAt: string;
+    }>
+  >([]);
 
   const listingPool = React.useMemo(() => (listings.length ? listings : MOCK_LISTINGS), [listings]);
+
+  const syncOrders = React.useCallback(async () => {
+    try {
+      const items = await listUserOrders(viewerId, 'all', 80);
+      setBackendOrders(items);
+    } catch {
+      setBackendOrders([]);
+    }
+  }, [viewerId]);
+
+  React.useEffect(() => {
+    void syncOrders();
+  }, [syncOrders]);
 
   // Restored full mock mapping for Buying and Selling tabs
   const buyingOrders: OrderItem[] = React.useMemo(() => {
@@ -64,7 +94,65 @@ export default function MyOrdersScreen() {
     ];
   }, [listingPool]);
 
-  const activeOrders = activeTab === 'buying' ? buyingOrders : sellingOrders;
+  const backendOrderCards: OrderItem[] = React.useMemo(() => {
+    const statusLabelByState: Record<string, string> = {
+      created: 'Awaiting Payment',
+      paid: 'Paid',
+      shipped: 'Shipped',
+      delivered: 'Delivered',
+      cancelled: 'Cancelled',
+    };
+
+    return backendOrders.map((order) => {
+      const existingListing = listingPool.find((entry) => entry.id === order.listingId);
+      const fallbackListing: Listing = existingListing ?? {
+        id: order.listingId,
+        title: order.listingTitle || 'Ordered item',
+        brand: 'Thryftverse',
+        size: 'One size',
+        condition: 'Very good',
+        price: order.totalGbp,
+        priceWithProtection: order.totalGbp,
+        images: [order.listingImageUrl ?? `https://picsum.photos/seed/${order.listingId}/400/400`],
+        likes: 0,
+        sellerId: order.sellerId,
+        category: 'general',
+        subcategory: 'General',
+        description: order.listingTitle || 'Order item',
+      };
+
+      return {
+        id: order.id,
+        item: fallbackListing,
+        status: statusLabelByState[order.status] ?? 'In progress',
+        isDone: order.status === 'delivered' || order.status === 'cancelled',
+        buyer: MOCK_USERS.find((user) => user.id === order.buyerId),
+      };
+    });
+  }, [backendOrders, listingPool]);
+
+  const backendOrderById = React.useMemo(
+    () => new Map(backendOrders.map((order) => [order.id, order])),
+    [backendOrders]
+  );
+
+  const backendBuyingOrders = React.useMemo(
+    () => backendOrderCards.filter((order) => backendOrderById.get(order.id)?.buyerId === viewerId),
+    [backendOrderById, backendOrderCards, viewerId]
+  );
+
+  const backendSellingOrders = React.useMemo(
+    () => backendOrderCards.filter((order) => backendOrderById.get(order.id)?.sellerId === viewerId),
+    [backendOrderById, backendOrderCards, viewerId]
+  );
+
+  const activeOrders = React.useMemo(() => {
+    if (backendOrders.length > 0) {
+      return activeTab === 'buying' ? backendBuyingOrders : backendSellingOrders;
+    }
+
+    return activeTab === 'buying' ? buyingOrders : sellingOrders;
+  }, [activeTab, backendBuyingOrders, backendOrders, backendSellingOrders, buyingOrders, sellingOrders]);
 
   const [refreshing, setRefreshing] = useState(false);
   const scrollY = useSharedValue(0);
@@ -77,7 +165,7 @@ export default function MyOrdersScreen() {
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    await refreshListings();
+    await Promise.all([refreshListings(), syncOrders()]);
     setTimeout(() => setRefreshing(false), 400);
   };
 
@@ -85,7 +173,7 @@ export default function MyOrdersScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
       
       <View style={styles.header}>
         <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>

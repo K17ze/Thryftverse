@@ -13,14 +13,17 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
+import { ActiveTheme, Colors } from '../constants/colors';
 
 type Props = StackScreenProps<RootStackParamList, 'PushNotifications'>;
 
-const TEAL = '#4ECDC4';
-const BG = '#0a0a0a';
-const CARD = '#111111';
-const MUTED = '#888888';
-const TEXT = '#FFFFFF';
+const IS_LIGHT = ActiveTheme === 'light';
+const TEAL = IS_LIGHT ? '#2f251b' : '#e8dcc8';
+const BG = Colors.background;
+const CARD = IS_LIGHT ? '#ffffff' : '#111111';
+const BORDER = IS_LIGHT ? '#d8d1c6' : '#1c1c1c';
+const MUTED = Colors.textMuted;
+const TEXT = Colors.textPrimary;
 
 type NotifItem = { key: string; label: string; subtitle: string };
 
@@ -44,7 +47,7 @@ export default function PushNotificationsScreen({ navigation }: Props) {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={BG} />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={BG} />
       <View style={styles.header}>
         <AnimatedPressable onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={TEXT} />
@@ -66,8 +69,8 @@ export default function PushNotificationsScreen({ navigation }: Props) {
                 <Switch
                   value={toggles[item.key]}
                   onValueChange={() => toggle(item.key)}
-                  trackColor={{ false: '#333', true: TEAL }}
-                  thumbColor={TEXT}
+                  trackColor={{ false: BORDER, true: TEAL }}
+                  thumbColor={Colors.textInverse}
                 />
               </View>
               {idx < NOTIFICATIONS.length - 1 && <View style={styles.divider} />}
@@ -92,7 +95,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#1a1a1a',
+    borderBottomColor: BORDER,
   },
   headerTitle: { fontSize: 17, fontWeight: '700', color: TEXT },
   content: { padding: 20 },
@@ -104,7 +107,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     marginLeft: 4,
   },
-  card: { backgroundColor: CARD, borderRadius: 16, overflow: 'hidden', marginBottom: 20 },
+  card: { backgroundColor: CARD, borderWidth: 1, borderColor: BORDER, borderRadius: 16, overflow: 'hidden', marginBottom: 20 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -114,6 +117,6 @@ const styles = StyleSheet.create({
   rowText: { flex: 1, marginRight: 12 },
   rowLabel: { fontSize: 15, fontWeight: '600', color: TEXT, marginBottom: 2 },
   rowSubtitle: { fontSize: 12, color: MUTED },
-  divider: { height: 1, backgroundColor: '#1c1c1c', marginHorizontal: 18 },
+  divider: { height: 1, backgroundColor: BORDER, marginHorizontal: 18 },
   footerNote: { fontSize: 12, color: MUTED, textAlign: 'center', lineHeight: 18, paddingHorizontal: 10 },
 });

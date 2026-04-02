@@ -14,7 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import Reanimated, { FadeInDown } from 'react-native-reanimated';
-import { Colors } from '../constants/colors';
+import { ActiveTheme, Colors } from '../constants/colors';
 import { RootStackParamList } from '../navigation/types';
 import { getSyndicateMarket, SyndicateAsset } from '../data/tradeHub';
 import { useStore } from '../store/useStore';
@@ -43,7 +43,7 @@ export default function AssetLeaderboardScreen() {
   const renderList = (title: string, icon: keyof typeof Ionicons.glyphMap, data: SyndicateAsset[], metric: (asset: SyndicateAsset) => string) => (
     <View style={styles.sectionCard}>
       <View style={styles.sectionHeader}>
-        <Ionicons name={icon} size={16} color="#4ECDC4" />
+        <Ionicons name={icon} size={16} color="#e8dcc8" />
         <Text style={styles.sectionTitle}>{title}</Text>
       </View>
 
@@ -72,7 +72,7 @@ export default function AssetLeaderboardScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
       <View style={styles.header}>
         <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
@@ -175,7 +175,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_500Medium',
   },
   metric: {
-    color: '#8de5dc',
+    color: '#e8dcc8',
     fontSize: 11,
     fontFamily: 'Inter_700Bold',
   },

@@ -66,7 +66,7 @@ const styles = StyleSheet.create({
   },
   text: {
     color: '#fff',
-    fontFamily: 'Inter_800ExtraBold',
+    fontFamily: 'Inter_700Bold',
     includeFontPadding: false,
     textAlign: 'center',
   },

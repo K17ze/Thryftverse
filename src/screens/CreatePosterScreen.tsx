@@ -9,14 +9,15 @@ import {
   TextInput,
   Image,
   FlatList,
-  ActivityIndicator
+  ActivityIndicator,
+  ScrollView
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import * as ImagePicker from 'expo-image-picker';
-import { Colors } from '../constants/colors';
+import { ActiveTheme, Colors } from '../constants/colors';
 import { RootStackParamList } from '../navigation/types';
 import { MOCK_LISTINGS, MOCK_USERS, Listing } from '../data/mockData';
 import type { Poster } from '../data/posters';
@@ -26,8 +27,12 @@ import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useBackendData } from '../context/BackendDataContext';
 
 type NavT = StackNavigationProp<RootStackParamList>;
+type ListingSource = 'mine' | 'marketplace';
+type StoryPosition = 'top' | 'center' | 'bottom';
 
 const EXPIRY_OPTIONS = [6, 12, 24, 48];
+const STORY_COLORS = ['#ffffff', '#e8dcc8', '#ff8fab', '#8dd3ff'];
+const STORY_POSITIONS: StoryPosition[] = ['top', 'center', 'bottom'];
 
 export default function CreatePosterScreen() {
   const navigation = useNavigation<NavT>();
@@ -37,17 +42,34 @@ export default function CreatePosterScreen() {
 
   const currentUser = useStore((state) => state.currentUser);
   const addPoster = useStore((state) => state.addPoster);
+  const uploaderId = currentUser?.id ?? MOCK_USERS[0]?.id ?? 'u1';
 
-  const listingOptions = React.useMemo(
-    () => (listings.length ? listings : MOCK_LISTINGS).slice(0, 12),
+  const allListingOptions = React.useMemo(
+    () => (listings.length ? listings : MOCK_LISTINGS),
     [listings]
   );
+
+  const [listingSource, setListingSource] = React.useState<ListingSource>('mine');
+
+  const listingOptions = React.useMemo(() => {
+    const mine = allListingOptions.filter((item) => item.sellerId === uploaderId);
+    const marketplace = allListingOptions.filter((item) => item.sellerId !== uploaderId);
+
+    if (listingSource === 'mine') {
+      return (mine.length ? mine : allListingOptions).slice(0, 24);
+    }
+
+    return (marketplace.length ? marketplace : allListingOptions).slice(0, 24);
+  }, [allListingOptions, listingSource, uploaderId]);
 
   const [caption, setCaption] = React.useState('');
   const [expiryHours, setExpiryHours] = React.useState(24);
   const [selectedListingId, setSelectedListingId] = React.useState(listingOptions[0]?.id ?? '');
   const [posterImageUri, setPosterImageUri] = React.useState<string | null>(null);
   const [isPickingImage, setIsPickingImage] = React.useState(false);
+  const [storyText, setStoryText] = React.useState('');
+  const [storyColor, setStoryColor] = React.useState('#ffffff');
+  const [storyPosition, setStoryPosition] = React.useState<StoryPosition>('bottom');
 
   React.useEffect(() => {
     if (!listingOptions.length) {
@@ -63,6 +85,18 @@ export default function CreatePosterScreen() {
     () => listingOptions.find((item) => item.id === selectedListingId),
     [listingOptions, selectedListingId]
   );
+
+  const selectedListingSeller = React.useMemo(
+    () => MOCK_USERS.find((user) => user.id === selectedListing?.sellerId),
+    [selectedListing?.sellerId]
+  );
+
+  const storyOverlayPositionStyle =
+    storyPosition === 'top'
+      ? styles.storyOverlayTop
+      : storyPosition === 'center'
+        ? styles.storyOverlayCenter
+        : styles.storyOverlayBottom;
 
   const previewUri =
     posterImageUri ??
@@ -121,6 +155,7 @@ export default function CreatePosterScreen() {
 
   const handlePublish = () => {
     const trimmedCaption = caption.trim();
+    const trimmedStoryText = storyText.trim();
 
     if (!selectedListing) {
       show('Choose a listing first', 'error');
@@ -132,7 +167,7 @@ export default function CreatePosterScreen() {
       return;
     }
 
-    const uploaderId = currentUser?.id ?? MOCK_USERS[0]?.id ?? 'u1';
+    const sharedFromUserId = selectedListing.sellerId !== uploaderId ? selectedListing.sellerId : undefined;
 
     const newPoster: Poster = {
       id: `p_user_${Date.now()}`,
@@ -142,6 +177,14 @@ export default function CreatePosterScreen() {
       caption: trimmedCaption,
       createdAt: new Date().toISOString(),
       expiryHours,
+      sharedFromUserId,
+      storyOverlay: trimmedStoryText
+        ? {
+            text: trimmedStoryText,
+            color: storyColor,
+            position: storyPosition,
+          }
+        : undefined,
     };
 
     addPoster(newPoster);
@@ -151,6 +194,7 @@ export default function CreatePosterScreen() {
 
   const renderListingCard = ({ item }: { item: Listing }) => {
     const selected = item.id === selectedListingId;
+    const sellerName = MOCK_USERS.find((user) => user.id === item.sellerId)?.username ?? 'seller';
 
     return (
       <AnimatedPressable
@@ -163,6 +207,7 @@ export default function CreatePosterScreen() {
           <Text style={styles.listingTitle} numberOfLines={1}>
             {item.title}
           </Text>
+          <Text style={styles.listingSeller} numberOfLines={1}>@{sellerName}</Text>
           <Text style={styles.listingPrice}>{formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}</Text>
         </View>
         {selected ? (
@@ -176,7 +221,7 @@ export default function CreatePosterScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
       <View style={styles.header}>
         <AnimatedPressable style={styles.backBtn} activeOpacity={0.85} onPress={() => navigation.goBack()}>
@@ -193,23 +238,61 @@ export default function CreatePosterScreen() {
         </AnimatedPressable>
       </View>
 
-      <View style={styles.content}>
+      <ScrollView
+        style={styles.content}
+        contentContainerStyle={styles.contentContainer}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.previewCard}>
           <Image
             source={{ uri: previewUri }}
             style={styles.previewImage}
           />
           <View style={styles.previewOverlayTop}>
+            {selectedListing && selectedListing.sellerId !== uploaderId ? (
+              <View style={styles.sharedListingPill}>
+                <Ionicons name="repeat-outline" size={12} color="#fff" />
+                <Text style={styles.sharedListingText}>Shared @{selectedListingSeller?.username ?? 'seller'}</Text>
+              </View>
+            ) : null}
             <View style={styles.previewExpiryPill}>
               <Ionicons name="time-outline" size={12} color="#fff" />
               <Text style={styles.previewExpiryText}>{expiryHours}h</Text>
             </View>
           </View>
+          {storyText.trim().length > 0 ? (
+            <View style={[styles.storyOverlayWrap, storyOverlayPositionStyle]}>
+              <Text style={[styles.storyOverlayText, { color: storyColor }]} numberOfLines={2}>
+                {storyText.trim()}
+              </Text>
+            </View>
+          ) : null}
           <View style={styles.previewOverlayBottom}>
             <Text style={styles.previewCaption} numberOfLines={2}>
               {caption.trim() || 'Add caption for this poster...'}
             </Text>
           </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Listing Source</Text>
+          <View style={styles.sourceRow}>
+            <AnimatedPressable
+              style={[styles.sourceChip, listingSource === 'mine' && styles.sourceChipActive]}
+              onPress={() => setListingSource('mine')}
+              activeOpacity={0.9}
+            >
+              <Text style={[styles.sourceChipText, listingSource === 'mine' && styles.sourceChipTextActive]}>Mine</Text>
+            </AnimatedPressable>
+            <AnimatedPressable
+              style={[styles.sourceChip, listingSource === 'marketplace' && styles.sourceChipActive]}
+              onPress={() => setListingSource('marketplace')}
+              activeOpacity={0.9}
+            >
+              <Text style={[styles.sourceChipText, listingSource === 'marketplace' && styles.sourceChipTextActive]}>Marketplace</Text>
+            </AnimatedPressable>
+          </View>
+          <Text style={styles.helperTextLeft}>Pick your own listing or share another seller listing with attribution.</Text>
         </View>
 
         <View style={styles.section}>
@@ -252,7 +335,7 @@ export default function CreatePosterScreen() {
 
           {isPickingImage ? (
             <View style={styles.pickingRow}>
-              <ActivityIndicator size="small" color="#4ECDC4" />
+              <ActivityIndicator size="small" color="#e8dcc8" />
               <Text style={styles.pickingText}>Opening picker...</Text>
             </View>
           ) : null}
@@ -270,6 +353,54 @@ export default function CreatePosterScreen() {
             maxLength={120}
           />
           <Text style={styles.helperText}>{caption.length}/120</Text>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Story Overlay</Text>
+          <TextInput
+            style={styles.storyInput}
+            value={storyText}
+            onChangeText={setStoryText}
+            placeholder="Add overlay text like Instagram stories"
+            placeholderTextColor={Colors.textMuted}
+            maxLength={48}
+          />
+
+          <View style={styles.storyControlRow}>
+            <Text style={styles.storyControlLabel}>Color</Text>
+            <View style={styles.storyColorRow}>
+              {STORY_COLORS.map((color) => {
+                const active = storyColor === color;
+                return (
+                  <AnimatedPressable
+                    key={color}
+                    style={[styles.storyColorChip, { backgroundColor: color }, active && styles.storyColorChipActive]}
+                    onPress={() => setStoryColor(color)}
+                    activeOpacity={0.85}
+                  />
+                );
+              })}
+            </View>
+          </View>
+
+          <View style={styles.storyControlRow}>
+            <Text style={styles.storyControlLabel}>Position</Text>
+            <View style={styles.storyPositionRow}>
+              {STORY_POSITIONS.map((position) => {
+                const active = storyPosition === position;
+                return (
+                  <AnimatedPressable
+                    key={position}
+                    style={[styles.storyPositionChip, active && styles.storyPositionChipActive]}
+                    onPress={() => setStoryPosition(position)}
+                    activeOpacity={0.9}
+                  >
+                    <Text style={[styles.storyPositionText, active && styles.storyPositionTextActive]}>{position.toUpperCase()}</Text>
+                  </AnimatedPressable>
+                );
+              })}
+            </View>
+          </View>
         </View>
 
         <View style={styles.section}>
@@ -294,7 +425,7 @@ export default function CreatePosterScreen() {
         <View style={styles.section}>
           <View style={styles.sectionHeaderRow}>
             <Text style={styles.sectionTitle}>Attach Listing</Text>
-            <Text style={styles.sectionHint}>Used as poster image target</Text>
+            <Text style={styles.sectionHint}>{listingOptions.length} items</Text>
           </View>
 
           <FlatList
@@ -306,7 +437,7 @@ export default function CreatePosterScreen() {
             contentContainerStyle={styles.listingListContent}
           />
         </View>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -335,7 +466,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#151515',
   },
   headerLabel: {
-    color: '#4ECDC4',
+    color: '#e8dcc8',
     fontSize: 10,
     letterSpacing: 1,
     fontFamily: 'Inter_600SemiBold',
@@ -363,6 +494,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 14,
   },
+  contentContainer: {
+    paddingBottom: 28,
+  },
   previewCard: {
     height: 198,
     borderRadius: 16,
@@ -378,7 +512,27 @@ const styles = StyleSheet.create({
   previewOverlayTop: {
     position: 'absolute',
     top: 8,
+    left: 8,
     right: 8,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
+  },
+  sharedListingPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    maxWidth: '68%',
+  },
+  sharedListingText: {
+    color: '#fff',
+    fontSize: 11,
+    fontFamily: 'Inter_600SemiBold',
   },
   previewExpiryPill: {
     flexDirection: 'row',
@@ -407,6 +561,30 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 12,
     fontFamily: 'Inter_600SemiBold',
+  },
+  storyOverlayWrap: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    alignItems: 'center',
+    zIndex: 2,
+  },
+  storyOverlayTop: {
+    top: 46,
+  },
+  storyOverlayCenter: {
+    top: '45%',
+  },
+  storyOverlayBottom: {
+    bottom: 44,
+  },
+  storyOverlayText: {
+    fontSize: 20,
+    fontFamily: 'Inter_700Bold',
+    textAlign: 'center',
+    textShadowColor: 'rgba(0,0,0,0.55)',
+    textShadowRadius: 8,
+    letterSpacing: 0.2,
   },
   section: {
     marginBottom: 16,
@@ -437,6 +615,100 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_500Medium',
     textAlign: 'right',
   },
+  helperTextLeft: {
+    marginTop: 6,
+    color: Colors.textMuted,
+    fontSize: 11,
+    fontFamily: 'Inter_500Medium',
+  },
+  sourceRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  sourceChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#343434',
+    backgroundColor: '#121212',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  sourceChipActive: {
+    borderColor: '#e8dcc8',
+    backgroundColor: '#2f291f',
+  },
+  sourceChipText: {
+    color: Colors.textSecondary,
+    fontSize: 12,
+    fontFamily: 'Inter_700Bold',
+  },
+  sourceChipTextActive: {
+    color: '#e8dcc8',
+  },
+  storyInput: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+    backgroundColor: '#121212',
+    color: Colors.textPrimary,
+    fontSize: 14,
+    fontFamily: 'Inter_500Medium',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 10,
+  },
+  storyControlRow: {
+    marginTop: 6,
+  },
+  storyControlLabel: {
+    color: Colors.textMuted,
+    fontSize: 11,
+    fontFamily: 'Inter_700Bold',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginBottom: 6,
+  },
+  storyColorRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 8,
+  },
+  storyColorChip: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: '#4a4a4a',
+  },
+  storyColorChipActive: {
+    borderColor: '#ffffff',
+    borderWidth: 2,
+  },
+  storyPositionRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  storyPositionChip: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#343434',
+    backgroundColor: '#121212',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  storyPositionChipActive: {
+    borderColor: '#e8dcc8',
+    backgroundColor: '#2f291f',
+  },
+  storyPositionText: {
+    color: Colors.textSecondary,
+    fontSize: 10,
+    fontFamily: 'Inter_700Bold',
+    letterSpacing: 0.4,
+  },
+  storyPositionTextActive: {
+    color: '#e8dcc8',
+  },
   expiryRow: {
     flexDirection: 'row',
     gap: 8,
@@ -450,8 +722,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#121212',
   },
   expiryChipActive: {
-    borderColor: '#4ECDC4',
-    backgroundColor: '#18302c',
+    borderColor: '#e8dcc8',
+    backgroundColor: '#2f291f',
   },
   expiryChipText: {
     color: Colors.textSecondary,
@@ -459,7 +731,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_600SemiBold',
   },
   expiryChipTextActive: {
-    color: '#8de5dc',
+    color: '#e8dcc8',
   },
   sectionHeaderRow: {
     flexDirection: 'row',
@@ -524,7 +796,7 @@ const styles = StyleSheet.create({
     borderColor: '#272727',
   },
   listingCardSelected: {
-    borderColor: '#4ECDC4',
+    borderColor: '#e8dcc8',
   },
   listingImage: {
     width: '100%',
@@ -538,8 +810,14 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: 'Inter_600SemiBold',
   },
+  listingSeller: {
+    marginTop: 3,
+    color: Colors.textMuted,
+    fontSize: 10,
+    fontFamily: 'Inter_500Medium',
+  },
   listingPrice: {
-    marginTop: 4,
+    marginTop: 3,
     color: Colors.textSecondary,
     fontSize: 11,
     fontFamily: 'Inter_500Medium',
@@ -551,7 +829,7 @@ const styles = StyleSheet.create({
     width: 20,
     height: 20,
     borderRadius: 10,
-    backgroundColor: '#8de5dc',
+    backgroundColor: '#e8dcc8',
     alignItems: 'center',
     justifyContent: 'center',
   },

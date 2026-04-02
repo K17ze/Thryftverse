@@ -12,7 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
-import { Colors } from '../constants/colors';
+import { ActiveTheme, Colors } from '../constants/colors';
 import { RootStackParamList } from '../navigation/types';
 import { getSyndicateMarket } from '../data/tradeHub';
 import { useStore } from '../store/useStore';
@@ -22,6 +22,10 @@ import { useToast } from '../context/ToastContext';
 
 type RouteT = RouteProp<RootStackParamList, 'Buyout'>;
 type NavT = StackNavigationProp<RootStackParamList>;
+const IS_LIGHT = ActiveTheme === 'light';
+const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111111';
+const PANEL_SOFT_BG = IS_LIGHT ? '#f7f4ef' : '#121212';
+const PANEL_BORDER = IS_LIGHT ? '#d8d1c6' : '#2a2a2a';
 
 export default function BuyoutScreen() {
   const navigation = useNavigation<NavT>();
@@ -44,7 +48,7 @@ export default function BuyoutScreen() {
   if (!asset) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
-        <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+        <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
         <View style={styles.header}>
           <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
             <Ionicons name="arrow-back" size={22} color={Colors.textPrimary} />
@@ -78,7 +82,7 @@ export default function BuyoutScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
       <View style={styles.header}>
         <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
@@ -146,8 +150,8 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#272727',
-    backgroundColor: '#121212',
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_SOFT_BG,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -176,8 +180,8 @@ const styles = StyleSheet.create({
     marginTop: 12,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
-    backgroundColor: '#111111',
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
     paddingHorizontal: 11,
     paddingVertical: 10,
   },
@@ -198,7 +202,7 @@ const styles = StyleSheet.create({
   },
   totalRow: {
     borderTopWidth: 1,
-    borderTopColor: '#252525',
+    borderTopColor: PANEL_BORDER,
     marginTop: 4,
     paddingTop: 10,
   },
@@ -210,7 +214,7 @@ const styles = StyleSheet.create({
   totalValue: {
     color: Colors.textPrimary,
     fontSize: 15,
-    fontFamily: 'Inter_800ExtraBold',
+    fontFamily: 'Inter_700Bold',
   },
   submitBtn: {
     marginTop: 14,
@@ -223,7 +227,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   submitText: {
-    color: Colors.background,
+    color: Colors.textInverse,
     fontSize: 13,
     fontFamily: 'Inter_700Bold',
   },

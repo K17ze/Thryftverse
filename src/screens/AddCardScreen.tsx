@@ -15,23 +15,33 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
+import { ActiveTheme, Colors } from '../constants/colors';
 import { useStore } from '../store/useStore';
 import { useToast } from '../context/ToastContext';
 import { buildCardPaymentMethod } from '../utils/checkoutFlow';
+import { createUserPaymentMethod } from '../services/commerceApi';
 
 type Props = StackScreenProps<RootStackParamList, 'AddCard'>;
 
-const TEAL = '#4ECDC4';
-const BG = '#0a0a0a';
-const CARD = '#111111';
-const MUTED = '#888888';
-const TEXT = '#FFFFFF';
+const IS_LIGHT = ActiveTheme === 'light';
+const BG = Colors.background;
+const CARD = IS_LIGHT ? '#ffffff' : '#111111';
+const CARD_SOFT = IS_LIGHT ? '#f7f4ef' : '#1a1a1a';
+const BORDER = IS_LIGHT ? '#d8d1c6' : '#2a2a2a';
+const DIVIDER = IS_LIGHT ? '#e4ded3' : '#1c1c1c';
+const MUTED = Colors.textMuted;
+const TEXT = Colors.textPrimary;
+const BRAND = IS_LIGHT ? '#2f251b' : '#e8dcc8';
+const CARD_PREVIEW_BG = IS_LIGHT ? '#f1ede6' : '#1a2a1a';
+const CARD_PREVIEW_BORDER = IS_LIGHT ? '#d0c3af' : `${BRAND}44`;
 
 export default function AddCardScreen({ navigation }: Props) {
   const [cardNumber, setCardNumber] = useState('');
   const [expiry, setExpiry] = useState('');
   const [cvv, setCvv] = useState('');
   const [name, setName] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const currentUser = useStore((state) => state.currentUser);
   const savePaymentMethod = useStore((state) => state.savePaymentMethod);
   const { show } = useToast();
 
@@ -57,20 +67,44 @@ export default function AddCardScreen({ navigation }: Props) {
     cvv.length >= 3 &&
     name.trim().length >= 2;
 
-  const handleSaveCard = () => {
-    if (!isComplete) {
+  const handleSaveCard = async () => {
+    if (!isComplete || isSaving) {
       return;
     }
 
     const last4 = cardNumber.replace(/\s/g, '').slice(-4);
-    savePaymentMethod(buildCardPaymentMethod(last4, expiry, 'Visa'));
-    show('Card saved', 'success');
-    navigation.goBack();
+    const localPaymentMethod = buildCardPaymentMethod(last4, expiry, 'Visa');
+
+    setIsSaving(true);
+    try {
+      const userId = currentUser?.id ?? 'u1';
+      const saved = await createUserPaymentMethod(userId, {
+        type: 'card',
+        label: localPaymentMethod.label,
+        details: localPaymentMethod.details,
+        isDefault: true,
+      });
+
+      savePaymentMethod({
+        id: saved.id,
+        type: saved.type,
+        label: saved.label,
+        details: saved.details ?? undefined,
+        isDefault: saved.isDefault,
+      });
+      show('Card saved', 'success');
+    } catch {
+      savePaymentMethod(localPaymentMethod);
+      show('Card saved locally. Backend sync unavailable.', 'info');
+    } finally {
+      setIsSaving(false);
+      navigation.goBack();
+    }
   };
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={BG} />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={BG} />
       <View style={styles.header}>
         <AnimatedPressable onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={TEXT} />
@@ -110,7 +144,7 @@ export default function AddCardScreen({ navigation }: Props) {
                 placeholder="0000 0000 0000 0000"
                 placeholderTextColor={MUTED}
                 keyboardType="number-pad"
-                selectionColor={TEAL}
+                selectionColor={BRAND}
                 maxLength={19}
               />
             </View>
@@ -125,7 +159,7 @@ export default function AddCardScreen({ navigation }: Props) {
                   placeholder="MM/YY"
                   placeholderTextColor={MUTED}
                   keyboardType="number-pad"
-                  selectionColor={TEAL}
+                  selectionColor={BRAND}
                   maxLength={5}
                 />
               </View>
@@ -139,7 +173,7 @@ export default function AddCardScreen({ navigation }: Props) {
                   placeholder="•••"
                   placeholderTextColor={MUTED}
                   keyboardType="number-pad"
-                  selectionColor={TEAL}
+                  selectionColor={BRAND}
                   secureTextEntry
                   maxLength={4}
                 />
@@ -155,7 +189,7 @@ export default function AddCardScreen({ navigation }: Props) {
                 placeholder="As it appears on card"
                 placeholderTextColor={MUTED}
                 autoCapitalize="words"
-                selectionColor={TEAL}
+                selectionColor={BRAND}
               />
             </View>
           </View>
@@ -168,11 +202,11 @@ export default function AddCardScreen({ navigation }: Props) {
 
         <View style={styles.footer}>
           <AnimatedPressable
-            style={[styles.saveBtn, !isComplete && { opacity: 0.4 }]}
-            disabled={!isComplete}
+            style={[styles.saveBtn, (!isComplete || isSaving) && { opacity: 0.4 }]}
+            disabled={!isComplete || isSaving}
             onPress={handleSaveCard}
           >
-            <Text style={styles.saveBtnText}>Save card</Text>
+            <Text style={styles.saveBtnText}>{isSaving ? 'Saving...' : 'Save card'}</Text>
           </AnimatedPressable>
         </View>
       </KeyboardAvoidingView>
@@ -184,17 +218,17 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: BG },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#1a1a1a',
+    paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: BORDER,
   },
   headerTitle: { fontSize: 17, fontWeight: '700', color: TEXT },
   content: { padding: 20, paddingBottom: 40 },
   cardPreview: {
-    backgroundColor: '#1a2a1a',
+    backgroundColor: CARD_PREVIEW_BG,
     borderRadius: 20,
     padding: 24,
     marginBottom: 28,
     borderWidth: 1,
-    borderColor: TEAL + '44',
+    borderColor: CARD_PREVIEW_BORDER,
     height: 180,
     justifyContent: 'space-between',
   },
@@ -203,17 +237,17 @@ const styles = StyleSheet.create({
   cardPreviewLabel: { fontSize: 10, color: MUTED, letterSpacing: 1.5, marginBottom: 4 },
   cardPreviewValue: { fontSize: 14, fontWeight: '600', color: TEXT },
   sectionLabel: { fontSize: 11, color: MUTED, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 10, marginLeft: 4 },
-  card: { backgroundColor: CARD, borderRadius: 16, overflow: 'hidden', marginBottom: 16 },
+  card: { backgroundColor: CARD, borderWidth: 1, borderColor: BORDER, borderRadius: 16, overflow: 'hidden', marginBottom: 16 },
   fieldRow: { paddingHorizontal: 18, paddingVertical: 14 },
   fieldRowHalf: { flexDirection: 'row' },
   halfField: { flex: 1, paddingHorizontal: 18, paddingVertical: 14 },
-  halfDivider: { width: 1, backgroundColor: '#1c1c1c' },
+  halfDivider: { width: 1, backgroundColor: DIVIDER },
   fieldLabel: { fontSize: 11, color: MUTED, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 6 },
   fieldInput: { fontSize: 16, color: TEXT, fontWeight: '500' },
-  divider: { height: 1, backgroundColor: '#1c1c1c' },
+  divider: { height: 1, backgroundColor: DIVIDER },
   secureRow: { flexDirection: 'row', alignItems: 'center', gap: 6, justifyContent: 'center' },
   secureText: { fontSize: 12, color: MUTED },
-  footer: { padding: 20, borderTopWidth: 1, borderTopColor: '#1a1a1a' },
-  saveBtn: { backgroundColor: TEAL, borderRadius: 30, paddingVertical: 16, alignItems: 'center' },
-  saveBtnText: { fontSize: 16, fontWeight: '700', color: '#0a0a0a' },
+  footer: { padding: 20, borderTopWidth: 1, borderTopColor: BORDER },
+  saveBtn: { backgroundColor: Colors.accent, borderRadius: 30, paddingVertical: 16, alignItems: 'center' },
+  saveBtnText: { fontSize: 16, fontWeight: '700', color: Colors.textInverse },
 });

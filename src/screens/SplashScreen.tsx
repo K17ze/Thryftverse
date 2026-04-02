@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, StatusBar, Dimensions } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
-import { Colors } from '../constants/colors';
+import { ActiveTheme, Colors } from '../constants/colors';
 import Reanimated, {
   useSharedValue,
   useAnimatedStyle,
@@ -53,7 +53,7 @@ export default function SplashScreen() {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
       <Reanimated.View style={[styles.brandContainer, containerStyle]}>
         <View style={styles.titleRow}>
           {TITLE.map((letter, i) => {
@@ -103,7 +103,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
   },
   brandText: {
-    fontFamily: 'Inter_800ExtraBold',
+    fontFamily: 'Inter_700Bold',
     fontSize: 32,
     color: Colors.textPrimary,
     letterSpacing: 2,

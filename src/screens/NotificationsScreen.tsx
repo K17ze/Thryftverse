@@ -13,20 +13,20 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
-import { Colors } from '../constants/colors';
+import { ActiveTheme, Colors } from '../constants/colors';
 import { MOCK_NOTIFICATIONS } from '../data/mockData';
 import { RootStackParamList } from '../navigation/types';
 import { EmptyState } from '../components/EmptyState';
 
 type NavT = StackNavigationProp<RootStackParamList>;
-const TEAL = '#4ECDC4';
+const TEAL = '#e8dcc8';
 
 export default function NotificationsScreen() {
   const navigation = useNavigation<NavT>();
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
       {/* ── Header ── */}
       <View style={styles.header}>

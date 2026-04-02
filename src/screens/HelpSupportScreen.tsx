@@ -16,15 +16,18 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
+import { ActiveTheme, Colors } from '../constants/colors';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 
 type Props = StackScreenProps<RootStackParamList, 'HelpSupport'>;
 
-const TEAL = '#4ECDC4';
-const BG = '#0a0a0a';
-const CARD = '#111111';
-const MUTED = '#888888';
-const TEXT = '#FFFFFF';
+const IS_LIGHT = ActiveTheme === 'light';
+const TEAL = IS_LIGHT ? '#2f251b' : '#e8dcc8';
+const BG = Colors.background;
+const CARD = IS_LIGHT ? '#ffffff' : '#111111';
+const BORDER = IS_LIGHT ? '#d8d1c6' : '#1c1c1c';
+const MUTED = Colors.textMuted;
+const TEXT = Colors.textPrimary;
 
 export default function HelpSupportScreen({ navigation }: Props) {
   const { formatFromFiat } = useFormattedPrice();
@@ -60,7 +63,7 @@ export default function HelpSupportScreen({ navigation }: Props) {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={BG} />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={BG} />
       <View style={styles.header}>
         <AnimatedPressable onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={TEXT} />
@@ -122,14 +125,14 @@ export default function HelpSupportScreen({ navigation }: Props) {
             multiline
             numberOfLines={5}
             textAlignVertical="top"
-            selectionColor={TEAL}
+            selectionColor={Colors.accent}
           />
           <AnimatedPressable
             style={[styles.sendBtn, !message.trim() && { opacity: 0.4 }]}
             disabled={!message.trim()}
             onPress={() => setMessage('')}
           >
-            <Ionicons name="send" size={16} color="#0a0a0a" />
+            <Ionicons name="send" size={16} color={Colors.textInverse} />
             <Text style={styles.sendBtnText}>Send message</Text>
           </AnimatedPressable>
         </View>
@@ -162,25 +165,25 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: BG },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#1a1a1a',
+    paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: BORDER,
   },
   headerTitle: { fontSize: 17, fontWeight: '700', color: TEXT },
   content: { padding: 20, paddingBottom: 60 },
   quickRow: { flexDirection: 'row', gap: 12, marginBottom: 28 },
   quickBtn: { flex: 1, alignItems: 'center', gap: 8 },
-  quickIcon: { width: 58, height: 58, borderRadius: 18, backgroundColor: CARD, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#1c1c1c' },
+  quickIcon: { width: 58, height: 58, borderRadius: 18, backgroundColor: CARD, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: BORDER },
   quickLabel: { fontSize: 12, color: TEXT, fontWeight: '600' },
   sectionLabel: { fontSize: 11, color: MUTED, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 10, marginLeft: 4 },
-  faqCard: { backgroundColor: CARD, borderRadius: 16, overflow: 'hidden', marginBottom: 24 },
+  faqCard: { backgroundColor: CARD, borderWidth: 1, borderColor: BORDER, borderRadius: 16, overflow: 'hidden', marginBottom: 24 },
   faqRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 18, paddingVertical: 16 },
   faqQ: { flex: 1, fontSize: 14, fontWeight: '600', color: TEXT, lineHeight: 20 },
   faqA: { fontSize: 13, color: MUTED, lineHeight: 20, paddingHorizontal: 18, paddingBottom: 16 },
-  divider: { height: 1, backgroundColor: '#1c1c1c', marginHorizontal: 18 },
-  contactCard: { backgroundColor: CARD, borderRadius: 16, padding: 16, marginBottom: 24 },
+  divider: { height: 1, backgroundColor: BORDER, marginHorizontal: 18 },
+  contactCard: { backgroundColor: CARD, borderWidth: 1, borderColor: BORDER, borderRadius: 16, padding: 16, marginBottom: 24 },
   messageInput: { fontSize: 14, color: TEXT, minHeight: 100, marginBottom: 14 },
-  sendBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: TEAL, borderRadius: 24, paddingVertical: 12, justifyContent: 'center' },
-  sendBtnText: { fontSize: 14, fontWeight: '700', color: '#0a0a0a' },
-  linksCard: { backgroundColor: CARD, borderRadius: 16, overflow: 'hidden', marginBottom: 20 },
+  sendBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: Colors.accent, borderRadius: 24, paddingVertical: 12, justifyContent: 'center' },
+  sendBtnText: { fontSize: 14, fontWeight: '700', color: Colors.textInverse },
+  linksCard: { backgroundColor: CARD, borderWidth: 1, borderColor: BORDER, borderRadius: 16, overflow: 'hidden', marginBottom: 20 },
   linkRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 18, paddingVertical: 16 },
   linkText: { flex: 1, fontSize: 14, color: TEXT },
   version: { fontSize: 11, color: MUTED, textAlign: 'center' },

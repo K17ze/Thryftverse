@@ -13,14 +13,18 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
+import { ActiveTheme, Colors } from '../constants/colors';
 
 type Props = StackScreenProps<RootStackParamList, 'InviteFriends'>;
 
-const TEAL = '#4ECDC4';
-const BG = '#0a0a0a';
-const CARD = '#111111';
-const MUTED = '#888888';
-const TEXT = '#FFFFFF';
+const IS_LIGHT = ActiveTheme === 'light';
+const TEAL = IS_LIGHT ? '#2f251b' : '#e8dcc8';
+const BG = Colors.background;
+const CARD = IS_LIGHT ? '#ffffff' : '#111111';
+const CARD_ALT = IS_LIGHT ? '#f3eee7' : '#151515';
+const BORDER = IS_LIGHT ? '#d8d1c6' : '#1c1c1c';
+const MUTED = Colors.textMuted;
+const TEXT = Colors.textPrimary;
 
 const MOCK_CONTACTS = [
   { id: '1', name: 'Alex Johnson', initials: 'AJ' },
@@ -42,7 +46,7 @@ export default function InviteFriendsScreen({ navigation }: Props) {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={BG} />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={BG} />
       <View style={styles.header}>
         <AnimatedPressable onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={TEXT} />
@@ -124,12 +128,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#1a1a1a',
+    borderBottomColor: BORDER,
   },
   headerTitle: { fontSize: 17, fontWeight: '700', color: TEXT },
   content: { padding: 20 },
   heroCard: {
     backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: BORDER,
     borderRadius: 20,
     padding: 30,
     alignItems: 'center',
@@ -150,6 +156,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: BORDER,
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 14,
@@ -170,10 +178,10 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#151515',
+    backgroundColor: CARD_ALT,
   },
   shareIconLabel: { fontSize: 11, color: MUTED },
-  card: { backgroundColor: CARD, borderRadius: 16, overflow: 'hidden', marginBottom: 20 },
+  card: { backgroundColor: CARD, borderWidth: 1, borderColor: BORDER, borderRadius: 16, overflow: 'hidden', marginBottom: 20 },
   contactRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -184,7 +192,9 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    backgroundColor: '#222',
+    backgroundColor: CARD_ALT,
+    borderWidth: 1,
+    borderColor: BORDER,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 14,
@@ -194,10 +204,11 @@ const styles = StyleSheet.create({
   inviteBtn: {
     borderWidth: 1,
     borderColor: TEAL,
+    backgroundColor: CARD_ALT,
     borderRadius: 20,
     paddingHorizontal: 14,
     paddingVertical: 6,
   },
   inviteBtnText: { fontSize: 13, color: TEAL, fontWeight: '600' },
-  divider: { height: 1, backgroundColor: '#1c1c1c', marginHorizontal: 18 },
+  divider: { height: 1, backgroundColor: BORDER, marginHorizontal: 18 },
 });

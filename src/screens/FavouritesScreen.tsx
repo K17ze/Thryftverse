@@ -14,7 +14,7 @@ import Reanimated, { FadeInDown, useSharedValue } from 'react-native-reanimated'
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
-import { Colors } from '../constants/colors';
+import { ActiveTheme, Colors } from '../constants/colors';
 import { RootStackParamList } from '../navigation/types';
 import { useStore } from '../store/useStore';
 import { ProductCard } from '../components/ProductCard';
@@ -46,7 +46,7 @@ export default function FavouritesScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
       <View style={styles.header}>
         <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.85}>
@@ -95,7 +95,7 @@ export default function FavouritesScreen() {
             title="No favourites yet"
             subtitle="Tap hearts on listings to save them here."
             ctaLabel="Browse Closet"
-            onCtaPress={() => navigation.navigate('MainTabs')}
+            onCtaPress={() => (navigation as any).navigate('MainTabs', { screen: 'Search' })}
           />
         }
       />
@@ -127,7 +127,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   headerLabel: {
-    color: '#4ECDC4',
+    color: '#e8dcc8',
     fontSize: 10,
     fontFamily: 'Inter_700Bold',
     letterSpacing: 0.7,

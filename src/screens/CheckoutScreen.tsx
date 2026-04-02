@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import { View,
@@ -12,7 +12,7 @@ import { View,
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors } from '../constants/colors';
+import { ActiveTheme, Colors } from '../constants/colors';
 import { MOCK_LISTINGS, MOCK_USERS } from '../data/mockData';
 import { RootStackParamList } from '../navigation/types';
 import { useStore } from '../store/useStore';
@@ -20,16 +20,31 @@ import { useToast } from '../context/ToastContext';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { isCheckoutReady } from '../utils/checkoutFlow';
 import { useBackendData } from '../context/BackendDataContext';
+import {
+  createOrder,
+  listUserAddresses,
+  listUserPaymentMethods,
+  payOrder,
+} from '../services/commerceApi';
 
 type RouteT = RouteProp<RootStackParamList, 'Checkout'>;
+const IS_LIGHT = ActiveTheme === 'light';
+const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111111';
+const PANEL_BORDER = IS_LIGHT ? '#d8d1c6' : '#2a2a2a';
+const FOOTER_BG = IS_LIGHT ? 'rgba(236,234,230,0.97)' : 'rgba(10,10,10,0.95)';
 
 export default function CheckoutScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<RouteT>();
   const { itemId } = route.params;
   const { listings } = useBackendData();
+  const currentUser = useStore((state) => state.currentUser);
   const savedAddress = useStore((state) => state.savedAddress);
+  const saveAddress = useStore((state) => state.saveAddress);
   const savedPaymentMethod = useStore((state) => state.savedPaymentMethod);
+  const savePaymentMethod = useStore((state) => state.savePaymentMethod);
+  const [isHydratingCheckout, setIsHydratingCheckout] = useState(false);
+  const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
   const { show } = useToast();
   const { formatFromFiat } = useFormattedPrice();
 
@@ -41,18 +56,96 @@ export default function CheckoutScreen() {
   const TOTAL = item.price + PROTECTION_FEE + POSTAGE_FEE;
   const checkoutReady = isCheckoutReady(savedAddress, savedPaymentMethod);
 
-  const handlePay = () => {
+  useEffect(() => {
+    let cancelled = false;
+
+    const hydrateCheckoutDefaults = async () => {
+      setIsHydratingCheckout(true);
+      try {
+        const userId = currentUser?.id ?? 'u1';
+        const [addresses, paymentMethods] = await Promise.all([
+          listUserAddresses(userId),
+          listUserPaymentMethods(userId),
+        ]);
+
+        if (cancelled) {
+          return;
+        }
+
+        if (!savedAddress && addresses.length > 0) {
+          const preferredAddress = addresses.find((entry) => entry.isDefault) ?? addresses[0];
+          saveAddress({
+            id: preferredAddress.id,
+            name: preferredAddress.name,
+            street: preferredAddress.street,
+            city: preferredAddress.city,
+            postcode: preferredAddress.postcode,
+            isDefault: preferredAddress.isDefault,
+          });
+        }
+
+        if (!savedPaymentMethod && paymentMethods.length > 0) {
+          const preferredPaymentMethod =
+            paymentMethods.find((entry) => entry.isDefault) ?? paymentMethods[0];
+          savePaymentMethod({
+            id: preferredPaymentMethod.id,
+            type: preferredPaymentMethod.type,
+            label: preferredPaymentMethod.label,
+            details: preferredPaymentMethod.details ?? undefined,
+            isDefault: preferredPaymentMethod.isDefault,
+          });
+        }
+      } catch {
+        // Keep local checkout state if backend data is unavailable.
+      } finally {
+        if (!cancelled) {
+          setIsHydratingCheckout(false);
+        }
+      }
+    };
+
+    void hydrateCheckoutDefaults();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser?.id, saveAddress, savePaymentMethod, savedAddress, savedPaymentMethod]);
+
+  const handlePay = async () => {
     if (!checkoutReady) {
       show('Add delivery address and payment method before paying.', 'error');
       return;
     }
 
-    navigation.replace('Success');
+    if (isSubmittingPayment) {
+      return;
+    }
+
+    setIsSubmittingPayment(true);
+    try {
+      const userId = currentUser?.id ?? 'u1';
+      const order = await createOrder({
+        buyerId: userId,
+        listingId: item.id,
+        addressId: savedAddress?.id,
+        paymentMethodId: savedPaymentMethod?.id,
+        buyerProtectionFeeGbp: PROTECTION_FEE,
+      });
+      await payOrder(order.id);
+
+      show('Payment completed', 'success');
+      navigation.replace('Success');
+    } catch {
+      show('Backend checkout unavailable. Completed locally.', 'info');
+      navigation.replace('Success');
+    } finally {
+      setIsSubmittingPayment(false);
+    }
   };
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
       <View style={styles.header}>
         <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
@@ -129,6 +222,9 @@ export default function CheckoutScreen() {
         {!checkoutReady && (
           <Text style={styles.requirementText}>Add both delivery details and a payment method to continue.</Text>
         )}
+        {isHydratingCheckout && (
+          <Text style={styles.syncText}>Syncing saved checkout details...</Text>
+        )}
 
         <View style={{ height: 100 }} />
       </ScrollView>
@@ -140,11 +236,12 @@ export default function CheckoutScreen() {
           <Text style={styles.footerTotalPrice}>{formatFromFiat(TOTAL, 'GBP')}</Text>
         </View>
         <AnimatedPressable 
-          style={[styles.payBtn, !checkoutReady && styles.payBtnDisabled]} 
+          style={[styles.payBtn, (!checkoutReady || isSubmittingPayment) && styles.payBtnDisabled]} 
           activeOpacity={0.9} 
           onPress={handlePay}
+          disabled={!checkoutReady || isSubmittingPayment}
         >
-          <Text style={styles.payBtnText}>Pay</Text>
+          <Text style={styles.payBtnText}>{isSubmittingPayment ? 'Processing...' : 'Pay'}</Text>
         </AnimatedPressable>
       </View>
     </SafeAreaView>
@@ -179,7 +276,17 @@ const styles = StyleSheet.create({
 
   scrollContent: { paddingHorizontal: 20, paddingTop: 16 },
 
-  itemCard: { flexDirection: 'row', backgroundColor: '#111', borderRadius: 16, padding: 12, marginBottom: 32, gap: 16, alignItems: 'center' },
+  itemCard: {
+    flexDirection: 'row',
+    backgroundColor: PANEL_BG,
+    borderWidth: 1,
+    borderColor: PANEL_BORDER,
+    borderRadius: 16,
+    padding: 12,
+    marginBottom: 32,
+    gap: 16,
+    alignItems: 'center',
+  },
   itemThumb: { width: 64, height: 64, borderRadius: 12 },
   itemInfo: { flex: 1, justifyContent: 'center' },
   itemTitle: { fontSize: 16, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary, marginBottom: 4 },
@@ -188,15 +295,25 @@ const styles = StyleSheet.create({
 
   sectionTitle: { fontSize: 13, fontFamily: 'Inter_600SemiBold', color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 12 },
 
-  blockBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#111', padding: 16, borderRadius: 16, marginBottom: 16 },
+  blockBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: PANEL_BG,
+    borderWidth: 1,
+    borderColor: PANEL_BORDER,
+    padding: 16,
+    borderRadius: 16,
+    marginBottom: 16,
+  },
   blockLeft: { flexDirection: 'row', alignItems: 'center', gap: 16 },
   blockTextCol: { justifyContent: 'center' },
   blockTitle: { fontSize: 16, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary, marginBottom: 4 },
   blockSub: { fontSize: 13, fontFamily: 'Inter_400Regular', color: Colors.textSecondary },
   blockRightPrice: { fontSize: 15, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary },
 
-  summaryCard: { backgroundColor: '#111', padding: 24, borderRadius: 20, marginBottom: 24 },
-  divider: { height: 1, backgroundColor: '#222', marginVertical: 12 },
+  summaryCard: { backgroundColor: PANEL_BG, borderWidth: 1, borderColor: PANEL_BORDER, padding: 24, borderRadius: 20, marginBottom: 24 },
+  divider: { height: 1, backgroundColor: PANEL_BORDER, marginVertical: 12 },
 
   termsText: { fontSize: 12, fontFamily: 'Inter_400Regular', color: Colors.textMuted, lineHeight: 18, textAlign: 'center', paddingHorizontal: 16 },
   requirementText: {
@@ -206,17 +323,26 @@ const styles = StyleSheet.create({
     color: Colors.danger,
     textAlign: 'center',
   },
+  syncText: {
+    marginTop: 10,
+    fontSize: 12,
+    fontFamily: 'Inter_500Medium',
+    color: Colors.textSecondary,
+    textAlign: 'center',
+  },
 
   footer: { 
     position: 'absolute', bottom: 0, left: 0, right: 0, 
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', 
-    backgroundColor: 'rgba(10, 10, 10, 0.95)', 
+    borderTopWidth: 1,
+    borderTopColor: PANEL_BORDER,
+    backgroundColor: FOOTER_BG, 
     paddingHorizontal: 20, paddingTop: 20, paddingBottom: Platform.OS === 'ios' ? 34 : 24,
   },
   footerPriceCol: { flex: 1 },
   footerTotalLabel: { fontSize: 13, fontFamily: 'Inter_400Regular', color: Colors.textSecondary },
   footerTotalPrice: { fontSize: 24, fontFamily: 'Inter_700Bold', color: Colors.textPrimary },
-  payBtn: { backgroundColor: Colors.textPrimary, height: 56, borderRadius: 28, paddingHorizontal: 48, alignItems: 'center', justifyContent: 'center' },
+  payBtn: { backgroundColor: Colors.accent, height: 56, borderRadius: 28, paddingHorizontal: 48, alignItems: 'center', justifyContent: 'center' },
   payBtnDisabled: { opacity: 0.45 },
-  payBtnText: { color: Colors.background, fontSize: 16, fontFamily: 'Inter_700Bold' }
+  payBtnText: { color: Colors.textInverse, fontSize: 16, fontFamily: 'Inter_700Bold' }
 });

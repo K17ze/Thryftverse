@@ -14,7 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
-import { Colors } from '../constants/colors';
+import { ActiveTheme, Colors } from '../constants/colors';
 import { RootStackParamList } from '../navigation/types';
 import { MOCK_LISTINGS, MOCK_USERS, Listing } from '../data/mockData';
 import type { AuctionMarketItem } from '../data/tradeHub';
@@ -185,7 +185,7 @@ export default function CreateAuctionScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
       <View style={styles.header}>
         <AnimatedPressable style={styles.closeBtn} onPress={() => navigation.goBack()} activeOpacity={0.85}>
@@ -321,7 +321,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#151515',
   },
   headerLabel: {
-    color: '#4ECDC4',
+    color: '#e8dcc8',
     fontSize: 10,
     letterSpacing: 1,
     fontFamily: 'Inter_600SemiBold',
@@ -415,7 +415,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#141414',
   },
   windowChipActive: {
-    borderColor: '#4ECDC4',
+    borderColor: '#e8dcc8',
     backgroundColor: '#162523',
   },
   windowChipText: {
@@ -424,7 +424,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_600SemiBold',
   },
   windowChipTextActive: {
-    color: '#8de5dc',
+    color: '#e8dcc8',
   },
   inputLabel: {
     color: Colors.textSecondary,
@@ -485,7 +485,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#121212',
   },
   listingCardSelected: {
-    borderColor: '#4ECDC4',
+    borderColor: '#e8dcc8',
     backgroundColor: '#15201f',
   },
   listingImage: {

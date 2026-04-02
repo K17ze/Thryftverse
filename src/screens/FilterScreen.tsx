@@ -346,8 +346,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingBottom: 20,
   },
-  headerTitle: { fontSize: 22, fontFamily: 'Inter_800ExtraBold', color: Colors.textPrimary, letterSpacing: -0.5 },
-  clearText: { color: '#4ECDC4', fontSize: 16, fontFamily: 'Inter_600SemiBold' },
+  headerTitle: { fontSize: 22, fontFamily: 'Inter_700Bold', color: Colors.textPrimary, letterSpacing: -0.5 },
+  clearText: { color: '#e8dcc8', fontSize: 16, fontFamily: 'Inter_600SemiBold' },
 
   scrollContent: { paddingTop: 10, paddingBottom: 40 },
   
@@ -366,7 +366,7 @@ const styles = StyleSheet.create({
     paddingRight: 20,
     marginBottom: 16,
   },
-  seeAllText: { color: '#4ECDC4', fontSize: 14, fontFamily: 'Inter_600SemiBold' },
+  seeAllText: { color: '#e8dcc8', fontSize: 14, fontFamily: 'Inter_600SemiBold' },
 
   hScroll: { paddingHorizontal: 20, gap: 10 },
   
@@ -418,7 +418,7 @@ const styles = StyleSheet.create({
   applyBtnText: {
     color: Colors.background,
     fontSize: 18,
-    fontFamily: 'Inter_800ExtraBold',
+    fontFamily: 'Inter_700Bold',
     letterSpacing: -0.5,
   },
 });

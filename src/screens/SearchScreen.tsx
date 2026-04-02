@@ -17,7 +17,8 @@ import Reanimated, { useSharedValue, useAnimatedScrollHandler, FadeInDown } from
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { ProductCard } from '../components/ProductCard';
-import { Colors } from '../constants/colors';
+import { ActiveTheme, Colors } from '../constants/colors';
+import { Typography } from '../constants/typography';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
@@ -28,7 +29,11 @@ import { useBackendData } from '../context/BackendDataContext';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const TEAL = '#4ECDC4';
+const TEAL = '#e8dcc8';
+const IS_LIGHT = ActiveTheme === 'light';
+const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111';
+const PANEL_ALT = IS_LIGHT ? '#ece4d8' : '#1f1f1f';
+const BRAND = IS_LIGHT ? '#2f251b' : TEAL;
 
 // ── Saved Look data ──────────────────────────────────────────
 interface SavedLook {
@@ -121,7 +126,7 @@ function LookCard({ look, onPress }: { look: SavedLook; onPress: () => void }) {
         </View>
         <View style={lookStyles.statsRow}>
           <AnimatedPressable style={lookStyles.statBtn}>
-            <Ionicons name="heart" size={18} color={TEAL} />
+            <Ionicons name="heart" size={18} color={BRAND} />
             <Text style={lookStyles.statCount}>{look.likes}</Text>
           </AnimatedPressable>
           <AnimatedPressable style={lookStyles.statBtn}>
@@ -129,7 +134,7 @@ function LookCard({ look, onPress }: { look: SavedLook; onPress: () => void }) {
             <Text style={lookStyles.statCount}>{look.comments}</Text>
           </AnimatedPressable>
           <AnimatedPressable style={lookStyles.statBtn}>
-            <Ionicons name="bookmark" size={16} color={TEAL} />
+            <Ionicons name="bookmark" size={16} color={BRAND} />
           </AnimatedPressable>
         </View>
       </View>
@@ -139,7 +144,7 @@ function LookCard({ look, onPress }: { look: SavedLook; onPress: () => void }) {
 
 // ── Main Screen ──────────────────────────────────────────────
 export default function SearchScreen() {
-  const [activeTab, setActiveTab] = useState<'SAVED LOOKS' | 'WISHLIST'>('SAVED LOOKS');
+  const [activeTab, setActiveTab] = useState<'SAVED' | 'WISHLIST'>('SAVED');
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const navigation = useNavigation<NavT>();
@@ -153,6 +158,8 @@ export default function SearchScreen() {
     () => listings.filter(l => wishlistIds.includes(l.id)),
     [listings, wishlistIds]
   );
+
+  const listingIdSet = React.useMemo(() => new Set(listings.map((item) => item.id)), [listings]);
 
   const scrollHandler = useAnimatedScrollHandler({
     onScroll: (e) => {
@@ -176,9 +183,19 @@ export default function SearchScreen() {
     !searchQuery || l.title.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const closetTabs = [
+    { key: 'SAVED' as const, label: 'Saved', icon: 'layers-outline' as const },
+    { key: 'WISHLIST' as const, label: 'Wishlist', icon: 'heart-outline' as const },
+  ];
+
+  const resolveLookItemId = React.useCallback(
+    (look: SavedLook) => look.items.find((entry) => listingIdSet.has(entry.id))?.id ?? listings[0]?.id,
+    [listingIdSet, listings]
+  );
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
       {/* ── Header ── */}
       <View style={styles.headerRow}>
@@ -217,20 +234,23 @@ export default function SearchScreen() {
       {/* ── Segmented Control ── */}
       <View style={styles.tabsContainer}>
         <View style={styles.tabsWrapper}>
-          {(['SAVED LOOKS', 'WISHLIST'] as const).map(tab => (
+          {closetTabs.map(tab => (
             <AnimatedPressable
-              key={tab}
-              style={[styles.tab, activeTab === tab && styles.activeTab]}
-              onPress={() => setActiveTab(tab)}
+              key={tab.key}
+              style={[styles.tab, activeTab === tab.key && styles.activeTab]}
+              onPress={() => setActiveTab(tab.key)}
               activeOpacity={0.8}
             >
               <Ionicons
-                name={tab === 'SAVED LOOKS' ? 'layers-outline' : 'heart-outline'}
+                name={tab.icon}
                 size={14}
-                color={activeTab === tab ? Colors.textInverse : Colors.textSecondary}
+                color={activeTab === tab.key ? Colors.textInverse : Colors.textSecondary}
                 style={{ marginRight: 6 }}
               />
-              <Text style={[styles.tabText, activeTab === tab && styles.activeTabText]}>{tab}</Text>
+              <Text style={[styles.tabText, activeTab === tab.key && styles.activeTabText]}>{tab.label}</Text>
+              <Text style={[styles.tabCount, activeTab === tab.key && styles.tabCountActive]}>
+                {tab.key === 'SAVED' ? filteredLooks.length : filteredWishlist.length}
+              </Text>
             </AnimatedPressable>
           ))}
         </View>
@@ -240,9 +260,10 @@ export default function SearchScreen() {
       <View style={{ flex: 1 }}>
         <RefreshIndicator scrollY={scrollY} isRefreshing={refreshing} topInset={20} />
         
-        {activeTab === 'SAVED LOOKS' ? (
+        {activeTab === 'SAVED' ? (
           filteredLooks.length > 0 ? (
             <AnimatedFlatList
+              key="saved-looks"
               data={filteredLooks}
               keyExtractor={(item: any) => item.id}
               contentContainerStyle={styles.listContent}
@@ -262,7 +283,12 @@ export default function SearchScreen() {
                 <Reanimated.View entering={FadeInDown.delay(Math.min(index, 10) * 50).duration(400)}>
                   <LookCard
                     look={item}
-                    onPress={() => {/* Navigate to look detail in future */}}
+                    onPress={() => {
+                      const itemId = resolveLookItemId(item);
+                      if (itemId) {
+                        navigation.navigate('ItemDetail', { itemId });
+                      }
+                    }}
                   />
                 </Reanimated.View>
               )}
@@ -284,6 +310,7 @@ export default function SearchScreen() {
         ) : (
           filteredWishlist.length > 0 ? (
             <AnimatedFlatList
+              key="wishlist-items"
               data={filteredWishlist}
               keyExtractor={(item: any) => item.id}
               numColumns={2}
@@ -333,7 +360,7 @@ export default function SearchScreen() {
 // ── Look Card Styles ─────────────────────────────────────────
 const lookStyles = StyleSheet.create({
   card: {
-    backgroundColor: '#111',
+    backgroundColor: PANEL_BG,
     borderRadius: 20,
     marginBottom: 20,
     overflow: 'hidden',
@@ -372,13 +399,13 @@ const lookStyles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: TEAL,
+    backgroundColor: BRAND,
     marginRight: 6,
   },
   tagLabel: {
     color: '#fff',
     fontSize: 11,
-    fontFamily: 'Inter_500Medium',
+    fontFamily: Typography.family.medium,
   },
   infoRow: {
     flexDirection: 'row',
@@ -397,14 +424,16 @@ const lookStyles = StyleSheet.create({
   },
   lookTitle: {
     color: Colors.textPrimary,
-    fontSize: 15,
-    fontFamily: 'Inter_600SemiBold',
+    fontSize: 16,
+    fontFamily: Typography.family.semibold,
+    letterSpacing: 0.06,
     marginBottom: 2,
   },
   creatorName: {
     color: Colors.textMuted,
     fontSize: 12,
-    fontFamily: 'Inter_400Regular',
+    fontFamily: Typography.family.regular,
+    letterSpacing: 0.1,
   },
   statsRow: {
     flexDirection: 'row',
@@ -419,7 +448,7 @@ const lookStyles = StyleSheet.create({
   statCount: {
     color: Colors.textSecondary,
     fontSize: 13,
-    fontFamily: 'Inter_500Medium',
+    fontFamily: Typography.family.medium,
   },
 });
 
@@ -438,23 +467,24 @@ const styles = StyleSheet.create({
   },
   headerLabel: {
     fontSize: 11,
-    fontFamily: 'Inter_600SemiBold',
-    color: TEAL,
-    letterSpacing: 1.5,
+    fontFamily: Typography.family.semibold,
+    color: BRAND,
+    letterSpacing: 1.1,
     marginBottom: 4,
   },
   hugeTitle: {
-    fontSize: 32,
-    fontFamily: 'Inter_700Bold',
+    fontSize: 31,
+    fontFamily: Typography.family.bold,
     color: Colors.textPrimary,
-    letterSpacing: -0.5,
+    letterSpacing: -0.35,
   },
   headerRight: {
     alignItems: 'flex-end',
   },
   itemCount: {
     fontSize: 13,
-    fontFamily: 'Inter_500Medium',
+    fontFamily: Typography.family.regular,
+    letterSpacing: 0.12,
     color: Colors.textSecondary,
   },
 
@@ -464,19 +494,25 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: '#111',
+    backgroundColor: PANEL_BG,
     borderRadius: 16,
     paddingHorizontal: 14,
     paddingVertical: 12,
     borderWidth: 1,
     borderColor: 'transparent',
   },
-  searchBarFocused: { borderColor: TEAL },
-  searchInput: { flex: 1, fontSize: 15, color: Colors.textPrimary, fontFamily: 'Inter_400Regular' },
+  searchBarFocused: { borderColor: BRAND },
+  searchInput: {
+    flex: 1,
+    fontSize: 15,
+    color: Colors.textPrimary,
+    fontFamily: Typography.family.medium,
+    letterSpacing: 0.08,
+  },
 
   // Tabs
   tabsContainer: { paddingHorizontal: 20, paddingBottom: 12 },
-  tabsWrapper: { flexDirection: 'row', backgroundColor: '#111', borderRadius: 30, padding: 4 },
+  tabsWrapper: { flexDirection: 'row', backgroundColor: PANEL_BG, borderRadius: 30, padding: 4 },
   tab: {
     flex: 1,
     flexDirection: 'row',
@@ -486,8 +522,25 @@ const styles = StyleSheet.create({
     borderRadius: 26,
   },
   activeTab: { backgroundColor: Colors.accent },
-  tabText: { fontSize: 11, fontFamily: 'Inter_700Bold', color: Colors.textSecondary, letterSpacing: 0.8 },
+  tabText: { fontSize: 11, fontFamily: Typography.family.semibold, color: Colors.textSecondary, letterSpacing: 0.2 },
   activeTabText: { color: Colors.textInverse },
+  tabCount: {
+    marginLeft: 6,
+    minWidth: 20,
+    textAlign: 'center',
+    borderRadius: 999,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    overflow: 'hidden',
+    backgroundColor: PANEL_ALT,
+    color: Colors.textMuted,
+    fontSize: 10,
+    fontFamily: Typography.family.semibold,
+  },
+  tabCountActive: {
+    backgroundColor: '#d4c5aa',
+    color: Colors.background,
+  },
 
   // Lists
   listContent: { paddingHorizontal: 20, paddingBottom: 120 },
@@ -506,23 +559,24 @@ const styles = StyleSheet.create({
     width: 88,
     height: 88,
     borderRadius: 44,
-    backgroundColor: '#111',
+    backgroundColor: PANEL_BG,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 20,
   },
   emptyTitle: {
     fontSize: 20,
-    fontFamily: 'Inter_600SemiBold',
+    fontFamily: Typography.family.semibold,
     color: Colors.textPrimary,
     marginBottom: 8,
   },
   emptySubtitle: {
     fontSize: 14,
-    fontFamily: 'Inter_400Regular',
+    fontFamily: Typography.family.regular,
     color: Colors.textSecondary,
     textAlign: 'center',
     lineHeight: 22,
+    letterSpacing: 0.1,
   },
   emptyFooter: {
     alignItems: 'center',
@@ -530,8 +584,9 @@ const styles = StyleSheet.create({
   },
   footerHint: {
     fontSize: 13,
-    fontFamily: 'Inter_400Regular',
+    fontFamily: Typography.family.regular,
     color: Colors.textMuted,
     textAlign: 'center',
+    letterSpacing: 0.1,
   },
 });

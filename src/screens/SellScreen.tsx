@@ -16,8 +16,9 @@ import Reanimated, { useSharedValue, useAnimatedStyle, withSequence, withTiming,
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
-import { Colors } from '../constants/colors';
+import { ActiveTheme, Colors } from '../constants/colors';
 import { Alert, Modal } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { useStore } from '../store/useStore';
 import { SortablePhotoStrip } from '../components/SortablePhotoStrip';
 import { BottomSheetPicker } from '../components/BottomSheetPicker';
@@ -29,7 +30,15 @@ import { buildCreateSyndicatePrefillFromSell } from '../utils/syndicatePrefill';
 const CONDITIONS = ['New with tags', 'Very good', 'Good', 'Satisfactory'];
 const SIZES = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', 'One size'];
 const BRANDS = ['Nike', 'Adidas', 'Zara', 'H&M', 'Ralph Lauren', 'Off-White', 'Stone Island', 'Stüssy', 'Other'];
+const CATEGORY_OPTIONS = ['Women', 'Men', 'Designer', 'Kids', 'Home', 'Electronics', 'Entertainment', 'Hobbies & collectables', 'Sports'];
 const OFFERING_WINDOWS_HOURS = [24, 48, 72];
+const IS_LIGHT = ActiveTheme === 'light';
+const BRAND = IS_LIGHT ? '#2f251b' : '#e8dcc8';
+const HEADER_BG = IS_LIGHT ? '#f3eee7' : '#0a0a0a';
+const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111111';
+const PANEL_SOFT_BG = IS_LIGHT ? '#f7f4ef' : '#171717';
+const PANEL_BORDER = IS_LIGHT ? '#d8d1c6' : '#2b2b2b';
+const FOOTER_BG = IS_LIGHT ? 'rgba(236,234,230,0.97)' : 'rgba(10,10,10,0.95)';
 
 const { width } = Dimensions.get('window');
 
@@ -38,7 +47,7 @@ export default function SellScreen() {
   const { currencyCode } = useCurrencyPref();
   const currencySymbol = CURRENCIES[currencyCode].symbol;
   
-  const [pickerMode, setPickerMode] = useState<'Brand' | 'Size' | 'Condition' | null>(null);
+  const [pickerMode, setPickerMode] = useState<'Brand' | 'Size' | 'Condition' | 'Category' | null>(null);
 
   const [title, setTitle] = useState('');
   const [desc, setDesc] = useState('');
@@ -82,16 +91,56 @@ export default function SellScreen() {
     }
   }, [price, shareCountInput, sharePriceInput, syndicateEnabled]);
 
-  const handleCameraPress = () => {
-    // Fake expo-image-picker by adding 3 mock product photos
-    const samplePhotos = [
-      'https://images.unsplash.com/photo-1542272604-787c3835535d?w=400&q=80', // jeans
-      'https://images.unsplash.com/photo-1516257984-b1b4d707412e?w=400&q=80', // detail
-      'https://images.unsplash.com/photo-1550614000-4b95fcd7dbfc?w=400&q=80', // tag
-    ];
-    setPhotos(samplePhotos);
-    if (syndicateEnabled) {
-      setAuthPhotos(samplePhotos.slice(0, 2));
+  const appendPhotoUri = (uri: string) => {
+    setPhotos((prev) => {
+      const next = [...prev, uri].slice(0, 10);
+      if (syndicateEnabled && authPhotos.length === 0) {
+        setAuthPhotos(next.slice(0, 2));
+      }
+      return next;
+    });
+  };
+
+  const handlePickFromLibrary = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      setErrorMsg('Allow gallery access to upload photos.');
+      shake();
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsMultipleSelection: false,
+      quality: 0.9,
+      allowsEditing: true,
+      aspect: [1, 1],
+    });
+
+    if (!result.canceled && result.assets?.[0]?.uri) {
+      appendPhotoUri(result.assets[0].uri);
+      setErrorMsg('');
+    }
+  };
+
+  const handlePickFromCamera = async () => {
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permission.granted) {
+      setErrorMsg('Allow camera access to take listing photos.');
+      shake();
+      return;
+    }
+
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.9,
+    });
+
+    if (!result.canceled && result.assets?.[0]?.uri) {
+      appendPhotoUri(result.assets[0].uri);
+      setErrorMsg('');
     }
   };
 
@@ -160,6 +209,7 @@ export default function SellScreen() {
 
   const getPickerOptions = () => {
     switch (pickerMode) {
+      case 'Category': return CATEGORY_OPTIONS;
       case 'Condition': return CONDITIONS;
       case 'Size': return SIZES;
       case 'Brand': return BRANDS;
@@ -169,6 +219,7 @@ export default function SellScreen() {
 
   const getPickerSelected = () => {
     switch (pickerMode) {
+      case 'Category': return sellDraft.categoryId;
       case 'Condition': return sellDraft.condition;
       case 'Size': return sellDraft.size;
       case 'Brand': return sellDraft.brand;
@@ -177,6 +228,7 @@ export default function SellScreen() {
   };
 
   const handlePickerSelect = (val: string) => {
+    if (pickerMode === 'Category') updateSellDraft({ categoryId: val, subcategoryId: undefined });
     if (pickerMode === 'Condition') updateSellDraft({ condition: val });
     if (pickerMode === 'Size') updateSellDraft({ size: val });
     if (pickerMode === 'Brand') updateSellDraft({ brand: val });
@@ -184,7 +236,7 @@ export default function SellScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
       {/* ── Scan Header / Upload Area ── */}
       <View style={styles.scanHeader}>
@@ -200,22 +252,29 @@ export default function SellScreen() {
 
         {/* Giant Camera-Centric Upload Box or Photo Strip */}
         {photos.length === 0 ? (
-          <AnimatedPressable 
-            style={styles.giantCameraBox} 
-            activeOpacity={0.9}
-            onPress={handleCameraPress}
-          >
+          <View style={styles.giantCameraBox}>
             <View style={styles.cameraCircle}>
               <Ionicons name="camera" size={40} color={Colors.background} />
             </View>
-            <Text style={styles.cameraText}>Take a photo or upload</Text>
-            <Text style={styles.cameraSubtext}>Clear photos sell 3x faster</Text>
-          </AnimatedPressable>
+            <Text style={styles.cameraText}>Add listing photos</Text>
+            <Text style={styles.cameraSubtext}>Take a photo or upload from your gallery</Text>
+
+            <View style={styles.uploadActionRow}>
+              <AnimatedPressable style={styles.uploadActionBtn} activeOpacity={0.88} onPress={handlePickFromCamera}>
+                <Ionicons name="camera-outline" size={16} color={Colors.background} />
+                <Text style={styles.uploadActionBtnText}>Camera</Text>
+              </AnimatedPressable>
+              <AnimatedPressable style={styles.uploadActionBtn} activeOpacity={0.88} onPress={handlePickFromLibrary}>
+                <Ionicons name="images-outline" size={16} color={Colors.background} />
+                <Text style={styles.uploadActionBtnText}>Gallery</Text>
+              </AnimatedPressable>
+            </View>
+          </View>
         ) : (
           <SortablePhotoStrip 
             photos={photos} 
             onReorder={setPhotos} 
-            onAddPhoto={() => Alert.alert('Add Photo', 'Picker opens here.')} 
+            onAddPhoto={handlePickFromLibrary}
           />
         )}
       </View>
@@ -234,7 +293,7 @@ export default function SellScreen() {
             <TextInput 
               style={styles.textInput} 
               placeholder="e.g. Vintage Nike Sweatshirt" 
-              placeholderTextColor="#555"
+              placeholderTextColor={Colors.textMuted}
               value={title} 
               onChangeText={setTitle} 
             />
@@ -245,7 +304,7 @@ export default function SellScreen() {
             <TextInput 
               style={[styles.textInput, styles.textArea]} 
               placeholder="Add measurements, flaws, and specific details..." 
-              placeholderTextColor="#555"
+              placeholderTextColor={Colors.textMuted}
               value={desc} 
               onChangeText={setDesc} 
               multiline 
@@ -258,7 +317,7 @@ export default function SellScreen() {
             <AnimatedPressable 
               style={styles.pickerRow} 
               activeOpacity={0.7} 
-              onPress={() => navigation.navigate('CategoryTree', { categoryPrefix: 'Sell' })}
+              onPress={() => setPickerMode('Category')}
             >
               <Text style={styles.pickerLabel}>Category</Text>
               <View style={styles.pickerValueArea}>
@@ -326,7 +385,7 @@ export default function SellScreen() {
             <TextInput 
               style={styles.priceInputContent} 
               placeholder="0.00" 
-              placeholderTextColor="#555"
+              placeholderTextColor={Colors.textMuted}
               value={price} 
               onChangeText={handlePriceChange} 
               keyboardType="decimal-pad"
@@ -374,7 +433,7 @@ export default function SellScreen() {
                   onChangeText={(value) => setShareCountInput(sanitizeIntegerInput(value))}
                   keyboardType="number-pad"
                   placeholder="100"
-                  placeholderTextColor="#555"
+                  placeholderTextColor={Colors.textMuted}
                 />
 
                 <Text style={styles.inputLabel}>Initial share price ({currencyCode})</Text>
@@ -384,7 +443,7 @@ export default function SellScreen() {
                   onChangeText={(value) => setSharePriceInput(sanitizeDecimalInput(value))}
                   keyboardType="decimal-pad"
                   placeholder="0.00"
-                  placeholderTextColor="#555"
+                  placeholderTextColor={Colors.textMuted}
                 />
 
                 <Text style={styles.inputLabel}>Offering window</Text>
@@ -482,9 +541,9 @@ const styles = StyleSheet.create({
   keyboardView: { flex: 1 },
   
   scanHeader: {
-    backgroundColor: '#0a0a0a',
+    backgroundColor: HEADER_BG,
     borderBottomWidth: 1,
-    borderBottomColor: '#1A1A1A',
+    borderBottomColor: PANEL_BORDER,
     paddingBottom: 24,
   },
   headerTop: {
@@ -494,19 +553,28 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     height: 64,
   },
-  iconBtn: { width: 44, height: 44, justifyContent: 'center', alignItems: 'center' },
+  iconBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   headerTitle: { fontSize: 16, fontFamily: 'Inter_700Bold', color: Colors.textPrimary, textTransform: 'uppercase', letterSpacing: 1 },
   
   giantCameraBox: {
     marginHorizontal: 20,
     marginTop: 10,
-    height: 200,
-    backgroundColor: '#111',
+    minHeight: 220,
+    backgroundColor: PANEL_BG,
     borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
-    borderColor: '#222',
+    borderColor: PANEL_BORDER,
   },
   cameraCircle: {
     width: 80,
@@ -527,13 +595,34 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: 'Inter_500Medium',
     color: Colors.textMuted,
+    marginBottom: 16,
+  },
+  uploadActionRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  uploadActionBtn: {
+    borderRadius: 999,
+    backgroundColor: Colors.accent,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  uploadActionBtnText: {
+    color: Colors.textInverse,
+    fontSize: 12,
+    fontFamily: 'Inter_700Bold',
   },
 
   scrollContent: { paddingTop: 24, paddingHorizontal: 20 },
   sectionHeading: { fontSize: 14, fontFamily: 'Inter_700Bold', color: Colors.textPrimary, marginBottom: 12, textTransform: 'uppercase', letterSpacing: 1 },
 
   pillInputBox: {
-    backgroundColor: '#111',
+    backgroundColor: PANEL_BG,
+    borderWidth: 1,
+    borderColor: PANEL_BORDER,
     borderRadius: 20,
     padding: 16,
     marginBottom: 16,
@@ -543,7 +632,9 @@ const styles = StyleSheet.create({
   textArea: { minHeight: 80, lineHeight: 24 },
 
   cardGroup: {
-    backgroundColor: '#111',
+    backgroundColor: PANEL_BG,
+    borderWidth: 1,
+    borderColor: PANEL_BORDER,
     borderRadius: 20,
     paddingHorizontal: 16,
     marginBottom: 16,
@@ -553,10 +644,12 @@ const styles = StyleSheet.create({
   pickerValueArea: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   pickerValue: { fontSize: 15, fontFamily: 'Inter_500Medium', color: Colors.textPrimary },
   pickerPlaceholder: { fontSize: 15, fontFamily: 'Inter_500Medium', color: Colors.textMuted },
-  divider: { height: 1, backgroundColor: '#1C1C1C' },
+  divider: { height: 1, backgroundColor: PANEL_BORDER },
 
   pricePillBox: {
-    backgroundColor: '#111',
+    backgroundColor: PANEL_BG,
+    borderWidth: 1,
+    borderColor: PANEL_BORDER,
     borderRadius: 20,
     paddingHorizontal: 20,
     height: 72,
@@ -574,13 +667,13 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_500Medium',
   },
   syndicateCard: {
-    backgroundColor: '#111',
+    backgroundColor: PANEL_BG,
     borderRadius: 20,
     paddingHorizontal: 16,
     paddingVertical: 14,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: '#1f1f1f',
+    borderColor: PANEL_BORDER,
   },
   syndicateTopRow: {
     flexDirection: 'row',
@@ -607,11 +700,11 @@ const styles = StyleSheet.create({
   },
   syndicateToggleWrap: {
     flexDirection: 'row',
-    backgroundColor: '#181818',
+    backgroundColor: PANEL_SOFT_BG,
     borderRadius: 14,
     padding: 4,
     borderWidth: 1,
-    borderColor: '#2b2b2b',
+    borderColor: PANEL_BORDER,
     height: 36,
   },
   syndicateToggleBtn: {
@@ -630,7 +723,7 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
   },
   syndicateToggleTextActive: {
-    color: Colors.background,
+    color: Colors.textInverse,
   },
   syndicateFieldsWrap: {
     marginTop: 14,
@@ -639,10 +732,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: 'Inter_600SemiBold',
     color: Colors.textPrimary,
-    backgroundColor: '#171717',
+    backgroundColor: PANEL_SOFT_BG,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#2b2b2b',
+    borderColor: PANEL_BORDER,
     paddingHorizontal: 12,
     height: 46,
     marginBottom: 10,
@@ -655,14 +748,14 @@ const styles = StyleSheet.create({
   windowChip: {
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#2f2f2f',
-    backgroundColor: '#171717',
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_SOFT_BG,
     paddingHorizontal: 12,
     paddingVertical: 7,
   },
   windowChipActive: {
-    borderColor: '#4ECDC4',
-    backgroundColor: '#16302b',
+    borderColor: BRAND,
+    backgroundColor: IS_LIGHT ? '#ece4d8' : '#2f291f',
   },
   windowChipText: {
     fontSize: 12,
@@ -670,14 +763,14 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
   },
   windowChipTextActive: {
-    color: '#8de5dc',
+    color: BRAND,
   },
   authRow: {
     marginTop: 2,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#2b2b2b',
-    backgroundColor: '#171717',
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_SOFT_BG,
     paddingHorizontal: 10,
     paddingVertical: 10,
     flexDirection: 'row',
@@ -703,19 +796,19 @@ const styles = StyleSheet.create({
   authBtn: {
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#3b4a4b',
-    backgroundColor: '#152024',
+    borderColor: BRAND,
+    backgroundColor: IS_LIGHT ? '#ece4d8' : '#2f291f',
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
   authBtnMuted: {
-    borderColor: '#2f2f2f',
-    backgroundColor: '#151515',
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
   },
   authBtnText: {
     fontSize: 11,
     fontFamily: 'Inter_700Bold',
-    color: '#8de5dc',
+    color: BRAND,
   },
   authBtnTextMuted: {
     color: Colors.textSecondary,
@@ -727,17 +820,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 16,
     paddingBottom: Platform.OS === 'ios' ? 34 : 24,
-    backgroundColor: 'rgba(10, 10, 10, 0.95)',
+    backgroundColor: FOOTER_BG,
     borderTopWidth: 1,
-    borderTopColor: '#1A1A1A',
+    borderTopColor: PANEL_BORDER,
   },
   errorText: { color: Colors.danger, fontSize: 13, fontFamily: 'Inter_500Medium', textAlign: 'center', marginBottom: 12 },
   uploadCta: {
-    backgroundColor: Colors.textPrimary,
+    backgroundColor: Colors.accent,
     height: 60,
     borderRadius: 30,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  uploadCtaText: { color: Colors.background, fontSize: 18, fontFamily: 'Inter_800ExtraBold', letterSpacing: -0.5 },
+  uploadCtaText: { color: Colors.textInverse, fontSize: 18, fontFamily: 'Inter_700Bold', letterSpacing: -0.5 },
 });

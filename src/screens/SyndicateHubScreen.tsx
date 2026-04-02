@@ -15,7 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import Reanimated, { FadeInDown } from 'react-native-reanimated';
-import { Colors } from '../constants/colors';
+import { ActiveTheme, Colors } from '../constants/colors';
 import { RootStackParamList } from '../navigation/types';
 import { formatCompact, getSyndicateMarket, SyndicateAsset } from '../data/tradeHub';
 import { useStore } from '../store/useStore';
@@ -96,7 +96,7 @@ export default function SyndicateHubScreen() {
               <Ionicons
                 name={isPositive ? 'trending-up-outline' : 'trending-down-outline'}
                 size={12}
-                color={isPositive ? '#8de5dc' : '#ff9d9d'}
+                color={isPositive ? '#e8dcc8' : '#ff9d9d'}
               />
               <Text style={[styles.moveText, isPositive ? styles.moveTextUp : styles.moveTextDown]}>
                 {isPositive ? '+' : ''}{item.marketMovePct24h.toFixed(1)}%
@@ -146,7 +146,7 @@ export default function SyndicateHubScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
       <FlatList
         data={filteredAssets}
@@ -255,7 +255,7 @@ const styles = StyleSheet.create({
     paddingBottom: 14,
   },
   headerLabel: {
-    color: '#4ECDC4',
+    color: '#e8dcc8',
     fontSize: 11,
     fontFamily: 'Inter_700Bold',
     letterSpacing: 1,
@@ -264,7 +264,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
     color: Colors.textPrimary,
     fontSize: 32,
-    fontFamily: 'Inter_800ExtraBold',
+    fontFamily: 'Inter_700Bold',
     letterSpacing: -0.7,
   },
   headerSubtitle: {
@@ -354,7 +354,7 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   sortChipActive: {
-    borderColor: '#4ECDC4',
+    borderColor: '#e8dcc8',
     backgroundColor: '#17302b',
   },
   sortChipText: {
@@ -364,7 +364,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   sortChipTextActive: {
-    color: '#8de5dc',
+    color: '#e8dcc8',
   },
   issueBtn: {
     marginTop: 12,
@@ -431,7 +431,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_700Bold',
   },
   moveTextUp: {
-    color: '#8de5dc',
+    color: '#e8dcc8',
   },
   moveTextDown: {
     color: '#ff9d9d',

@@ -180,7 +180,7 @@ const styles = StyleSheet.create({
   coverText: {
     color: '#000',
     fontSize: 10,
-    fontFamily: 'Inter_800ExtraBold',
+    fontFamily: 'Inter_700Bold',
   },
   hintText: {
     color: Colors.textMuted,

@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors } from '../constants/colors';
+import { ActiveTheme, Colors } from '../constants/colors';
 import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
 import { useStore } from '../store/useStore';
@@ -76,7 +76,7 @@ export default function GlobalSearchScreen({ navigation }: Props) {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
       {/* Hero Search Header */}
       <View style={styles.header}>
@@ -95,7 +95,7 @@ export default function GlobalSearchScreen({ navigation }: Props) {
             onSubmitEditing={handleSearchSubmit}
             returnKeyType="search"
             autoCapitalize="none"
-            selectionColor="#4ECDC4"
+            selectionColor="#e8dcc8"
           />
           {query.length > 0 && (
             <AnimatedPressable style={styles.clearBtn} onPress={() => setQuery('')}>

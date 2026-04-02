@@ -11,7 +11,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors } from '../constants/colors';
+import { ActiveTheme, Colors } from '../constants/colors';
+import { Typography } from '../constants/typography';
 import { MY_USER } from '../data/mockData';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -23,7 +24,13 @@ import { getSyndicateMarket } from '../data/tradeHub';
 import { resolveAssetMarketState } from '../data/mockSyndicateData';
 
 type NavT = StackNavigationProp<RootStackParamList>;
-const TEAL = '#4ECDC4';
+const TEAL = '#e8dcc8';
+const IS_LIGHT = ActiveTheme === 'light';
+const BRAND = IS_LIGHT ? '#2f251b' : TEAL;
+const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111';
+const PANEL_SOFT = IS_LIGHT ? '#f4efe7' : '#171717';
+const PANEL_ICON = IS_LIGHT ? '#ece5d9' : '#1a1a1a';
+const PANEL_BORDER = IS_LIGHT ? '#d8d1c6' : '#2a2a2a';
 
 interface QuickAccessItem {
   icon: string;
@@ -70,24 +77,24 @@ export default function MyProfileScreen() {
 
   const quickAccess = React.useMemo<QuickAccessItem[]>(
     () => [
-      { icon: 'receipt-outline', label: 'Orders', route: 'MyOrders', color: '#4ECDC4' },
+      { icon: 'receipt-outline', label: 'Orders', route: 'MyOrders', color: BRAND },
       {
         icon: 'wallet-outline',
         label: 'Wallet',
         route: 'Wallet',
         value: formatFromFiat(120.5, 'GBP', { displayMode: 'fiat' }),
-        color: '#FFD700',
+        color: IS_LIGHT ? '#6a4f2f' : '#d8c6a2',
       },
       {
         icon: 'pie-chart-outline',
         label: 'My Syndicate Holdings',
         route: 'Portfolio',
         value: `${syndicateHoldings.length} assets`,
-        color: '#6dd8ff',
+        color: IS_LIGHT ? '#5c4830' : '#ccb893',
       },
-      { icon: 'bookmark-outline', label: 'Wishlist', route: 'Favourites', color: '#FF6B6B' },
-      { icon: 'color-palette-outline', label: 'Style', route: 'Personalisation', color: '#BB86FC' },
-      { icon: 'people-outline', label: 'Invite', route: 'InviteFriends', color: '#4ECDC4' },
+      { icon: 'bookmark-outline', label: 'Wishlist', route: 'Favourites', color: IS_LIGHT ? '#704b3b' : '#e6c8b4' },
+      { icon: 'color-palette-outline', label: 'Style', route: 'Personalisation', color: IS_LIGHT ? '#6a5a45' : '#d6c6b4' },
+      { icon: 'people-outline', label: 'Invite', route: 'InviteFriends', color: BRAND },
       { icon: 'settings-outline', label: 'Settings', route: 'Settings', color: '#a0a0a0' },
     ],
     [formatFromFiat, syndicateHoldings.length]
@@ -95,7 +102,7 @@ export default function MyProfileScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
 
@@ -105,7 +112,7 @@ export default function MyProfileScreen() {
             <View style={styles.avatarWrap}>
               <Image source={{ uri: MY_USER.avatar }} style={styles.heroAvatar} />
               <View style={styles.verifiedBadge}>
-                <Ionicons name="checkmark-circle" size={20} color={TEAL} />
+                <Ionicons name="checkmark-circle" size={20} color={BRAND} />
               </View>
             </View>
             <AnimatedPressable 
@@ -310,7 +317,7 @@ const styles = StyleSheet.create({
     height: 80,
     borderRadius: 40,
     borderWidth: 2,
-    borderColor: '#222',
+    borderColor: Colors.border,
   },
   verifiedBadge: {
     position: 'absolute',
@@ -324,23 +331,25 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#111',
+    backgroundColor: PANEL_BG,
     alignItems: 'center',
     justifyContent: 'center',
   },
   heroName: {
-    fontSize: 24,
-    fontFamily: 'Inter_700Bold',
+    fontSize: 23,
+    fontFamily: Typography.family.bold,
     color: Colors.textPrimary,
     marginBottom: 4,
     alignSelf: 'flex-start',
+    letterSpacing: -0.3,
   },
   heroLocation: {
     fontSize: 13,
-    fontFamily: 'Inter_400Regular',
+    fontFamily: Typography.family.regular,
     color: Colors.textMuted,
     alignSelf: 'flex-start',
     marginBottom: 16,
+    letterSpacing: 0.1,
   },
   editProfileBtn: {
     alignSelf: 'flex-start',
@@ -349,50 +358,56 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     borderWidth: 1,
     borderColor: Colors.border,
-    backgroundColor: '#111',
+    backgroundColor: PANEL_BG,
   },
   editProfileText: {
     color: Colors.textPrimary,
     fontSize: 13,
-    fontFamily: 'Inter_600SemiBold',
+    fontFamily: Typography.family.semibold,
+    letterSpacing: 0.18,
   },
 
   // Stats
   statsRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#111',
+    alignItems: 'stretch',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    backgroundColor: PANEL_BG,
     borderRadius: 20,
-    padding: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     marginTop: 24,
     width: '100%',
+    gap: 8,
   },
   statItem: {
-    flex: 1,
+    width: '48%',
     alignItems: 'center',
+    borderRadius: 12,
+    backgroundColor: PANEL_SOFT,
+    paddingVertical: 10,
   },
   statNumber: {
     fontSize: 18,
-    fontFamily: 'Inter_700Bold',
+    fontFamily: Typography.family.bold,
     color: Colors.textPrimary,
     marginBottom: 4,
   },
   statLabel: {
-    fontSize: 9,
-    fontFamily: 'Inter_600SemiBold',
+    fontSize: 10,
+    fontFamily: Typography.family.semibold,
     color: Colors.textMuted,
-    letterSpacing: 0.8,
+    letterSpacing: 0.55,
   },
   statDivider: {
-    width: 1,
-    height: 28,
-    backgroundColor: '#2a2a2a',
+    display: 'none',
   },
 
   // Quick Access
   quickAccessCard: {
     marginHorizontal: 20,
-    backgroundColor: '#111',
+    backgroundColor: PANEL_BG,
     borderRadius: 24,
     padding: 20,
     marginBottom: 24,
@@ -403,15 +418,16 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   quickItem: {
-    width: '30%',
+    width: '47%',
     alignItems: 'center',
     marginBottom: 20,
+    minHeight: 90,
   },
   quickIconCircle: {
     width: 52,
     height: 52,
     borderRadius: 16,
-    backgroundColor: '#1a1a1a',
+    backgroundColor: PANEL_ICON,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 8,
@@ -419,27 +435,29 @@ const styles = StyleSheet.create({
   },
   quickLabel: {
     fontSize: 12,
-    fontFamily: 'Inter_500Medium',
+    fontFamily: Typography.family.medium,
     color: Colors.textSecondary,
     textAlign: 'center',
-    lineHeight: 14,
+    lineHeight: 16,
+    letterSpacing: 0.1,
   },
   quickValue: {
     fontSize: 11,
-    fontFamily: 'Inter_600SemiBold',
-    color: TEAL,
+    fontFamily: Typography.family.semibold,
+    color: BRAND,
     marginTop: 2,
+    letterSpacing: 0.08,
   },
 
   // Portfolio Summary
   portfolioSummaryCard: {
     marginHorizontal: 20,
-    backgroundColor: '#111',
+    backgroundColor: PANEL_BG,
     borderRadius: 24,
     padding: 20,
     marginBottom: 24,
     borderWidth: 1,
-    borderColor: '#24313b',
+    borderColor: PANEL_BORDER,
   },
   portfolioSummaryTop: {
     flexDirection: 'row',
@@ -449,9 +467,9 @@ const styles = StyleSheet.create({
   },
   portfolioSummaryLabel: {
     fontSize: 11,
-    fontFamily: 'Inter_700Bold',
-    color: TEAL,
-    letterSpacing: 1.2,
+    fontFamily: Typography.family.semibold,
+    color: BRAND,
+    letterSpacing: 0.9,
   },
   portfolioSummaryLinkBtn: {
     flexDirection: 'row',
@@ -460,14 +478,14 @@ const styles = StyleSheet.create({
   },
   portfolioSummaryLinkText: {
     fontSize: 12,
-    fontFamily: 'Inter_600SemiBold',
-    color: TEAL,
+    fontFamily: Typography.family.semibold,
+    color: BRAND,
   },
   portfolioSummaryValue: {
-    fontSize: 28,
-    fontFamily: 'Inter_800ExtraBold',
+    fontSize: 26,
+    fontFamily: Typography.family.bold,
     color: Colors.textPrimary,
-    letterSpacing: -0.5,
+    letterSpacing: -0.35,
   },
   portfolioSummaryMetaRow: {
     marginTop: 10,
@@ -478,15 +496,16 @@ const styles = StyleSheet.create({
   },
   portfolioSummaryMeta: {
     fontSize: 12,
-    fontFamily: 'Inter_500Medium',
+    fontFamily: Typography.family.medium,
     color: Colors.textSecondary,
+    letterSpacing: 0.1,
   },
   portfolioSummaryPnl: {
     fontSize: 12,
-    fontFamily: 'Inter_700Bold',
+    fontFamily: Typography.family.semibold,
   },
   portfolioPnlUp: {
-    color: '#8de5dc',
+    color: BRAND,
   },
   portfolioPnlDown: {
     color: '#ff9d9d',
@@ -505,7 +524,8 @@ const styles = StyleSheet.create({
   portfolioSummaryCtaText: {
     color: Colors.background,
     fontSize: 11,
-    fontFamily: 'Inter_700Bold',
+    fontFamily: Typography.family.semibold,
+    letterSpacing: 0.16,
   },
 
   // Wardrobe
@@ -521,16 +541,16 @@ const styles = StyleSheet.create({
   },
   wardrobeSectionLabel: {
     fontSize: 11,
-    fontFamily: 'Inter_600SemiBold',
-    color: TEAL,
-    letterSpacing: 1.5,
+    fontFamily: Typography.family.semibold,
+    color: BRAND,
+    letterSpacing: 1,
     marginBottom: 4,
   },
   wardrobeTitle: {
     fontSize: 22,
-    fontFamily: 'Inter_700Bold',
+    fontFamily: Typography.family.bold,
     color: Colors.textPrimary,
-    letterSpacing: -0.3,
+    letterSpacing: -0.25,
   },
   viewAllBtn: {
     flexDirection: 'row',
@@ -539,8 +559,9 @@ const styles = StyleSheet.create({
   },
   viewAllText: {
     fontSize: 13,
-    fontFamily: 'Inter_600SemiBold',
-    color: TEAL,
+    fontFamily: Typography.family.semibold,
+    color: BRAND,
+    letterSpacing: 0.16,
   },
   wardrobeScroll: {
     paddingLeft: 20,
@@ -563,14 +584,15 @@ const styles = StyleSheet.create({
   },
   wardrobePrice: {
     fontSize: 14,
-    fontFamily: 'Inter_600SemiBold',
+    fontFamily: Typography.family.semibold,
     color: Colors.textPrimary,
   },
   wardrobeBrand: {
     fontSize: 12,
-    fontFamily: 'Inter_400Regular',
+    fontFamily: Typography.family.regular,
     color: Colors.textSecondary,
     marginTop: 2,
+    letterSpacing: 0.08,
   },
   wardrobeLikes: {
     position: 'absolute',
@@ -586,30 +608,31 @@ const styles = StyleSheet.create({
   },
   wardrobeLikeCount: {
     fontSize: 10,
-    fontFamily: 'Inter_500Medium',
+    fontFamily: Typography.family.medium,
     color: Colors.textSecondary,
   },
 
   // Badges
   badgesCard: {
     marginHorizontal: 20,
-    backgroundColor: '#111',
+    backgroundColor: PANEL_BG,
     borderRadius: 24,
     padding: 20,
     marginBottom: 16,
   },
   badgesSectionLabel: {
     fontSize: 11,
-    fontFamily: 'Inter_600SemiBold',
-    color: TEAL,
-    letterSpacing: 1.5,
+    fontFamily: Typography.family.semibold,
+    color: BRAND,
+    letterSpacing: 1,
     marginBottom: 4,
   },
   badgesTitle: {
     fontSize: 20,
-    fontFamily: 'Inter_700Bold',
+    fontFamily: Typography.family.bold,
     color: Colors.textPrimary,
     marginBottom: 20,
+    letterSpacing: -0.2,
   },
   badgeRow: { flexDirection: 'row', gap: 16 },
   badgeItem: { alignItems: 'center', gap: 8 },
@@ -617,15 +640,15 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: '#1a1a1a',
+    backgroundColor: PANEL_ICON,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: '#2a2a2a',
+    borderColor: PANEL_BORDER,
   },
   badgeCircleEarned: {
-    borderColor: TEAL + '60',
-    backgroundColor: TEAL + '15',
+    borderColor: BRAND + '50',
+    backgroundColor: BRAND + '14',
   },
   badgeLabel: {
     fontSize: 11,
@@ -635,6 +658,6 @@ const styles = StyleSheet.create({
     maxWidth: 64,
   },
   badgeLabelEarned: {
-    color: TEAL,
+    color: BRAND,
   },
 });

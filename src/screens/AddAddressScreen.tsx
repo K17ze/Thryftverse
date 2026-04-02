@@ -11,42 +11,74 @@ import {
   KeyboardAvoidingView,
   Platform
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors } from '../constants/colors';
+import { ActiveTheme, Colors } from '../constants/colors';
 import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
 import { useStore } from '../store/useStore';
 import { useToast } from '../context/ToastContext';
+import { createUserAddress } from '../services/commerceApi';
 
 type Props = StackScreenProps<RootStackParamList, 'AddAddress'>;
+const IS_LIGHT = ActiveTheme === 'light';
+const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111111';
+const PANEL_SOFT_BG = IS_LIGHT ? '#f7f4ef' : '#151515';
+const PANEL_BORDER = IS_LIGHT ? '#d8d1c6' : '#2a2a2a';
+const FOOTER_BG = IS_LIGHT ? 'rgba(236,234,230,0.97)' : 'rgba(10,10,10,0.95)';
 
 export default function AddAddressScreen({ navigation }: Props) {
+  const insets = useSafeAreaInsets();
   const [name, setName] = useState('');
   const [street, setStreet] = useState('');
   const [city, setCity] = useState('');
   const [postcode, setPostcode] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const currentUser = useStore((state) => state.currentUser);
   const saveAddress = useStore((state) => state.saveAddress);
   const { show } = useToast();
 
   const isFormValid = name.trim() && street.trim() && city.trim() && postcode.trim();
 
-  const handleSave = () => {
-    if (isFormValid) {
+  const handleSave = async () => {
+    if (!isFormValid || isSaving) {
+      return;
+    }
+
+    const nextAddress = {
+      name: name.trim(),
+      street: street.trim(),
+      city: city.trim(),
+      postcode: postcode.trim().toUpperCase(),
+      isDefault: true,
+    };
+
+    setIsSaving(true);
+    try {
+      const userId = currentUser?.id ?? 'u1';
+      const saved = await createUserAddress(userId, nextAddress);
+
       saveAddress({
-        name: name.trim(),
-        street: street.trim(),
-        city: city.trim(),
-        postcode: postcode.trim().toUpperCase(),
+        id: saved.id,
+        name: saved.name,
+        street: saved.street,
+        city: saved.city,
+        postcode: saved.postcode,
+        isDefault: saved.isDefault,
       });
       show('Delivery address saved', 'success');
+    } catch {
+      saveAddress(nextAddress);
+      show('Address saved locally. Backend sync unavailable.', 'info');
+    } finally {
+      setIsSaving(false);
       navigation.goBack();
     }
   };
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
       <View style={styles.header}>
         <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.8}>
@@ -73,7 +105,7 @@ export default function AddAddressScreen({ navigation }: Props) {
                 placeholderTextColor={Colors.textMuted}
                 value={name}
                 onChangeText={setName}
-                selectionColor="#4ECDC4"
+                selectionColor={Colors.accent}
               />
             </View>
           </View>
@@ -87,7 +119,7 @@ export default function AddAddressScreen({ navigation }: Props) {
                 placeholderTextColor={Colors.textMuted}
                 value={street}
                 onChangeText={setStreet}
-                selectionColor="#4ECDC4"
+                selectionColor={Colors.accent}
               />
             </View>
           </View>
@@ -102,7 +134,7 @@ export default function AddAddressScreen({ navigation }: Props) {
                   placeholderTextColor={Colors.textMuted}
                   value={city}
                   onChangeText={setCity}
-                  selectionColor="#4ECDC4"
+                  selectionColor={Colors.accent}
                 />
               </View>
             </View>
@@ -117,7 +149,7 @@ export default function AddAddressScreen({ navigation }: Props) {
                   value={postcode}
                   onChangeText={setPostcode}
                   autoCapitalize="characters"
-                  selectionColor="#4ECDC4"
+                  selectionColor={Colors.accent}
                 />
               </View>
             </View>
@@ -131,14 +163,16 @@ export default function AddAddressScreen({ navigation }: Props) {
 
         </ScrollView>
 
-        <View style={styles.footer}>
+        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 20) }]}>
           <AnimatedPressable 
-            style={[styles.saveBtn, !isFormValid && styles.saveBtnDisabled]} 
+            style={[styles.saveBtn, (!isFormValid || isSaving) && styles.saveBtnDisabled]} 
             onPress={handleSave}
-            disabled={!isFormValid}
+            disabled={!isFormValid || isSaving}
             activeOpacity={0.9}
           >
-            <Text style={[styles.saveBtnText, !isFormValid && styles.saveBtnTextDisabled]}>Save Address</Text>
+            <Text style={[styles.saveBtnText, (!isFormValid || isSaving) && styles.saveBtnTextDisabled]}>
+              {isSaving ? 'Saving...' : 'Save Address'}
+            </Text>
           </AnimatedPressable>
         </View>
       </KeyboardAvoidingView>
@@ -157,14 +191,23 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     paddingBottom: 20,
   },
-  backBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#111', alignItems: 'center', justifyContent: 'center' },
+  backBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   headerTitle: { fontSize: 17, fontFamily: 'Inter_700Bold', color: Colors.textPrimary },
 
   content: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: 40 },
   
   heroCopy: {
     fontSize: 28,
-    fontFamily: 'Inter_800ExtraBold',
+    fontFamily: 'Inter_700Bold',
     color: Colors.textPrimary,
     letterSpacing: -1,
     lineHeight: 34,
@@ -183,13 +226,13 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
   inputWrapper: {
-    backgroundColor: '#111',
+    backgroundColor: PANEL_BG,
     borderRadius: 20,
     paddingHorizontal: 20,
     height: 60,
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: '#222',
+    borderColor: PANEL_BORDER,
   },
   input: {
     fontSize: 16,
@@ -202,7 +245,9 @@ const styles = StyleSheet.create({
   defaultToggleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#111',
+    backgroundColor: PANEL_BG,
+    borderWidth: 1,
+    borderColor: PANEL_BORDER,
     padding: 20,
     borderRadius: 20,
     marginTop: 16,
@@ -218,20 +263,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 16,
     paddingBottom: Platform.OS === 'ios' ? 34 : 24,
-    backgroundColor: 'rgba(10, 10, 10, 0.95)',
+    borderTopWidth: 1,
+    borderTopColor: PANEL_BORDER,
+    backgroundColor: FOOTER_BG,
   },
   saveBtn: {
-    backgroundColor: Colors.textPrimary,
+    backgroundColor: Colors.accent,
     height: 56,
     borderRadius: 28,
     alignItems: 'center',
     justifyContent: 'center',
   },
   saveBtnDisabled: {
-    backgroundColor: '#222',
+    backgroundColor: PANEL_SOFT_BG,
+    borderWidth: 1,
+    borderColor: PANEL_BORDER,
   },
   saveBtnText: {
-    color: Colors.background,
+    color: Colors.textInverse,
     fontSize: 16,
     fontFamily: 'Inter_700Bold',
   },

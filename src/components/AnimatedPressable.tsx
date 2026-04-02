@@ -20,6 +20,8 @@ interface Props extends Omit<PressableProps, 'style' | 'children'> {
   disableAnimation?: boolean;
 }
 
+const AnimatedNativePressable = Reanimated.createAnimatedComponent(Pressable);
+
 export function AnimatedPressable({
   children,
   onPress,
@@ -27,43 +29,50 @@ export function AnimatedPressable({
   onPressIn,
   onPressOut,
   style,
-  scaleValue = 0.96,
+  scaleValue = 1,
   disableAnimation = false,
   disabled = false,
   activeOpacity,
   ...rest
 }: Props) {
   const scale = useSharedValue(1);
+  const opacity = useSharedValue(1);
 
   const animStyle = useAnimatedStyle(() => ({
     transform: [{ scale: scale.value }],
+    opacity: opacity.value,
   }));
 
   return (
-    <Reanimated.View style={[animStyle, style]}>
-      <Pressable
-        onPressIn={(event) => {
-          if (!disabled && !disableAnimation) {
-            scale.value = withTiming(scaleValue, { duration: 100 });
-          }
-          if (onPressIn) {
-            onPressIn(event);
-          }
-        }}
-        onPressOut={(event) => {
-          if (!disableAnimation) {
-            scale.value = withSpring(1, { damping: 15, stiffness: 400 });
-          }
-          if (onPressOut) {
-            onPressOut(event);
-          }
-        }}
-        onPress={disabled ? undefined : onPress}
-        onLongPress={disabled ? undefined : onLongPress}
-        {...rest}
-      >
-        {children}
-      </Pressable>
-    </Reanimated.View>
+    <AnimatedNativePressable
+      style={[style, animStyle]}
+      onPressIn={(event) => {
+        if (!disabled && !disableAnimation) {
+          scale.value = withTiming(scaleValue, { duration: 85 });
+        }
+        if (typeof activeOpacity === 'number') {
+          opacity.value = withTiming(activeOpacity, { duration: 85 });
+        }
+        if (onPressIn) {
+          onPressIn(event);
+        }
+      }}
+      onPressOut={(event) => {
+        if (!disableAnimation) {
+          scale.value = withSpring(1, { damping: 18, stiffness: 420 });
+        }
+        if (typeof activeOpacity === 'number') {
+          opacity.value = withTiming(1, { duration: 110 });
+        }
+        if (onPressOut) {
+          onPressOut(event);
+        }
+      }}
+      onPress={disabled ? undefined : onPress}
+      onLongPress={disabled ? undefined : onLongPress}
+      {...rest}
+    >
+      {children}
+    </AnimatedNativePressable>
   );
 }

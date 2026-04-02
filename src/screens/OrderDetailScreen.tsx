@@ -13,11 +13,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
-import { Colors } from '../constants/colors';
+import { ActiveTheme, Colors } from '../constants/colors';
 import { RootStackParamList } from '../navigation/types';
 import { MOCK_LISTINGS, MOCK_USERS } from '../data/mockData';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useBackendData } from '../context/BackendDataContext';
+import { getOrder } from '../services/commerceApi';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 type RouteT = RouteProp<RootStackParamList, 'OrderDetail'>;
@@ -31,60 +32,192 @@ type TrackingStep = {
   active?: boolean;
 };
 
-export default function OrderDetailScreen() {
-  const navigation = useNavigation<NavT>();
-  const route = useRoute<RouteT>();
-  const { formatFromFiat } = useFormattedPrice();
-  const { listings } = useBackendData();
-  const { orderId } = route.params;
+type OrderStatus = 'created' | 'paid' | 'shipped' | 'delivered' | 'cancelled';
 
-  // Find order from mock data  
-  const listing = listings[0] || MOCK_LISTINGS[0];
-  const seller = MOCK_USERS[0];
-  const buyerProtectionFee = listing.price * 0.05 + 0.7;
-  const postageFee = 2.89;
-  const totalPaid = listing.price + buyerProtectionFee + postageFee;
+function normalizeOrderStatus(status?: string): OrderStatus {
+  if (status === 'created' || status === 'paid' || status === 'shipped' || status === 'delivered' || status === 'cancelled') {
+    return status;
+  }
 
-  const trackingSteps: TrackingStep[] = [
+  return 'shipped';
+}
+
+function buildTrackingSteps(status: OrderStatus, sellerUsername: string): TrackingStep[] {
+  if (status === 'cancelled') {
+    return [
+      {
+        id: 'cancelled',
+        label: 'Order cancelled',
+        subtitle: 'This order was cancelled and no further delivery updates will be shown.',
+        done: false,
+        active: true,
+      },
+    ];
+  }
+
+  const activeIndexByStatus: Record<Exclude<OrderStatus, 'cancelled'>, number> = {
+    created: 0,
+    paid: 1,
+    shipped: 2,
+    delivered: 4,
+  };
+
+  const activeIndex = activeIndexByStatus[status as Exclude<OrderStatus, 'cancelled'>];
+  const allDone = status === 'delivered';
+
+  const steps: Array<Omit<TrackingStep, 'done' | 'active'>> = [
     {
       id: 's1',
       label: 'Order confirmed',
       subtitle: 'Payment received. Seller has been notified.',
       date: '19 Mar 2026',
-      done: true,
     },
     {
       id: 's2',
       label: 'Seller preparing',
-      subtitle: `${seller.username} is packing your order.`,
+      subtitle: `${sellerUsername} is packing your order.`,
       date: '20 Mar 2026',
-      done: true,
     },
     {
       id: 's3',
       label: 'In transit',
       subtitle: 'Your parcel is on the way.',
       date: '21 Mar 2026',
-      done: true,
-      active: true,
     },
     {
       id: 's4',
       label: 'Out for delivery',
       subtitle: 'Your parcel will arrive today.',
-      done: false,
     },
     {
       id: 's5',
       label: 'Delivered',
       subtitle: 'You have 2 days to raise any issues.',
-      done: false,
     },
   ];
 
+  return steps.map((step, index) => ({
+    ...step,
+    done: allDone || index < activeIndex,
+    active: !allDone && index === activeIndex,
+  }));
+}
+
+function getStatusBanner(status: OrderStatus, sellerUsername: string) {
+  if (status === 'created') {
+    return {
+      label: 'Awaiting payment',
+      subtitle: 'Complete payment to confirm this order and notify the seller.',
+    };
+  }
+
+  if (status === 'paid') {
+    return {
+      label: 'Seller preparing',
+      subtitle: `${sellerUsername} is preparing your parcel for dispatch.`,
+    };
+  }
+
+  if (status === 'delivered') {
+    return {
+      label: 'Delivered',
+      subtitle: 'Delivery marked complete. You can now leave a review.',
+    };
+  }
+
+  if (status === 'cancelled') {
+    return {
+      label: 'Cancelled',
+      subtitle: 'This order has been cancelled.',
+    };
+  }
+
+  return {
+    label: 'In transit',
+    subtitle: `${sellerUsername} has to send it by 26 Mar. We will keep you updated.`,
+  };
+}
+
+export default function OrderDetailScreen() {
+  const navigation = useNavigation<NavT>();
+  const route = useRoute<RouteT>();
+  const { formatFromFiat } = useFormattedPrice();
+  const { listings } = useBackendData();
+  const { orderId } = route.params;
+  const [backendOrder, setBackendOrder] = React.useState<
+    | {
+        id: string;
+        buyerId: string;
+        sellerId: string;
+        listingId: string;
+        subtotalGbp: number;
+        buyerProtectionFeeGbp: number;
+        totalGbp: number;
+        status: string;
+        addressId: number | null;
+        paymentMethodId: number | null;
+        createdAt: string;
+        updatedAt: string;
+      }
+    | null
+  >(null);
+  const [isSyncingOrder, setIsSyncingOrder] = React.useState(false);
+
+  React.useEffect(() => {
+    let cancelled = false;
+
+    const syncOrder = async () => {
+      setIsSyncingOrder(true);
+      try {
+        const order = await getOrder(orderId);
+        if (!cancelled) {
+          setBackendOrder(order);
+        }
+      } catch {
+        if (!cancelled) {
+          setBackendOrder(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsSyncingOrder(false);
+        }
+      }
+    };
+
+    void syncOrder();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [orderId]);
+
+  const listingPool = listings.length > 0 ? listings : MOCK_LISTINGS;
+  const listingId = backendOrder?.listingId;
+  const listing =
+    (listingId
+      ? listingPool.find((item) => item.id === listingId) ?? MOCK_LISTINGS.find((item) => item.id === listingId)
+      : undefined) ??
+    listingPool[0] ??
+    MOCK_LISTINGS[0];
+
+  const seller =
+    MOCK_USERS.find((item) => item.id === (backendOrder?.sellerId ?? listing.sellerId)) ??
+    MOCK_USERS[0];
+
+  const subtotal = backendOrder?.subtotalGbp ?? listing.price;
+  const buyerProtectionFee = backendOrder?.buyerProtectionFeeGbp ?? listing.price * 0.05 + 0.7;
+  const postageFee = backendOrder
+    ? Math.max(0, Number((backendOrder.totalGbp - subtotal - buyerProtectionFee).toFixed(2)))
+    : 2.89;
+  const totalPaid = backendOrder?.totalGbp ?? subtotal + buyerProtectionFee + postageFee;
+
+  const orderStatus = normalizeOrderStatus(backendOrder?.status);
+  const trackingSteps = buildTrackingSteps(orderStatus, seller.username);
+  const statusBanner = getStatusBanner(orderStatus, seller.username);
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
       {/* ── Header ── */}
       <View style={styles.header}>
@@ -118,10 +251,11 @@ export default function OrderDetailScreen() {
         <View style={styles.statusBanner}>
           <Ionicons name="cube-outline" size={20} color={Colors.accent} />
           <View style={{ flex: 1 }}>
-            <Text style={styles.statusLabel}>In Transit</Text>
-            <Text style={styles.statusSub}>{seller.username} has to send it by 26 Mar. We'll keep you updated.</Text>
+            <Text style={styles.statusLabel}>{statusBanner.label}</Text>
+            <Text style={styles.statusSub}>{statusBanner.subtitle}</Text>
           </View>
         </View>
+        {isSyncingOrder ? <Text style={styles.syncHint}>Syncing live order status...</Text> : null}
 
         {/* ── Tracking Timeline ── */}
         <Text style={styles.sectionTitle}>Tracking</Text>
@@ -181,7 +315,7 @@ export default function OrderDetailScreen() {
         {/* ── Transaction Info ── */}
         <Text style={styles.sectionTitle}>Transaction</Text>
         <View style={styles.txCard}>
-          <TxRow label="Item price" value={formatFromFiat(listing.price, 'GBP', { displayMode: 'fiat' })} />
+          <TxRow label="Item price" value={formatFromFiat(subtotal, 'GBP', { displayMode: 'fiat' })} />
           <TxRow label="Buyer protection" value={formatFromFiat(buyerProtectionFee, 'GBP', { displayMode: 'fiat' })} />
           <TxRow label="Postage" value={`from ${formatFromFiat(postageFee, 'GBP', { displayMode: 'fiat' })}`} />
           <View style={styles.txDivider} />
@@ -201,7 +335,7 @@ export default function OrderDetailScreen() {
           <AnimatedPressable 
             style={styles.actionBtnPrimary} 
             activeOpacity={0.85}
-            onPress={() => navigation.navigate('WriteReview', { orderId: listing.id })}
+            onPress={() => navigation.navigate('WriteReview', { orderId })}
           >
             <Text style={styles.actionBtnPrimaryText}>Mark as received</Text>
           </AnimatedPressable>
@@ -282,6 +416,13 @@ const styles = StyleSheet.create({
   },
   statusLabel: { fontSize: 15, fontFamily: 'Inter_700Bold', color: Colors.accent, marginBottom: 4 },
   statusSub: { fontSize: 13, fontFamily: 'Inter_400Regular', color: Colors.textSecondary, lineHeight: 20 },
+  syncHint: {
+    marginTop: -18,
+    marginBottom: 22,
+    fontSize: 12,
+    fontFamily: 'Inter_500Medium',
+    color: Colors.textMuted,
+  },
 
   sectionTitle: {
     fontSize: 13,

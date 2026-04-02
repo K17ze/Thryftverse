@@ -10,7 +10,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
-import { Colors } from '../constants/colors';
+import { ActiveTheme, Colors } from '../constants/colors';
 import AuctionsScreen from './AuctionsScreen';
 import SyndicateScreen from './SyndicateScreen';
 import { useStore } from '../store/useStore';
@@ -19,6 +19,12 @@ import { useFormattedPrice } from '../hooks/useFormattedPrice';
 
 type TradeHubTab = 'AUCTIONS' | 'SYNDICATE';
 type NavT = StackNavigationProp<RootStackParamList>;
+const IS_LIGHT = ActiveTheme === 'light';
+const BRAND = IS_LIGHT ? '#2f251b' : '#e8dcc8';
+const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111111';
+const PANEL_TINT_BG = IS_LIGHT ? '#ece4d8' : '#1b1712';
+const PANEL_BORDER = IS_LIGHT ? '#d8d1c6' : '#272727';
+const PANEL_BORDER_STRONG = IS_LIGHT ? '#d0c3af' : '#3a342b';
 
 export default function TradeHubScreen() {
   const navigation = useNavigation<NavT>();
@@ -52,26 +58,17 @@ export default function TradeHubScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
       <View style={styles.headerWrap}>
         <View>
           <Text style={styles.headerLabel}>MARKET LAYERS</Text>
           <View style={styles.titleRow}>
-            <Text style={styles.headerTitle}>Trade HUB</Text>
-            <Ionicons name="sparkles-outline" size={18} color="#4ECDC4" />
+            <Text style={styles.headerTitle}>Trade Hub</Text>
+            <Ionicons name="sparkles-outline" size={18} color={BRAND} />
           </View>
-          <Text style={styles.headerSubtitle}>Auctions and asset syndicates in one desk</Text>
+          <Text style={styles.headerSubtitle}>Timed auctions and 1ze fractional syndicates in one desk</Text>
         </View>
-
-        <AnimatedPressable
-          style={styles.headerHubBtn}
-          activeOpacity={0.9}
-          onPress={() => navigation.navigate('SyndicateHub')}
-        >
-          <Ionicons name="grid-outline" size={14} color={Colors.background} />
-          <Text style={styles.headerHubBtnText}>Hub</Text>
-        </AnimatedPressable>
       </View>
 
       <View style={styles.tabSwitcher}>
@@ -82,14 +79,24 @@ export default function TradeHubScreen() {
             onPress={() => setActiveTab(tab)}
             activeOpacity={0.9}
           >
-            <Ionicons
-              name={tab === 'AUCTIONS' ? 'hammer-outline' : 'pie-chart-outline'}
-              size={14}
-              color={activeTab === tab ? Colors.textInverse : Colors.textSecondary}
-            />
-            <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>{tab}</Text>
+            <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
+              {tab === 'AUCTIONS' ? 'Auctions' : 'Syndicate'}
+            </Text>
           </AnimatedPressable>
         ))}
+      </View>
+
+      <View style={styles.modeCard}>
+        <Ionicons
+          name={activeTab === 'AUCTIONS' ? 'hammer-outline' : 'pie-chart-outline'}
+          size={14}
+          color={BRAND}
+        />
+        <Text style={styles.modeCardText}>
+          {activeTab === 'AUCTIONS'
+            ? 'Auction mode: timed bids only, winner is highest valid bid at close.'
+            : 'Syndicate mode: fractional unit trading, settlements quoted in 1ze with local previews.'}
+        </Text>
       </View>
 
       <AnimatedPressable
@@ -106,37 +113,6 @@ export default function TradeHubScreen() {
         </View>
         <Text style={styles.activityText} numberOfLines={2}>{latestActivityText}</Text>
       </AnimatedPressable>
-
-      {activeTab === 'SYNDICATE' ? (
-        <View style={styles.quickNavRow}>
-          <AnimatedPressable
-            style={styles.quickNavBtn}
-            activeOpacity={0.9}
-            onPress={() => navigation.navigate('Portfolio')}
-          >
-            <Ionicons name="pie-chart-outline" size={14} color={Colors.background} />
-            <Text style={styles.quickNavText}>Portfolio</Text>
-          </AnimatedPressable>
-
-          <AnimatedPressable
-            style={styles.quickNavBtn}
-            activeOpacity={0.9}
-            onPress={() => navigation.navigate('SyndicateOrderHistory')}
-          >
-            <Ionicons name="time-outline" size={14} color={Colors.background} />
-            <Text style={styles.quickNavText}>Orders</Text>
-          </AnimatedPressable>
-
-          <AnimatedPressable
-            style={styles.quickNavBtn}
-            activeOpacity={0.9}
-            onPress={() => navigation.navigate('SyndicateOnboarding')}
-          >
-            <Ionicons name="sparkles-outline" size={14} color={Colors.background} />
-            <Text style={styles.quickNavText}>Guide</Text>
-          </AnimatedPressable>
-        </View>
-      ) : null}
 
       <View style={styles.contentWrap}>
         {activeTab === 'AUCTIONS' ? <AuctionsScreen /> : <SyndicateScreen />}
@@ -159,7 +135,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   headerLabel: {
-    color: '#4ECDC4',
+    color: BRAND,
     fontSize: 11,
     fontFamily: 'Inter_600SemiBold',
     letterSpacing: 1.3,
@@ -182,39 +158,44 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: 'Inter_500Medium',
   },
-  headerHubBtn: {
-    marginTop: 4,
-    borderRadius: 999,
-    backgroundColor: Colors.accent,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  headerHubBtnText: {
-    color: Colors.background,
-    fontSize: 11,
-    fontFamily: 'Inter_700Bold',
-  },
   tabSwitcher: {
     marginHorizontal: 16,
     marginBottom: 12,
-    backgroundColor: '#111111',
+    backgroundColor: PANEL_BG,
     borderRadius: 26,
     borderWidth: 1,
-    borderColor: '#272727',
+    borderColor: PANEL_BORDER,
     padding: 4,
     flexDirection: 'row',
     gap: 6,
+  },
+  modeCard: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: PANEL_BORDER_STRONG,
+    backgroundColor: PANEL_TINT_BG,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  modeCardText: {
+    flex: 1,
+    color: BRAND,
+    fontSize: 12,
+    lineHeight: 17,
+    fontFamily: 'Inter_600SemiBold',
   },
   activityCard: {
     marginHorizontal: 16,
     marginBottom: 12,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#22303a',
-    backgroundColor: '#0f151b',
+    borderColor: PANEL_BORDER_STRONG,
+    backgroundColor: PANEL_TINT_BG,
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
@@ -229,7 +210,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   activityLabel: {
-    color: '#4ECDC4',
+    color: BRAND,
     fontSize: 11,
     fontFamily: 'Inter_700Bold',
     letterSpacing: 0.6,
@@ -245,28 +226,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: 'Inter_500Medium',
     lineHeight: 18,
-  },
-  quickNavRow: {
-    marginHorizontal: 16,
-    marginBottom: 12,
-    flexDirection: 'row',
-    gap: 8,
-  },
-  quickNavBtn: {
-    flex: 1,
-    borderRadius: 10,
-    backgroundColor: Colors.accent,
-    paddingVertical: 9,
-    paddingHorizontal: 7,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 4,
-  },
-  quickNavText: {
-    color: Colors.background,
-    fontSize: 11,
-    fontFamily: 'Inter_700Bold',
   },
   tabBtn: {
     flex: 1,

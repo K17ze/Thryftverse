@@ -15,7 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
-import { Colors } from '../constants/colors';
+import { ActiveTheme, Colors } from '../constants/colors';
 import { MOCK_CONVERSATIONS, MOCK_USERS, MOCK_LISTINGS } from '../data/mockData';
 import { RootStackParamList } from '../navigation/types';
 import { Swipeable } from 'react-native-gesture-handler';
@@ -27,7 +27,11 @@ import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useBackendData } from '../context/BackendDataContext';
 
 type NavT = StackNavigationProp<RootStackParamList>;
-const TEAL = '#4ECDC4';
+const TEAL = '#e8dcc8';
+const IS_LIGHT = ActiveTheme === 'light';
+const BRAND = IS_LIGHT ? '#2f251b' : TEAL;
+const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111';
+const PANEL_ALT = IS_LIGHT ? '#f1ede6' : '#1a1a1a';
 
 type ConvoItem = typeof MOCK_CONVERSATIONS[0];
 
@@ -132,7 +136,7 @@ export default function InboxScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
       <View style={styles.header}>
         <Text style={styles.headerLabel}>COMMUNICATION</Text>
@@ -186,7 +190,7 @@ const styles = StyleSheet.create({
   headerLabel: {
     fontSize: 11,
     fontFamily: 'Inter_600SemiBold',
-    color: '#4ECDC4',
+    color: BRAND,
     letterSpacing: 1.5,
     marginBottom: 4,
   },
@@ -198,7 +202,7 @@ const styles = StyleSheet.create({
   },
 
   messageCard: {
-    backgroundColor: '#111',
+    backgroundColor: PANEL_BG,
     borderRadius: 20,
     padding: 16,
     flexDirection: 'row',
@@ -221,7 +225,7 @@ const styles = StyleSheet.create({
     borderRadius: 7,
     backgroundColor: '#4caf50',
     borderWidth: 3,
-    borderColor: '#111',
+    borderColor: PANEL_BG,
   },
   messageBody: { flex: 1 },
   messageTop: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
@@ -232,7 +236,7 @@ const styles = StyleSheet.create({
   itemPreview: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1a1a1a',
+    backgroundColor: PANEL_ALT,
     borderRadius: 12,
     padding: 8,
     gap: 10,

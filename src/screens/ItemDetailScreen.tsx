@@ -24,7 +24,7 @@ import Reanimated, {
 } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { useRoute, useNavigation } from '@react-navigation/native';
-import { Colors } from '../constants/colors';
+import { ActiveTheme, Colors } from '../constants/colors';
 import { MOCK_LISTINGS, MOCK_USERS, Listing, User } from '../data/mockData';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useStore } from '../store/useStore';
@@ -36,6 +36,12 @@ import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useBackendData } from '../context/BackendDataContext';
 
 const { width, height } = Dimensions.get('window');
+const IS_LIGHT = ActiveTheme === 'light';
+const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111111';
+const PANEL_ALT_BG = IS_LIGHT ? '#f3eee7' : '#1a1a1a';
+const PANEL_BORDER = IS_LIGHT ? '#d8d1c6' : '#2a2a2a';
+const FOOTER_BG = IS_LIGHT ? 'rgba(236,234,230,0.97)' : 'rgba(10,10,10,0.95)';
+const TOP_SCRIM_BG = IS_LIGHT ? 'rgba(236,234,230,0.46)' : 'rgba(0,0,0,0.35)';
 
 export default function ItemDetailScreen() {
   const route = useRoute<any>();
@@ -86,13 +92,6 @@ export default function ItemDetailScreen() {
     };
   });
 
-  const buyBarStyle = useAnimatedStyle(() => {
-    const translateY = interpolate(scrollY.value, [height * 0.65 - 100, height * 0.65], [100, 0], Extrapolation.CLAMP);
-    return {
-      transform: [{ translateY }],
-    };
-  });
-
   // Big heart for double tap animation
   const bigHeartScale = useSharedValue(0);
   const bigHeartOpacity = useSharedValue(0);
@@ -119,11 +118,11 @@ export default function ItemDetailScreen() {
 
   return (
     <View style={styles.container}>
-      <StatusBar translucent backgroundColor="transparent" barStyle="light-content" />
+      <StatusBar translucent backgroundColor="transparent" barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} />
 
       <Reanimated.ScrollView 
         showsVerticalScrollIndicator={false} 
-        contentContainerStyle={{ paddingBottom: 100 }}
+        contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 20) + 126 }}
         onScroll={scrollHandler}
         scrollEventThrottle={16}
       >
@@ -131,6 +130,8 @@ export default function ItemDetailScreen() {
         {/* ── Image Carousel ── */}
         <Reanimated.View style={[styles.heroContainer, heroStyle]}>
           <ImageViewer images={item.images} height={height * 0.65} onDoubleTap={handleDoubleTap} itemId={item.id} />
+
+          <View style={styles.heroTopScrim} />
 
           <Reanimated.View style={[StyleSheet.absoluteFill, { alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 5 }, bigHeartStyle]}>
             <Ionicons name="heart" size={100} color="#fff" style={{ shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 10 }} />
@@ -164,10 +165,8 @@ export default function ItemDetailScreen() {
         </Reanimated.View>
 
         <View style={styles.detailsContainer}>
-          <View style={styles.priceRow}>
-            <Text style={styles.price}>{formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}</Text>
-            <Text style={styles.brand}>{item.brand}</Text>
-          </View>
+          <Text style={styles.price}>{formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}</Text>
+          <Text style={styles.brand} numberOfLines={1} ellipsizeMode="tail">{item.brand}</Text>
           {item.priceWithProtection && (
             <Text style={styles.protectionText}>
               incl. {formatFromFiat(item.priceWithProtection - item.price, 'GBP', { displayMode: 'fiat' })} Buyer Protection fee
@@ -224,7 +223,7 @@ export default function ItemDetailScreen() {
 
       {/* ── Floating Buy Bar ── */}
       {!item.isSold && (
-        <Reanimated.View style={[styles.floatingBuyBar, { paddingBottom: Math.max(insets.bottom, 20) }, buyBarStyle]}>
+        <Reanimated.View style={[styles.floatingBuyBar, { paddingBottom: Math.max(insets.bottom, 20) }]}>
           <AnimatedPressable
             style={styles.buyBtn}
             activeOpacity={0.9}
@@ -247,41 +246,70 @@ export default function ItemDetailScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  heroContainer: { width: width, height: height * 0.65, position: 'relative', backgroundColor: '#111' },
+  heroContainer: { width: width, height: height * 0.65, position: 'relative', backgroundColor: Colors.surface },
+  heroTopScrim: { position: 'absolute', top: 0, left: 0, right: 0, height: 132, backgroundColor: TOP_SCRIM_BG },
   heroImage: { width: width, height: '100%' },
   soldOverlay: { position: 'absolute', bottom: 32, left: 20, backgroundColor: Colors.success, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
-  soldText: { color: Colors.background, fontSize: 16, fontFamily: 'Inter_700Bold', letterSpacing: 1 },
+  soldText: { color: Colors.textInverse, fontSize: 16, fontFamily: 'Inter_700Bold', letterSpacing: 1 },
   floatingHeader: { position: 'absolute', top: 0, left: 0, right: 0, flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 20, zIndex: 10 },
   headerRight: { flexDirection: 'row', gap: 12 },
   blurBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center' },
   detailsContainer: { paddingHorizontal: 20, paddingTop: 24 },
-  priceRow: { flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 4 },
-  price: { fontSize: 42, fontFamily: 'Inter_800ExtraBold', color: Colors.textPrimary, letterSpacing: -1.5 },
-  brand: { fontSize: 18, fontFamily: 'Inter_700Bold', color: Colors.textPrimary, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 8 },
-  protectionText: { fontSize: 12, color: Colors.textMuted, fontFamily: 'Inter_400Regular', marginBottom: 12 },
+  price: { fontSize: 40, fontFamily: 'Inter_700Bold', color: Colors.textPrimary, letterSpacing: -1.2, marginBottom: 2 },
+  brand: { fontSize: 15, fontFamily: 'Inter_700Bold', color: Colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.9, marginBottom: 8 },
+  protectionText: { fontSize: 12, color: Colors.textSecondary, fontFamily: 'Inter_400Regular', marginBottom: 12 },
   title: { fontSize: 20, fontFamily: 'Inter_400Regular', color: Colors.textSecondary, marginBottom: 12, lineHeight: 28 },
   sizeCondition: { fontSize: 15, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary },
-  descriptionBox: { marginTop: 24, backgroundColor: '#111', padding: 20, borderRadius: 24 },
+  descriptionBox: { marginTop: 24, backgroundColor: PANEL_BG, borderWidth: 1, borderColor: PANEL_BORDER, padding: 20, borderRadius: 24 },
   description: { fontSize: 15, fontFamily: 'Inter_400Regular', color: Colors.textSecondary, lineHeight: 24 },
   timePosted: { fontSize: 12, fontFamily: 'Inter_500Medium', color: Colors.textMuted, marginTop: 12 },
   statsRow: { flexDirection: 'row', alignItems: 'center', marginTop: 12 },
   statsText: { fontSize: 12, color: Colors.textSecondary, marginLeft: 6, fontFamily: 'Inter_500Medium' },
-  sellerCard: { flexDirection: 'row', alignItems: 'center', marginTop: 40, paddingBottom: 16, gap: 16 },
+  sellerCard: { flexDirection: 'row', alignItems: 'center', marginTop: 26, paddingHorizontal: 14, paddingVertical: 14, borderWidth: 1, borderColor: PANEL_BORDER, borderRadius: 20, backgroundColor: PANEL_BG, gap: 16 },
   sellerAvatar: { width: 56, height: 56, borderRadius: 28 },
   sellerInfo: { flex: 1 },
   sellerName: { fontSize: 16, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary },
   sellerStats: { fontSize: 13, fontFamily: 'Inter_500Medium', color: Colors.textMuted, marginTop: 4 },
   sellerLastSeen: { fontSize: 11, fontFamily: 'Inter_400Regular', color: Colors.textMuted, marginTop: 2 },
-  followBtn: { backgroundColor: '#222', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20 },
+  followBtn: { backgroundColor: PANEL_ALT_BG, borderWidth: 1, borderColor: PANEL_BORDER, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20 },
   followBtnText: { color: Colors.textPrimary, fontSize: 13, fontFamily: 'Inter_600SemiBold' },
   sellerItemsSection: { marginTop: 24, paddingBottom: 32 },
   sectionTitle: { fontSize: 16, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary, marginBottom: 16 },
   sellerItemCard: { width: 100 },
   sellerItemImg: { width: 100, height: 130, borderRadius: 16, marginBottom: 8 },
   sellerItemPrice: { fontSize: 14, fontFamily: 'Inter_700Bold', color: Colors.textPrimary },
-  floatingBuyBar: { position: 'absolute', bottom: 0, left: 0, right: 0, flexDirection: 'row', gap: 12, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 40, backgroundColor: 'rgba(10, 10, 10, 0.95)' },
-  buyBtn: { flex: 2, backgroundColor: Colors.textPrimary, borderRadius: 30, height: 60, alignItems: 'center', justifyContent: 'center' },
-  buyBtnText: { color: Colors.background, fontSize: 18, fontFamily: 'Inter_800ExtraBold', letterSpacing: -0.5 },
-  offerBtn: { flex: 1, backgroundColor: '#1A1A1A', borderRadius: 30, height: 60, alignItems: 'center', justifyContent: 'center' },
-  offerBtnText: { color: Colors.textPrimary, fontSize: 16, fontFamily: 'Inter_700Bold' },
+  floatingBuyBar: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 20,
+    borderTopWidth: 1,
+    borderTopColor: PANEL_BORDER,
+    backgroundColor: FOOTER_BG,
+  },
+  buyBtn: {
+    flex: 2,
+    backgroundColor: Colors.accent,
+    borderRadius: 16,
+    height: 56,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  buyBtnText: { color: Colors.textInverse, fontSize: 17, fontFamily: 'Inter_700Bold', letterSpacing: -0.4 },
+  offerBtn: {
+    flex: 1,
+    backgroundColor: PANEL_ALT_BG,
+    borderWidth: 1,
+    borderColor: PANEL_BORDER,
+    borderRadius: 16,
+    height: 56,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  offerBtnText: { color: Colors.textPrimary, fontSize: 15, fontFamily: 'Inter_700Bold' },
 });

@@ -12,6 +12,7 @@ import Reanimated, {
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../constants/colors';
+import { Typography } from '../constants/typography';
 import { AnimatedPressable } from './AnimatedPressable';
 
 const { height, width } = Dimensions.get('window');
@@ -160,7 +161,7 @@ const styles = StyleSheet.create({
   handleContainer: { alignItems: 'center', paddingVertical: 14 },
   handle: { width: 44, height: 5, borderRadius: 3, backgroundColor: '#333' },
   header: { alignItems: 'center', marginBottom: 12 },
-  headerTitle: { fontSize: 20, fontFamily: 'Inter_700Bold', color: Colors.textPrimary },
+  headerTitle: { fontSize: 20, fontFamily: Typography.family.semibold, color: Colors.textPrimary, letterSpacing: 0.08 },
   
   searchContainer: {
     flexDirection: 'row',
@@ -172,7 +173,7 @@ const styles = StyleSheet.create({
     borderRadius: 25,
     marginBottom: 16,
   },
-  searchInput: { flex: 1, marginLeft: 10, color: Colors.textPrimary, fontFamily: 'Inter_500Medium', fontSize: 16 },
+  searchInput: { flex: 1, marginLeft: 10, color: Colors.textPrimary, fontFamily: Typography.family.medium, fontSize: 16, letterSpacing: 0.08 },
   
   scrollList: { flex: 1 },
   scrollContent: { paddingHorizontal: 20, paddingBottom: 100 },
@@ -185,8 +186,8 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#222',
   },
-  optionText: { fontSize: 16, fontFamily: 'Inter_500Medium', color: Colors.textPrimary },
-  optionTextActive: { fontFamily: 'Inter_700Bold', color: Colors.accent },
+  optionText: { fontSize: 16, fontFamily: Typography.family.medium, color: Colors.textPrimary, letterSpacing: 0.08 },
+  optionTextActive: { fontFamily: Typography.family.semibold, color: Colors.accent },
   
-  noResultsText: { textAlign: 'center', color: Colors.textMuted, marginTop: 40, fontFamily: 'Inter_500Medium' },
+  noResultsText: { textAlign: 'center', color: Colors.textMuted, marginTop: 40, fontFamily: Typography.family.medium },
 });

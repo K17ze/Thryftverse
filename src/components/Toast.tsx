@@ -11,11 +11,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { useToast, ToastType } from '../context/ToastContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AnimatedPressable } from './AnimatedPressable';
+import { Typography } from '../constants/typography';
 
 const TYPE_CONFIG: Record<ToastType, { borderColor: string; icon: keyof typeof Ionicons.glyphMap; iconColor: string }> = {
   success: { borderColor: '#4CAF50', icon: 'checkmark-circle', iconColor: '#4CAF50' },
   error: { borderColor: '#FF4D4D', icon: 'alert-circle', iconColor: '#FF4D4D' },
-  info: { borderColor: '#4ECDC4', icon: 'information-circle', iconColor: '#4ECDC4' },
+  info: { borderColor: '#e8dcc8', icon: 'information-circle', iconColor: '#e8dcc8' },
 };
 
 interface ToastItemProps {
@@ -89,7 +90,7 @@ const styles = StyleSheet.create({
   toast: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1a1a1a',
+    backgroundColor: '#191714',
     borderRadius: 14,
     paddingHorizontal: 16,
     paddingVertical: 14,
@@ -104,9 +105,10 @@ const styles = StyleSheet.create({
   message: {
     flex: 1,
     fontSize: 14,
-    fontFamily: 'Inter_500Medium',
-    color: '#ffffff',
-    lineHeight: 20,
+    fontFamily: Typography.family.medium,
+    color: '#f3ede3',
+    letterSpacing: 0.08,
+    lineHeight: 19,
   },
   closeBtn: {
     padding: 2,

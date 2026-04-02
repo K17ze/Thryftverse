@@ -5,6 +5,10 @@ const ML_BASE = process.env.ML_BASE_URL ?? 'http://localhost:8000';
 const KEY_BASE = process.env.KEY_BASE_URL ?? 'http://localhost:4100';
 const API_SECURITY_ADMIN_TOKEN = process.env.API_SECURITY_ADMIN_TOKEN ?? 'local-security-admin-token';
 
+function createSmokeId(prefix) {
+  return `${prefix}_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
+}
+
 async function requestJson(url, init) {
   const maxAttempts = 12;
   let lastError = null;
@@ -64,6 +68,218 @@ async function main() {
   const listings = await requestJson(`${API_BASE}/listings`);
   assert(Array.isArray(listings.items), 'Listings endpoint did not return items array');
   assert(listings.items.length >= 1, 'Expected seeded listings');
+
+  const listingSeed1 = listings.items.find((item) => item.id === 'l_seed_1') ?? listings.items[0];
+  const listingSeed2 =
+    listings.items.find((item) => item.id === 'l_seed_2') ??
+    listings.items.find((item) => item.id !== listingSeed1.id) ??
+    listingSeed1;
+
+  assert(Boolean(listingSeed1?.id), 'Missing listing to run smoke checks');
+  assert(Boolean(listingSeed2?.id), 'Missing second listing to run smoke checks');
+
+  console.log('[check] Commerce lifecycle (address/payment/order/pay)');
+  const address = await requestJson(`${API_BASE}/users/u1/addresses`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      name: 'Smoke Buyer',
+      street: '1 Smoke Test Street',
+      city: 'London',
+      postcode: 'N1 1AA',
+      isDefault: true,
+    }),
+  });
+  assert(address.ok === true, 'Address creation failed');
+  assert(address.item?.id !== undefined && address.item?.id !== null, 'Address response missing id');
+
+  const paymentMethod = await requestJson(`${API_BASE}/users/u1/payment-methods`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      type: 'card',
+      label: 'Smoke Visa',
+      details: '**** 4242',
+      isDefault: true,
+    }),
+  });
+  assert(paymentMethod.ok === true, 'Payment method creation failed');
+  assert(
+    paymentMethod.item?.id !== undefined && paymentMethod.item?.id !== null,
+    'Payment method response missing id'
+  );
+
+  const smokeOrderId = createSmokeId('ord_smoke');
+  const orderCreate = await requestJson(`${API_BASE}/orders`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      orderId: smokeOrderId,
+      buyerId: 'u1',
+      listingId: listingSeed1.id,
+      addressId: address.item.id,
+      paymentMethodId: paymentMethod.item.id,
+    }),
+  });
+  assert(orderCreate.ok === true, 'Order creation failed');
+  assert(orderCreate.order?.id === smokeOrderId, 'Order id mismatch');
+  assert(orderCreate.order?.status === 'created', 'Expected new order status to be created');
+
+  const orderPay = await requestJson(`${API_BASE}/orders/${smokeOrderId}/pay`, {
+    method: 'POST',
+  });
+  assert(orderPay.ok === true, 'Order payment failed');
+  assert(orderPay.status === 'paid', 'Expected order status to be paid after payment');
+
+  const orderRead = await requestJson(`${API_BASE}/orders/${smokeOrderId}`);
+  assert(orderRead.ok === true, 'Order read failed');
+  assert(orderRead.order?.status === 'paid', 'Paid order readback mismatch');
+
+  const buyerOrders = await requestJson(`${API_BASE}/users/u1/orders?role=buyer&limit=20`);
+  assert(Array.isArray(buyerOrders.items), 'Buyer orders endpoint did not return items array');
+  assert(
+    buyerOrders.items.some((item) => item.id === smokeOrderId),
+    'Created order was not returned in buyer orders list'
+  );
+
+  console.log('[check] Market actions + unified market-history pagination');
+  const now = Date.now();
+  const smokeAuctionId = createSmokeId('a_smoke');
+  const smokeAssetId = createSmokeId('s_smoke');
+
+  const auctionCreate = await requestJson(`${API_BASE}/auctions`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      id: smokeAuctionId,
+      listingId: listingSeed1.id,
+      sellerId: 'u2',
+      startsAt: new Date(now - 60_000).toISOString(),
+      endsAt: new Date(now + 6 * 60 * 60 * 1000).toISOString(),
+      startingBidGbp: 95,
+      buyNowPriceGbp: 160,
+    }),
+  });
+  assert(auctionCreate.ok === true, 'Auction creation failed');
+
+  const bidOne = await requestJson(`${API_BASE}/auctions/${smokeAuctionId}/bids`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      bidderId: 'u1',
+      amountGbp: 100,
+    }),
+  });
+  assert(bidOne.ok === true, 'First auction bid failed');
+
+  const bidTwo = await requestJson(`${API_BASE}/auctions/${smokeAuctionId}/bids`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      bidderId: 'u1',
+      amountGbp: 110,
+    }),
+  });
+  assert(bidTwo.ok === true, 'Second auction bid failed');
+
+  const auctionBids = await requestJson(`${API_BASE}/auctions/${smokeAuctionId}/bids?limit=10`);
+  assert(Array.isArray(auctionBids.items), 'Auction bids endpoint did not return items array');
+  assert(
+    auctionBids.items.filter((item) => item.bidderId === 'u1').length >= 2,
+    'Expected at least two smoke bids for bidder u1'
+  );
+
+  const assetCreate = await requestJson(`${API_BASE}/syndicate/assets`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      id: smokeAssetId,
+      listingId: listingSeed2.id,
+      issuerId: 'u2',
+      totalUnits: 250,
+      unitPriceGbp: 1.5,
+      unitPriceStable: 1.9,
+      settlementMode: 'HYBRID',
+      issuerJurisdiction: 'GB',
+    }),
+  });
+  assert(assetCreate.ok === true, 'Syndicate asset creation failed');
+
+  const syndicateOrderOne = await requestJson(`${API_BASE}/syndicate/assets/${smokeAssetId}/orders`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      userId: 'u1',
+      side: 'buy',
+      units: 8,
+    }),
+  });
+  assert(syndicateOrderOne.ok === true, 'First syndicate order failed');
+
+  const syndicateOrderTwo = await requestJson(`${API_BASE}/syndicate/assets/${smokeAssetId}/orders`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      userId: 'u1',
+      side: 'buy',
+      units: 5,
+    }),
+  });
+  assert(syndicateOrderTwo.ok === true, 'Second syndicate order failed');
+
+  const assetOrders = await requestJson(`${API_BASE}/syndicate/assets/${smokeAssetId}/orders?limit=10`);
+  assert(Array.isArray(assetOrders.items), 'Syndicate orders endpoint did not return items array');
+  assert(
+    assetOrders.items.filter((item) => item.userId === 'u1').length >= 2,
+    'Expected at least two smoke syndicate orders for user u1'
+  );
+
+  const marketHistoryPageOne = await requestJson(`${API_BASE}/users/u1/market-history?channel=all&limit=2`);
+  assert(Array.isArray(marketHistoryPageOne.items), 'Market-history page one missing items array');
+  assert(marketHistoryPageOne.items.length === 2, 'Market-history page one limit was not respected');
+  assert(marketHistoryPageOne.pageInfo?.hasMore === true, 'Expected market-history page one to indicate hasMore=true');
+  assert(
+    typeof marketHistoryPageOne.pageInfo?.nextCursor?.cursorTs === 'string' &&
+      typeof marketHistoryPageOne.pageInfo?.nextCursor?.cursorId === 'string',
+    'Market-history page one missing next cursor'
+  );
+
+  const pageOneCursor = marketHistoryPageOne.pageInfo.nextCursor;
+  const marketHistoryPageTwo = await requestJson(
+    `${API_BASE}/users/u1/market-history?channel=all&limit=2&cursorTs=${encodeURIComponent(pageOneCursor.cursorTs)}&cursorId=${encodeURIComponent(pageOneCursor.cursorId)}`
+  );
+  assert(Array.isArray(marketHistoryPageTwo.items), 'Market-history page two missing items array');
+  assert(marketHistoryPageTwo.items.length >= 1, 'Expected market-history page two to include at least one item');
+
+  const pageOneIds = new Set(marketHistoryPageOne.items.map((item) => item.id));
+  assert(
+    marketHistoryPageTwo.items.every((item) => !pageOneIds.has(item.id)),
+    'Market-history cursor pagination returned overlapping item ids'
+  );
+
+  const marketHistoryCombined = [...marketHistoryPageOne.items, ...marketHistoryPageTwo.items];
+  assert(
+    marketHistoryCombined.some((item) => item.referenceId === smokeAuctionId),
+    'Market-history did not include smoke auction entries'
+  );
+  assert(
+    marketHistoryCombined.some((item) => item.referenceId === smokeAssetId),
+    'Market-history did not include smoke syndicate entries'
+  );
+
+  const auctionHistory = await requestJson(`${API_BASE}/users/u1/market-history?channel=auction&limit=10`);
+  assert(Array.isArray(auctionHistory.items), 'Auction-only market-history missing items array');
+  assert(
+    auctionHistory.items.every((item) => item.channel === 'auction'),
+    'Auction-only market-history contained non-auction entries'
+  );
+
+  const syndicateHistory = await requestJson(`${API_BASE}/users/u1/market-history?channel=syndicate&limit=10`);
+  assert(Array.isArray(syndicateHistory.items), 'Syndicate-only market-history missing items array');
+  assert(
+    syndicateHistory.items.every((item) => item.channel === 'syndicate'),
+    'Syndicate-only market-history contained non-syndicate entries'
+  );
 
   console.log('[check] Secure profile encrypt/decrypt roundtrip');
   const profileUpsert = await requestJson(`${API_BASE}/secure-profiles`, {

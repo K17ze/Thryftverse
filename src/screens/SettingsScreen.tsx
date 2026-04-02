@@ -9,7 +9,7 @@ import { View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors } from '../constants/colors';
+import { ActiveTheme, Colors } from '../constants/colors';
 import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
 import { useStore } from '../store/useStore';
@@ -17,9 +17,19 @@ import { Alert } from 'react-native';
 import { CURRENCIES, SupportedCurrencyCode } from '../constants/currencies';
 import { useCurrencyPref } from '../hooks/useCurrencyPref';
 import { BottomSheetPicker } from '../components/BottomSheetPicker';
+import {
+  getStoredThemePreference,
+  getThemePreferenceLabel,
+  ThemePreference,
+  updateThemePreference,
+} from '../theme/themePreference';
 
 type Props = StackScreenProps<RootStackParamList, 'Settings'>;
-const TEAL = '#4ECDC4';
+const TEAL = '#e8dcc8';
+const IS_LIGHT = ActiveTheme === 'light';
+const BRAND = IS_LIGHT ? '#2f251b' : TEAL;
+const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111';
+const PANEL_BORDER = IS_LIGHT ? '#d8d1c6' : '#1c1c1c';
 
 interface SettingItem {
   icon: string;
@@ -32,6 +42,8 @@ interface SettingItem {
 export default function SettingsScreen({ navigation }: Props) {
   const logout = useStore(state => state.logout);
   const [currencyPickerVisible, setCurrencyPickerVisible] = React.useState(false);
+  const [themePickerVisible, setThemePickerVisible] = React.useState(false);
+  const [themePreference, setThemePreference] = React.useState<ThemePreference>('system');
   const {
     currencyCode,
     displayModeLabel,
@@ -53,10 +65,38 @@ export default function SettingsScreen({ navigation }: Props) {
     [currencyCode, currencyOptions]
   );
 
+  const themeOptions = React.useMemo(() => ['System', 'Light', 'Dark'], []);
+
+  const selectedThemeOption = React.useMemo(
+    () => themeOptions.find((option) => option.toLowerCase() === themePreference),
+    [themeOptions, themePreference]
+  );
+
+  React.useEffect(() => {
+    getStoredThemePreference().then(setThemePreference).catch(() => {
+      // Ignore persistence errors and keep default.
+    });
+  }, []);
+
   const handleCurrencySelect = (option: string) => {
     const selectedCode = option.split(' · ')[0] as SupportedCurrencyCode;
     if (selectedCode !== currencyCode) {
       setCurrencyCode(selectedCode);
+    }
+  };
+
+  const handleThemeSelect = async (option: string) => {
+    const nextPreference = option.toLowerCase() as ThemePreference;
+
+    if (nextPreference === themePreference) {
+      return;
+    }
+
+    setThemePreference(nextPreference);
+    const reloaded = await updateThemePreference(nextPreference, { reloadApp: true });
+
+    if (!reloaded) {
+      Alert.alert('Theme updated', 'Please restart the app to fully apply this theme mode.');
     }
   };
 
@@ -106,7 +146,13 @@ export default function SettingsScreen({ navigation }: Props) {
       color: '#64B5F6',
       onPress: () => setCurrencyPickerVisible(true),
     },
-    { icon: 'moon-outline', title: 'Dark Mode', subtitle: 'Always on', color: '#BB86FC', onPress: () => Alert.alert('Dark Mode', 'Dark mode is always on.') },
+    {
+      icon: 'color-palette-outline',
+      title: 'Theme',
+      subtitle: getThemePreferenceLabel(themePreference),
+      color: '#BB86FC',
+      onPress: () => setThemePickerVisible(true),
+    },
   ];
 
   const supportItems: SettingItem[] = [
@@ -117,7 +163,7 @@ export default function SettingsScreen({ navigation }: Props) {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
       <View style={styles.header}>
         <AnimatedPressable onPress={() => navigation.goBack()} style={styles.backBtn}>
@@ -194,6 +240,15 @@ export default function SettingsScreen({ navigation }: Props) {
         onSelect={handleCurrencySelect}
         searchable
       />
+
+      <BottomSheetPicker
+        visible={themePickerVisible}
+        onClose={() => setThemePickerVisible(false)}
+        title="Theme Mode"
+        options={themeOptions}
+        selectedValue={selectedThemeOption}
+        onSelect={handleThemeSelect}
+      />
     </SafeAreaView>
   );
 }
@@ -212,14 +267,14 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 14,
-    backgroundColor: '#111',
+    backgroundColor: PANEL_BG,
     justifyContent: 'center',
     alignItems: 'center',
   },
   headerLabel: {
     fontSize: 11,
     fontFamily: 'Inter_600SemiBold',
-    color: '#4ECDC4',
+    color: BRAND,
     letterSpacing: 1.5,
     marginBottom: 2,
   },
@@ -251,7 +306,7 @@ const styles = StyleSheet.create({
 
   // Pill cards
   pillCard: {
-    backgroundColor: '#111',
+    backgroundColor: PANEL_BG,
     borderRadius: 20,
     paddingHorizontal: 16,
     overflow: 'hidden',
@@ -263,7 +318,7 @@ const styles = StyleSheet.create({
   },
   settingRowBorder: {
     borderBottomWidth: 1,
-    borderBottomColor: '#1c1c1c',
+    borderBottomColor: PANEL_BORDER,
   },
 
   // Larger square icons

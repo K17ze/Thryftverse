@@ -47,7 +47,7 @@ PowerShell example from project root:
 $env:EXPO_PUBLIC_API_BASE_URL="http://192.168.1.10:4000"; npx expo start
 ```
 
-## API Endpoints (starter)
+## API Endpoints
 
 - `GET /health`
 - `GET /health/deep` (checks Postgres + Redis + key service + ML + S3 bucket connectivity)
@@ -60,6 +60,40 @@ $env:EXPO_PUBLIC_API_BASE_URL="http://192.168.1.10:4000"; npx expo start
 - `POST /secure-messages` and `GET /secure-messages/:conversationId`
 - `POST /wallets/:userId/snapshot` and `GET /wallets/:userId/snapshot`
 - `POST /security/keys/:keyName/rotate` (admin-maintenance route, optional bulk rewrap)
+
+Commerce and checkout:
+
+- `GET /users/:userId/addresses`
+- `POST /users/:userId/addresses`
+- `DELETE /users/:userId/addresses/:addressId`
+- `GET /users/:userId/payment-methods`
+- `POST /users/:userId/payment-methods`
+- `DELETE /users/:userId/payment-methods/:paymentMethodId`
+- `POST /orders`
+- `POST /orders/:orderId/pay`
+- `GET /orders/:orderId`
+- `GET /users/:userId/orders`
+- `GET /users/:userId/market-history`
+
+Note: `POST /orders/:orderId/pay` should be sent with `Content-Type: application/json` (an empty `{}` body is valid).
+
+Trade Hub market:
+
+- `GET /auctions`
+- `POST /auctions`
+- `GET /auctions/:auctionId/bids`
+- `POST /auctions/:auctionId/bids`
+- `GET /syndicate/assets`
+- `POST /syndicate/assets`
+- `GET /syndicate/assets/:assetId/orders`
+- `POST /syndicate/assets/:assetId/orders`
+
+Market history pagination:
+
+- `GET /users/:userId/market-history?channel=all|auction|syndicate&limit=80`
+- Cursor pagination uses `cursorTs` and `cursorId` together:
+	- Example next page: `GET /users/:userId/market-history?channel=all&limit=80&cursorTs=2026-04-03T01:11:00.000Z&cursorId=auction_bid_123`
+- Response includes `pageInfo.hasMore` and `pageInfo.nextCursor`.
 
 From project root, run full local connectivity check:
 

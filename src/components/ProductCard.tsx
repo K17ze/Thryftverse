@@ -7,6 +7,7 @@ import {
   Dimensions
 } from 'react-native';
 import { Colors } from '../constants/colors';
+import { Typography } from '../constants/typography';
 import { Listing } from '../data/mockData';
 import { useStore } from '../store/useStore';
 import { AnimatedHeart } from './AnimatedHeart';
@@ -97,9 +98,9 @@ const styles = StyleSheet.create({
   },
   soldText: {
     color: Colors.textPrimary,
-    fontFamily: 'Inter_700Bold',
-    fontSize: 16,
-    letterSpacing: 2,
+    fontFamily: Typography.family.bold,
+    fontSize: 14,
+    letterSpacing: 1.1,
   },
   info: {
     paddingTop: 8,
@@ -107,14 +108,16 @@ const styles = StyleSheet.create({
   },
   price: {
     color: Colors.textPrimary,
-    fontSize: 13,
-    fontFamily: 'Inter_600SemiBold',
+    fontSize: 14,
+    fontFamily: Typography.family.semibold,
+    letterSpacing: 0.1,
     marginBottom: 2,
   },
   brand: {
     color: Colors.textSecondary,
     fontSize: 12,
-    fontFamily: 'Inter_400Regular',
+    fontFamily: Typography.family.regular,
+    letterSpacing: 0.08,
   },
   favBtn: {
     position: 'absolute',
