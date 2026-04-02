@@ -1,14 +1,15 @@
 import React from 'react';
 import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import {
   View,
   Text,
   StyleSheet,
   FlatList,
-  TouchableOpacity,
   Image,
   RefreshControl,
   Modal,
-  TextInput,
+  TextInput
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -30,6 +31,27 @@ type NavT = StackNavigationProp<RootStackParamList>;
 type SyndicateView = 'MARKET' | 'HOLDINGS';
 
 const STABLE_COIN = 'TVUSD';
+const COUNTRY_OPTIONS = [
+  { code: 'GB', label: 'United Kingdom' },
+  { code: 'EU', label: 'European Union' },
+  { code: 'SG', label: 'Singapore' },
+  { code: 'AE', label: 'UAE' },
+  { code: 'US', label: 'United States' },
+  { code: 'CA', label: 'Canada' },
+] as const;
+
+const settlementLabelMap: Record<'GBP' | 'TVUSD' | 'HYBRID', string> = {
+  GBP: 'GBP only',
+  TVUSD: 'TVUSD only',
+  HYBRID: 'GBP + TVUSD',
+};
+
+type ComposerMode = 'buy' | 'sell';
+
+function formatSigned(value: number) {
+  const sign = value >= 0 ? '+' : '-';
+  return `${sign}${formatMoney(Math.abs(value))}`;
+}
 
 export default function SyndicateScreen() {
   const navigation = useNavigation<NavT>();
@@ -37,6 +59,9 @@ export default function SyndicateScreen() {
   const currentUser = useStore((state) => state.currentUser);
   const customSyndicates = useStore((state) => state.customSyndicates);
   const syndicateRuntime = useStore((state) => state.syndicateRuntime);
+  const syndicateCompliance = useStore((state) => state.syndicateCompliance);
+  const updateSyndicateCompliance = useStore((state) => state.updateSyndicateCompliance);
+  const checkSyndicateEligibility = useStore((state) => state.checkSyndicateEligibility);
   const buySyndicateUnits = useStore((state) => state.buySyndicateUnits);
   const sellSyndicateUnits = useStore((state) => state.sellSyndicateUnits);
 
@@ -45,6 +70,8 @@ export default function SyndicateScreen() {
   const [refreshing, setRefreshing] = React.useState(false);
   const [activeView, setActiveView] = React.useState<SyndicateView>('MARKET');
   const [unitsComposerVisible, setUnitsComposerVisible] = React.useState(false);
+  const [complianceModalVisible, setComplianceModalVisible] = React.useState(false);
+  const [composerMode, setComposerMode] = React.useState<ComposerMode>('buy');
   const [selectedAsset, setSelectedAsset] = React.useState<SyndicateAsset | null>(null);
   const [unitsInput, setUnitsInput] = React.useState('1');
 
@@ -69,6 +96,11 @@ export default function SyndicateScreen() {
           holders: runtime.holders,
           volume24hGBP: runtime.volume24hGBP,
           yourUnits: runtime.yourUnits,
+          unitPriceGBP: runtime.unitPriceGBP,
+          unitPriceStable: runtime.unitPriceStable,
+          marketMovePct24h: runtime.marketMovePct24h,
+          avgEntryPriceGBP: runtime.avgEntryPriceGBP,
+          realizedProfitGBP: runtime.realizedProfitGBP,
         };
       }),
     [baseAssets, syndicateRuntime]
@@ -92,19 +124,52 @@ export default function SyndicateScreen() {
     [marketAssets]
   );
 
-  const openUnitsComposer = (asset: SyndicateAsset) => {
+  const unrealizedPnl = React.useMemo(
+    () =>
+      marketAssets.reduce((sum, asset) => {
+        if (asset.yourUnits <= 0) {
+          return sum;
+        }
+
+        const avgEntry = asset.avgEntryPriceGBP ?? asset.unitPriceGBP;
+        return sum + (asset.unitPriceGBP - avgEntry) * asset.yourUnits;
+      }, 0),
+    [marketAssets]
+  );
+
+  const realizedPnl = React.useMemo(
+    () => marketAssets.reduce((sum, asset) => sum + (asset.realizedProfitGBP ?? 0), 0),
+    [marketAssets]
+  );
+
+  const marketEligibility = checkSyndicateEligibility('HYBRID');
+
+  const openUnitsComposer = (asset: SyndicateAsset, mode: ComposerMode) => {
+    const eligibility = checkSyndicateEligibility(asset.settlementMode);
+    if (!eligibility.ok) {
+      show(eligibility.message ?? 'Compliance requirements are incomplete', 'error');
+      setComplianceModalVisible(true);
+      return;
+    }
+
+    setComposerMode(mode);
     setSelectedAsset(asset);
-    setUnitsInput('1');
+    if (mode === 'sell') {
+      setUnitsInput(String(Math.max(1, Math.min(asset.yourUnits, 10))));
+    } else {
+      setUnitsInput('1');
+    }
     setUnitsComposerVisible(true);
   };
 
   const closeUnitsComposer = () => {
     setUnitsComposerVisible(false);
     setSelectedAsset(null);
+    setComposerMode('buy');
     setUnitsInput('1');
   };
 
-  const submitUnitsPurchase = () => {
+  const submitUnitsOrder = () => {
     if (!selectedAsset) {
       return;
     }
@@ -115,13 +180,19 @@ export default function SyndicateScreen() {
       return;
     }
 
-    const result = buySyndicateUnits(selectedAsset, actingUserId, units);
+    const result = composerMode === 'buy'
+      ? buySyndicateUnits(selectedAsset, actingUserId, units)
+      : sellSyndicateUnits(selectedAsset, actingUserId, units);
+
     if (!result.ok) {
       show(result.message ?? 'Unable to purchase units', 'error');
+      if (result.message?.toLowerCase().includes('kyc') || result.message?.toLowerCase().includes('country')) {
+        setComplianceModalVisible(true);
+      }
       return;
     }
 
-    show(`Purchased ${units} unit${units === 1 ? '' : 's'} in ${selectedAsset.title}`, 'success');
+    show(result.message ?? `${composerMode === 'buy' ? 'Purchased' : 'Sold'} units`, 'success');
     closeUnitsComposer();
   };
 
@@ -142,16 +213,37 @@ export default function SyndicateScreen() {
         </View>
       </View>
 
-      <View style={styles.complianceCard}>
+      <View style={styles.metricsPnlRow}>
+        <View style={styles.metricCardWide}>
+          <Text style={styles.metricWideLabel}>Unrealized P/L</Text>
+          <Text style={[styles.metricWideValue, unrealizedPnl >= 0 ? styles.pnlUp : styles.pnlDown]}>
+            {formatSigned(unrealizedPnl)}
+          </Text>
+        </View>
+        <View style={styles.metricCardWide}>
+          <Text style={styles.metricWideLabel}>Realized P/L</Text>
+          <Text style={[styles.metricWideValue, realizedPnl >= 0 ? styles.pnlUp : styles.pnlDown]}>
+            {formatSigned(realizedPnl)}
+          </Text>
+        </View>
+      </View>
+
+      <AnimatedPressable style={styles.complianceCard} activeOpacity={0.9} onPress={() => setComplianceModalVisible(true)}>
         <View style={styles.complianceTopRow}>
           <Ionicons name="shield-checkmark-outline" size={16} color="#4ECDC4" />
           <Text style={styles.complianceTitle}>Regulatory Guardrails</Text>
+          <Ionicons name="chevron-forward" size={14} color={Colors.textMuted} />
         </View>
         <Text style={styles.complianceText}>
-          Syndicate access is jurisdiction-aware. Real launch requires KYC, AML checks, suitability rules,
-          and country-level eligibility controls.
+          Country {syndicateCompliance.countryCode} · KYC {syndicateCompliance.kycVerified ? 'on' : 'off'} ·
+          Disclosure {syndicateCompliance.riskDisclosureAccepted ? 'accepted' : 'pending'}.
         </Text>
-      </View>
+        {!marketEligibility.ok ? (
+          <Text style={styles.complianceErrorText}>{marketEligibility.message}</Text>
+        ) : (
+          <Text style={styles.complianceOkText}>Eligible to trade syndicated assets.</Text>
+        )}
+      </AnimatedPressable>
 
       <View style={styles.issueRow}>
         <View>
@@ -159,32 +251,61 @@ export default function SyndicateScreen() {
           <Text style={styles.issueHint}>Tokenize a listing into buyable unit lots</Text>
         </View>
 
-        <TouchableOpacity
+        <AnimatedPressable
           style={styles.issueBtn}
           activeOpacity={0.9}
           onPress={() => navigation.navigate('CreateSyndicate')}
         >
           <Ionicons name="add" size={15} color={Colors.background} />
           <Text style={styles.issueBtnText}>Issue</Text>
-        </TouchableOpacity>
+        </AnimatedPressable>
+      </View>
+
+      <View style={styles.quickActionsRow}>
+        <AnimatedPressable
+          style={styles.quickActionChip}
+          activeOpacity={0.9}
+          onPress={() => navigation.navigate('SyndicateHub')}
+        >
+          <Ionicons name="grid-outline" size={13} color={Colors.textSecondary} />
+          <Text style={styles.quickActionText}>Hub</Text>
+        </AnimatedPressable>
+
+        <AnimatedPressable
+          style={styles.quickActionChip}
+          activeOpacity={0.9}
+          onPress={() => navigation.navigate('Portfolio')}
+        >
+          <Ionicons name="pie-chart-outline" size={13} color={Colors.textSecondary} />
+          <Text style={styles.quickActionText}>Portfolio</Text>
+        </AnimatedPressable>
+
+        <AnimatedPressable
+          style={styles.quickActionChip}
+          activeOpacity={0.9}
+          onPress={() => navigation.navigate('SyndicateOrderHistory')}
+        >
+          <Ionicons name="time-outline" size={13} color={Colors.textSecondary} />
+          <Text style={styles.quickActionText}>Orders</Text>
+        </AnimatedPressable>
       </View>
 
       <View style={styles.switcherWrap}>
         {(['MARKET', 'HOLDINGS'] as const).map((view) => (
-          <TouchableOpacity
+          <AnimatedPressable
             key={view}
             style={[styles.switcherBtn, activeView === view && styles.switcherBtnActive]}
             onPress={() => setActiveView(view)}
             activeOpacity={0.9}
           >
             <Text style={[styles.switcherText, activeView === view && styles.switcherTextActive]}>{view}</Text>
-          </TouchableOpacity>
+          </AnimatedPressable>
         ))}
       </View>
 
       <View style={styles.sectionRow}>
         <Text style={styles.sectionTitle}>{activeView === 'MARKET' ? 'Open Syndicates' : 'Your Holdings'}</Text>
-        <Text style={styles.sectionHint}>Settles in GBP or {STABLE_COIN}</Text>
+        <Text style={styles.sectionHint}>Settles in local GBP, {STABLE_COIN}, or hybrid rails</Text>
       </View>
     </View>
   );
@@ -193,15 +314,18 @@ export default function SyndicateScreen() {
     const soldPct = ((item.totalUnits - item.availableUnits) / item.totalUnits) * 100;
     const moveIsPositive = item.marketMovePct24h >= 0;
     const isHoldingsMode = activeView === 'HOLDINGS';
+    const avgEntry = item.avgEntryPriceGBP ?? item.unitPriceGBP;
+    const unrealized = item.yourUnits > 0 ? (item.unitPriceGBP - avgEntry) * item.yourUnits : 0;
+    const eligibility = checkSyndicateEligibility(item.settlementMode);
     const primaryDisabled = isHoldingsMode
       ? item.yourUnits === 0
-      : !item.isOpen || item.availableUnits === 0;
+      : !item.isOpen || item.availableUnits === 0 || !eligibility.ok;
 
     return (
-      <TouchableOpacity
+      <AnimatedPressable
         style={styles.assetCard}
         activeOpacity={0.94}
-        onPress={() => navigation.navigate('ItemDetail', { itemId: item.listingId })}
+        onPress={() => navigation.navigate('AssetDetail', { assetId: item.id })}
       >
         <Image source={{ uri: item.image }} style={styles.assetImage} />
 
@@ -222,6 +346,17 @@ export default function SyndicateScreen() {
 
           <Text style={styles.assetIssuer}>Issuer {getUserLabel(item.issuerId)}</Text>
 
+          <View style={styles.assetBadgesRow}>
+            <View style={styles.assetBadgePill}>
+              <Text style={styles.assetBadgeText}>{settlementLabelMap[item.settlementMode]}</Text>
+            </View>
+            {item.issuerJurisdiction ? (
+              <View style={styles.assetBadgePillMuted}>
+                <Text style={styles.assetBadgeTextMuted}>{item.issuerJurisdiction}</Text>
+              </View>
+            ) : null}
+          </View>
+
           <View style={styles.priceRow}>
             <Text style={styles.pricePrimary}>{formatMoney(item.unitPriceGBP)} / unit</Text>
             <Text style={styles.priceSecondary}>{item.unitPriceStable.toFixed(2)} {STABLE_COIN}</Text>
@@ -236,25 +371,34 @@ export default function SyndicateScreen() {
             <Text style={styles.metaText}>{item.holders} holders</Text>
           </View>
 
+          {item.yourUnits > 0 ? (
+            <View style={styles.pnlRow}>
+              <Text style={styles.metaText}>Entry {formatMoney(avgEntry)}</Text>
+              <Text style={[styles.pnlValue, unrealized >= 0 ? styles.pnlUp : styles.pnlDown]}>
+                Unrealized {formatSigned(unrealized)}
+              </Text>
+            </View>
+          ) : null}
+
           <View style={styles.ctaRow}>
-            <TouchableOpacity
+            <AnimatedPressable
               style={[styles.buyBtn, primaryDisabled && styles.buyBtnDisabled]}
               onPress={() => {
                 if (isHoldingsMode) {
-                  const result = sellSyndicateUnits(item, actingUserId, 1);
-                  if (!result.ok) {
-                    show(result.message ?? 'Unable to sell units', 'error');
-                    return;
-                  }
-
-                  show(`Sold 1 unit in ${item.title}`, 'success');
+                  openUnitsComposer(item, 'sell');
                 } else {
                   if (!item.isOpen || item.availableUnits === 0) {
                     show('Pool currently closed', 'error');
                     return;
                   }
 
-                  openUnitsComposer(item);
+                  if (!eligibility.ok) {
+                    show(eligibility.message ?? 'Complete compliance checks to trade', 'error');
+                    setComplianceModalVisible(true);
+                    return;
+                  }
+
+                  openUnitsComposer(item, 'buy');
                 }
               }}
               activeOpacity={0.9}
@@ -265,20 +409,20 @@ export default function SyndicateScreen() {
                 color={!primaryDisabled ? Colors.background : Colors.textMuted}
               />
               <Text style={[styles.buyBtnText, primaryDisabled && styles.buyBtnTextDisabled]}>
-                {isHoldingsMode ? 'Sell 1 Unit' : 'Buy Units'}
+                {isHoldingsMode ? 'Book Profit' : 'Buy Units'}
               </Text>
-            </TouchableOpacity>
+            </AnimatedPressable>
 
-            <TouchableOpacity
+            <AnimatedPressable
               style={styles.detailsBtn}
-              onPress={() => navigation.navigate('ItemDetail', { itemId: item.listingId })}
+              onPress={() => navigation.navigate('AssetDetail', { assetId: item.id })}
               activeOpacity={0.9}
             >
               <Text style={styles.detailsBtnText}>Asset</Text>
-            </TouchableOpacity>
+            </AnimatedPressable>
           </View>
         </View>
-      </TouchableOpacity>
+      </AnimatedPressable>
     );
   };
 
@@ -288,8 +432,15 @@ export default function SyndicateScreen() {
     }
 
     const unitsAsNumber = Number(unitsInput);
-    const estimatedSpend = Number.isFinite(unitsAsNumber) && unitsAsNumber > 0
-      ? unitsAsNumber * selectedAsset.unitPriceGBP
+    const normalizedUnits = Number.isFinite(unitsAsNumber) && unitsAsNumber > 0 ? Math.floor(unitsAsNumber) : 0;
+    const estimatedQuote = normalizedUnits > 0
+      ? normalizedUnits * selectedAsset.unitPriceGBP
+      : 0;
+    const estimatedStable = normalizedUnits > 0
+      ? normalizedUnits * selectedAsset.unitPriceStable
+      : 0;
+    const estimatedRealized = composerMode === 'sell'
+      ? normalizedUnits * (selectedAsset.unitPriceGBP - (selectedAsset.avgEntryPriceGBP ?? selectedAsset.unitPriceGBP))
       : 0;
 
     return (
@@ -300,19 +451,23 @@ export default function SyndicateScreen() {
         onRequestClose={closeUnitsComposer}
       >
         <View style={styles.unitsModalOverlay}>
-          <TouchableOpacity style={styles.unitsModalDismissLayer} activeOpacity={1} onPress={closeUnitsComposer} />
+          <AnimatedPressable style={styles.unitsModalDismissLayer} activeOpacity={1} onPress={closeUnitsComposer} />
 
           <View style={styles.unitsModalCard}>
             <Text style={styles.unitsModalLabel}>UNITS COMPOSER</Text>
             <Text style={styles.unitsModalTitle} numberOfLines={1}>{selectedAsset.title}</Text>
-            <Text style={styles.unitsModalHint}>Available {selectedAsset.availableUnits} units</Text>
+            <Text style={styles.unitsModalHint}>
+              {composerMode === 'buy'
+                ? `Available ${selectedAsset.availableUnits} units`
+                : `Holdings ${selectedAsset.yourUnits} units`}
+            </Text>
 
             <View style={styles.unitsInputWrap}>
               <Text style={styles.unitsInputPrefix}>Units</Text>
               <TextInput
                 style={styles.unitsInput}
                 value={unitsInput}
-                onChangeText={setUnitsInput}
+                onChangeText={(value) => setUnitsInput(value.replace(/\D/g, ''))}
                 keyboardType="number-pad"
                 placeholder="1"
                 placeholderTextColor={Colors.textMuted}
@@ -320,34 +475,151 @@ export default function SyndicateScreen() {
             </View>
 
             <View style={styles.unitsQuickRow}>
-              {[1, 5, 10].map((units) => (
-                <TouchableOpacity
+              {[1, 5, 10, 25].map((units) => (
+                <AnimatedPressable
                   key={units}
                   style={styles.unitsQuickChip}
                   onPress={() => setUnitsInput(String(units))}
                   activeOpacity={0.9}
                 >
                   <Text style={styles.unitsQuickText}>{units}</Text>
-                </TouchableOpacity>
+                </AnimatedPressable>
               ))}
             </View>
 
-            <Text style={styles.unitsSpendText}>Estimated spend {formatMoney(estimatedSpend)}</Text>
+            <Text style={styles.unitsSpendText}>
+              {composerMode === 'buy' ? 'Estimated spend' : 'Estimated receive'} {formatMoney(estimatedQuote)}
+            </Text>
+            <Text style={styles.unitsSpendSubText}>Approx. {estimatedStable.toFixed(2)} {STABLE_COIN}</Text>
+            {composerMode === 'sell' ? (
+              <Text style={[styles.unitsSpendSubText, estimatedRealized >= 0 ? styles.pnlUp : styles.pnlDown]}>
+                Realized P/L preview {formatSigned(estimatedRealized)}
+              </Text>
+            ) : null}
 
             <View style={styles.unitsModalActions}>
-              <TouchableOpacity style={styles.unitsCancelBtn} onPress={closeUnitsComposer} activeOpacity={0.9}>
+              <AnimatedPressable style={styles.unitsCancelBtn} onPress={closeUnitsComposer} activeOpacity={0.9}>
                 <Text style={styles.unitsCancelText}>Cancel</Text>
-              </TouchableOpacity>
+              </AnimatedPressable>
 
-              <TouchableOpacity style={styles.unitsSubmitBtn} onPress={submitUnitsPurchase} activeOpacity={0.9}>
-                <Text style={styles.unitsSubmitText}>Buy Units</Text>
-              </TouchableOpacity>
+              <AnimatedPressable style={styles.unitsSubmitBtn} onPress={submitUnitsOrder} activeOpacity={0.9}>
+                <Text style={styles.unitsSubmitText}>{composerMode === 'buy' ? 'Buy Units' : 'Sell Units'}</Text>
+              </AnimatedPressable>
             </View>
           </View>
         </View>
       </Modal>
     );
   };
+
+  const renderComplianceModal = () => (
+    <Modal
+      visible={complianceModalVisible}
+      transparent
+      animationType="fade"
+      onRequestClose={() => setComplianceModalVisible(false)}
+    >
+      <View style={styles.complianceModalOverlay}>
+        <AnimatedPressable
+          style={styles.complianceModalDismissLayer}
+          activeOpacity={1}
+          onPress={() => setComplianceModalVisible(false)}
+        />
+
+        <View style={styles.complianceModalCard}>
+          <Text style={styles.complianceModalLabel}>COMPLIANCE SETUP</Text>
+          <Text style={styles.complianceModalTitle}>Jurisdiction & KYC</Text>
+          <Text style={styles.complianceModalHint}>
+            Configure regional eligibility checks before issuing or trading syndicate units.
+          </Text>
+
+          <Text style={styles.complianceFieldLabel}>Country</Text>
+          <View style={styles.countryChipsWrap}>
+            {COUNTRY_OPTIONS.map((country) => {
+              const active = syndicateCompliance.countryCode === country.code;
+              return (
+                <AnimatedPressable
+                  key={country.code}
+                  style={[styles.countryChip, active && styles.countryChipActive]}
+                  onPress={() => updateSyndicateCompliance({ countryCode: country.code })}
+                  activeOpacity={0.9}
+                >
+                  <Text style={[styles.countryChipText, active && styles.countryChipTextActive]}>{country.code}</Text>
+                </AnimatedPressable>
+              );
+            })}
+          </View>
+
+          <View style={styles.complianceToggleRow}>
+            <Text style={styles.complianceToggleText}>KYC verified</Text>
+            <AnimatedPressable
+              style={[styles.complianceToggleBtn, syndicateCompliance.kycVerified && styles.complianceToggleBtnActive]}
+              onPress={() => updateSyndicateCompliance({ kycVerified: !syndicateCompliance.kycVerified })}
+              activeOpacity={0.9}
+            >
+              <Text style={[styles.complianceToggleBtnText, syndicateCompliance.kycVerified && styles.complianceToggleBtnTextActive]}>
+                {syndicateCompliance.kycVerified ? 'ON' : 'OFF'}
+              </Text>
+            </AnimatedPressable>
+          </View>
+
+          <View style={styles.complianceToggleRow}>
+            <Text style={styles.complianceToggleText}>Risk disclosure accepted</Text>
+            <AnimatedPressable
+              style={[styles.complianceToggleBtn, syndicateCompliance.riskDisclosureAccepted && styles.complianceToggleBtnActive]}
+              onPress={() =>
+                updateSyndicateCompliance({ riskDisclosureAccepted: !syndicateCompliance.riskDisclosureAccepted })
+              }
+              activeOpacity={0.9}
+            >
+              <Text
+                style={[
+                  styles.complianceToggleBtnText,
+                  syndicateCompliance.riskDisclosureAccepted && styles.complianceToggleBtnTextActive,
+                ]}
+              >
+                {syndicateCompliance.riskDisclosureAccepted ? 'ON' : 'OFF'}
+              </Text>
+            </AnimatedPressable>
+          </View>
+
+          <View style={styles.complianceToggleRow}>
+            <Text style={styles.complianceToggleText}>{STABLE_COIN} wallet connected</Text>
+            <AnimatedPressable
+              style={[styles.complianceToggleBtn, syndicateCompliance.stableCoinWalletConnected && styles.complianceToggleBtnActive]}
+              onPress={() =>
+                updateSyndicateCompliance({ stableCoinWalletConnected: !syndicateCompliance.stableCoinWalletConnected })
+              }
+              activeOpacity={0.9}
+            >
+              <Text
+                style={[
+                  styles.complianceToggleBtnText,
+                  syndicateCompliance.stableCoinWalletConnected && styles.complianceToggleBtnTextActive,
+                ]}
+              >
+                {syndicateCompliance.stableCoinWalletConnected ? 'ON' : 'OFF'}
+              </Text>
+            </AnimatedPressable>
+          </View>
+
+          <View style={[styles.complianceStatusBanner, marketEligibility.ok ? styles.complianceStatusOk : styles.complianceStatusError]}>
+            <Text style={[styles.complianceStatusText, marketEligibility.ok ? styles.complianceStatusTextOk : styles.complianceStatusTextError]}>
+              {marketEligibility.ok ? 'Eligible for syndicate trading' : marketEligibility.message}
+            </Text>
+          </View>
+
+          <AnimatedPressable
+            style={styles.complianceDoneBtn}
+            onPress={() => setComplianceModalVisible(false)}
+            activeOpacity={0.9}
+          >
+            <Text style={styles.complianceDoneBtnText}>Done</Text>
+          </AnimatedPressable>
+        </View>
+      </View>
+    </Modal>
+  );
 
   return (
     <>
@@ -360,10 +632,18 @@ export default function SyndicateScreen() {
         ListEmptyComponent={
           <EmptyState
             icon="pie-chart-outline"
-            title="No holdings yet"
-            subtitle="Buy fractions from an open pool to see your syndicate positions here."
-            ctaLabel="Browse Market"
-            onCtaPress={() => setActiveView('MARKET')}
+            title={activeView === 'HOLDINGS' ? 'No holdings yet' : 'No open syndicates'}
+            subtitle={
+              activeView === 'HOLDINGS'
+                ? 'Buy fractions from an open pool to see your syndicate positions here.'
+                : 'Create a new syndicate to tokenize a listing and open fractional ownership.'
+            }
+            ctaLabel={activeView === 'HOLDINGS' ? 'Browse Market' : 'Issue Syndicate'}
+            onCtaPress={() =>
+              activeView === 'HOLDINGS'
+                ? setActiveView('MARKET')
+                : navigation.navigate('CreateSyndicate')
+            }
           />
         }
         contentContainerStyle={styles.contentContainer}
@@ -379,6 +659,7 @@ export default function SyndicateScreen() {
         }
       />
       {renderUnitsComposer()}
+      {renderComplianceModal()}
     </>
   );
 }
@@ -388,6 +669,12 @@ const styles = StyleSheet.create({
     paddingBottom: 130,
   },
   metricsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    paddingHorizontal: 16,
+    marginBottom: 12,
+  },
+  metricsPnlRow: {
     flexDirection: 'row',
     gap: 10,
     paddingHorizontal: 16,
@@ -415,6 +702,32 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: 'Inter_500Medium',
   },
+  metricCardWide: {
+    flex: 1,
+    backgroundColor: '#11151b',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#27313a',
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+  },
+  metricWideLabel: {
+    color: Colors.textMuted,
+    fontSize: 10,
+    fontFamily: 'Inter_600SemiBold',
+    letterSpacing: 0.4,
+  },
+  metricWideValue: {
+    marginTop: 4,
+    fontSize: 14,
+    fontFamily: 'Inter_700Bold',
+  },
+  pnlUp: {
+    color: '#8de5dc',
+  },
+  pnlDown: {
+    color: '#ff9797',
+  },
   complianceCard: {
     marginHorizontal: 16,
     marginBottom: 14,
@@ -441,6 +754,18 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: 'Inter_500Medium',
     lineHeight: 17,
+  },
+  complianceOkText: {
+    marginTop: 6,
+    color: '#8de5dc',
+    fontSize: 11,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  complianceErrorText: {
+    marginTop: 6,
+    color: '#ff9797',
+    fontSize: 11,
+    fontFamily: 'Inter_600SemiBold',
   },
   issueRow: {
     marginHorizontal: 16,
@@ -478,6 +803,29 @@ const styles = StyleSheet.create({
   issueBtnText: {
     color: Colors.background,
     fontSize: 12,
+    fontFamily: 'Inter_700Bold',
+  },
+  quickActionsRow: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+    flexDirection: 'row',
+    gap: 8,
+  },
+  quickActionChip: {
+    flex: 1,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#2f2f2f',
+    backgroundColor: '#141414',
+    paddingVertical: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 5,
+  },
+  quickActionText: {
+    color: Colors.textSecondary,
+    fontSize: 11,
     fontFamily: 'Inter_700Bold',
   },
   switcherWrap: {
@@ -586,6 +934,39 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: 'Inter_500Medium',
   },
+  assetBadgesRow: {
+    marginTop: 8,
+    flexDirection: 'row',
+    gap: 6,
+  },
+  assetBadgePill: {
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: '#14231f',
+    borderWidth: 1,
+    borderColor: '#2e4440',
+  },
+  assetBadgeText: {
+    color: '#8de5dc',
+    fontSize: 10,
+    fontFamily: 'Inter_700Bold',
+    letterSpacing: 0.3,
+  },
+  assetBadgePillMuted: {
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: '#151515',
+    borderWidth: 1,
+    borderColor: '#2e2e2e',
+  },
+  assetBadgeTextMuted: {
+    color: Colors.textMuted,
+    fontSize: 10,
+    fontFamily: 'Inter_700Bold',
+    letterSpacing: 0.3,
+  },
   priceRow: {
     marginTop: 10,
     flexDirection: 'row',
@@ -619,6 +1000,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+  },
+  pnlRow: {
+    marginTop: 8,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  pnlValue: {
+    fontSize: 11,
+    fontFamily: 'Inter_700Bold',
   },
   metaText: {
     color: Colors.textSecondary,
@@ -750,6 +1141,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: 'Inter_500Medium',
   },
+  unitsSpendSubText: {
+    marginTop: 4,
+    color: Colors.textMuted,
+    fontSize: 11,
+    fontFamily: 'Inter_500Medium',
+  },
   unitsModalActions: {
     marginTop: 14,
     flexDirection: 'row',
@@ -779,6 +1176,152 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.accent,
   },
   unitsSubmitText: {
+    color: Colors.background,
+    fontSize: 12,
+    fontFamily: 'Inter_700Bold',
+  },
+  complianceModalOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  complianceModalDismissLayer: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  complianceModalCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+    backgroundColor: '#111111',
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+  },
+  complianceModalLabel: {
+    color: '#4ECDC4',
+    fontSize: 10,
+    fontFamily: 'Inter_700Bold',
+    letterSpacing: 0.8,
+  },
+  complianceModalTitle: {
+    marginTop: 5,
+    color: Colors.textPrimary,
+    fontSize: 16,
+    fontFamily: 'Inter_700Bold',
+  },
+  complianceModalHint: {
+    marginTop: 4,
+    color: Colors.textSecondary,
+    fontSize: 12,
+    fontFamily: 'Inter_500Medium',
+    lineHeight: 17,
+  },
+  complianceFieldLabel: {
+    marginTop: 12,
+    marginBottom: 7,
+    color: Colors.textSecondary,
+    fontSize: 11,
+    fontFamily: 'Inter_700Bold',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+  },
+  countryChipsWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  countryChip: {
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: '#313131',
+    backgroundColor: '#161616',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  countryChipActive: {
+    borderColor: '#4ECDC4',
+    backgroundColor: '#17302b',
+  },
+  countryChipText: {
+    color: Colors.textSecondary,
+    fontSize: 11,
+    fontFamily: 'Inter_700Bold',
+  },
+  countryChipTextActive: {
+    color: '#8de5dc',
+  },
+  complianceToggleRow: {
+    marginTop: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#2c2c2c',
+    backgroundColor: '#161616',
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  complianceToggleText: {
+    color: Colors.textPrimary,
+    fontSize: 12,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  complianceToggleBtn: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#353535',
+    backgroundColor: '#121212',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  complianceToggleBtnActive: {
+    borderColor: '#4ECDC4',
+    backgroundColor: '#17302b',
+  },
+  complianceToggleBtnText: {
+    color: Colors.textSecondary,
+    fontSize: 10,
+    fontFamily: 'Inter_700Bold',
+    letterSpacing: 0.5,
+  },
+  complianceToggleBtnTextActive: {
+    color: '#8de5dc',
+  },
+  complianceStatusBanner: {
+    marginTop: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  complianceStatusOk: {
+    borderColor: '#2d4a45',
+    backgroundColor: '#152420',
+  },
+  complianceStatusError: {
+    borderColor: '#4a2b2b',
+    backgroundColor: '#231616',
+  },
+  complianceStatusText: {
+    fontSize: 11,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  complianceStatusTextOk: {
+    color: '#8de5dc',
+  },
+  complianceStatusTextError: {
+    color: '#ff9797',
+  },
+  complianceDoneBtn: {
+    marginTop: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    backgroundColor: Colors.accent,
+  },
+  complianceDoneBtnText: {
     color: Colors.background,
     fontSize: 12,
     fontFamily: 'Inter_700Bold',

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Dimensions, TextInput } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Dimensions, TextInput } from 'react-native';
 import Reanimated, {
   useSharedValue,
   useAnimatedStyle,
@@ -12,6 +12,7 @@ import Reanimated, {
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../constants/colors';
+import { AnimatedPressable } from './AnimatedPressable';
 
 const { height, width } = Dimensions.get('window');
 
@@ -87,7 +88,12 @@ export function BottomSheetPicker({ visible, onClose, title, options, selectedVa
   return (
     <View style={[StyleSheet.absoluteFill, { zIndex: 9999 }]} pointerEvents="box-none">
       <Reanimated.View style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }, overlayStyle]}>
-        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={handleClose} />
+        <AnimatedPressable
+          style={StyleSheet.absoluteFill}
+          activeOpacity={1}
+          disableAnimation
+          onPress={handleClose}
+        />
       </Reanimated.View>
 
       <GestureDetector gesture={gesture}>
@@ -118,7 +124,7 @@ export function BottomSheetPicker({ visible, onClose, title, options, selectedVa
               <Text style={styles.noResultsText}>No results found</Text>
             ) : (
               filteredOptions.map((opt) => (
-                <TouchableOpacity
+                <AnimatedPressable
                   key={opt}
                   style={styles.optionRow}
                   activeOpacity={0.7}
@@ -126,7 +132,7 @@ export function BottomSheetPicker({ visible, onClose, title, options, selectedVa
                 >
                   <Text style={[styles.optionText, selectedValue === opt && styles.optionTextActive]}>{opt}</Text>
                   {selectedValue === opt && <Ionicons name="checkmark-circle" size={24} color={Colors.accent} />}
-                </TouchableOpacity>
+                </AnimatedPressable>
               ))
             )}
           </ScrollView>

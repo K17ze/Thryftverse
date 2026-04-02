@@ -1,9 +1,9 @@
 import React from 'react';
 import {
   Pressable,
+  PressableProps,
   StyleProp,
   ViewStyle,
-  GestureResponderEvent,
 } from 'react-native';
 import Reanimated, {
   useSharedValue,
@@ -12,24 +12,26 @@ import Reanimated, {
   withTiming,
 } from 'react-native-reanimated';
 
-interface Props {
-  children: React.ReactNode;
-  onPress?: (e: GestureResponderEvent) => void;
-  onLongPress?: (e: GestureResponderEvent) => void;
+interface Props extends Omit<PressableProps, 'style' | 'children'> {
+  children?: React.ReactNode;
   style?: StyleProp<ViewStyle>;
   scaleValue?: number;
-  disabled?: boolean;
-  hitSlop?: { top?: number; bottom?: number; left?: number; right?: number };
+  activeOpacity?: number;
+  disableAnimation?: boolean;
 }
 
 export function AnimatedPressable({
   children,
   onPress,
   onLongPress,
+  onPressIn,
+  onPressOut,
   style,
   scaleValue = 0.96,
+  disableAnimation = false,
   disabled = false,
-  hitSlop,
+  activeOpacity,
+  ...rest
 }: Props) {
   const scale = useSharedValue(1);
 
@@ -40,16 +42,25 @@ export function AnimatedPressable({
   return (
     <Reanimated.View style={[animStyle, style]}>
       <Pressable
-        onPressIn={() => {
-          if (!disabled) scale.value = withTiming(scaleValue, { duration: 100 });
+        onPressIn={(event) => {
+          if (!disabled && !disableAnimation) {
+            scale.value = withTiming(scaleValue, { duration: 100 });
+          }
+          if (onPressIn) {
+            onPressIn(event);
+          }
         }}
-        onPressOut={() => {
-          scale.value = withSpring(1, { damping: 15, stiffness: 400 });
+        onPressOut={(event) => {
+          if (!disableAnimation) {
+            scale.value = withSpring(1, { damping: 15, stiffness: 400 });
+          }
+          if (onPressOut) {
+            onPressOut(event);
+          }
         }}
         onPress={disabled ? undefined : onPress}
         onLongPress={disabled ? undefined : onLongPress}
-        hitSlop={hitSlop}
-        style={{ flex: 1 }}
+        {...rest}
       >
         {children}
       </Pressable>

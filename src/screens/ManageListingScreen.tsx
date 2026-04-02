@@ -1,20 +1,34 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, StatusBar, Image, Alert } from 'react-native';
+import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import { View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  StatusBar,
+  Image,
+  Alert
+} from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../constants/colors';
 import { MOCK_LISTINGS } from '../data/mockData';
 import { RootStackParamList } from '../navigation/types';
+import { useFormattedPrice } from '../hooks/useFormattedPrice';
+import { useBackendData } from '../context/BackendDataContext';
 
 type RouteT = RouteProp<RootStackParamList, 'ManageListing'>;
 
 export default function ManageListingScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<RouteT>();
+  const { formatFromFiat } = useFormattedPrice();
+  const { listings } = useBackendData();
   const { itemId } = route.params;
 
-  const item = MOCK_LISTINGS.find(l => l.id === itemId) || MOCK_LISTINGS[0];
+  const item = listings.find((l) => l.id === itemId) || MOCK_LISTINGS.find((l) => l.id === itemId) || listings[0] || MOCK_LISTINGS[0];
+  const bumpFeeLabel = formatFromFiat(1.95, 'GBP', { displayMode: 'fiat' });
 
   const handleAction = (title: string, msg: string) => {
     Alert.alert(title, msg, [
@@ -28,9 +42,9 @@ export default function ManageListingScreen() {
       <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
 
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
-        </TouchableOpacity>
+        </AnimatedPressable>
         <Text style={styles.headerTitle}>Manage Listing</Text>
         <View style={{ width: 44 }} />
       </View>
@@ -42,7 +56,7 @@ export default function ManageListingScreen() {
           <Image source={{ uri: item.images[0] }} style={styles.previewImg} />
           <View style={styles.previewInfo}>
             <Text style={styles.itemTitle} numberOfLines={2}>{item.title}</Text>
-            <Text style={styles.itemPrice}>£{item.price.toFixed(2)}</Text>
+            <Text style={styles.itemPrice}>{formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}</Text>
             <View style={styles.statusBadge}>
               <Text style={styles.statusText}>{item.isSold ? 'SOLD' : 'ACTIVE'}</Text>
             </View>
@@ -50,10 +64,10 @@ export default function ManageListingScreen() {
         </View>
 
         <Text style={styles.sectionTitle}>Promote</Text>
-        <TouchableOpacity 
+        <AnimatedPressable 
           style={styles.actionBlock} 
           activeOpacity={0.8}
-          onPress={() => handleAction('Bump Item', 'Push this item to the top of the feed for £1.95?')}
+          onPress={() => handleAction('Bump Item', `Push this item to the top of the feed for ${bumpFeeLabel}?`)}
         >
           <View style={styles.blockLeft}>
             <View style={[styles.iconBox, { backgroundColor: 'rgba(245,166,35,0.1)' }]}>
@@ -65,11 +79,11 @@ export default function ManageListingScreen() {
             </View>
           </View>
           <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
-        </TouchableOpacity>
+        </AnimatedPressable>
 
         <Text style={styles.sectionTitle}>Actions</Text>
         
-        <TouchableOpacity 
+        <AnimatedPressable 
           style={styles.actionBlock} 
           activeOpacity={0.8}
           onPress={() => navigation.navigate('Sell')}
@@ -80,10 +94,10 @@ export default function ManageListingScreen() {
             </View>
             <Text style={styles.blockTitle}>Edit details</Text>
           </View>
-        </TouchableOpacity>
+        </AnimatedPressable>
 
         {!item.isSold && (
-          <TouchableOpacity 
+          <AnimatedPressable 
             style={styles.actionBlock} 
             activeOpacity={0.8}
             onPress={() => handleAction('Mark as Sold', 'Are you sure you want to mark this item as sold? It will no longer be available for purchase.')}
@@ -94,10 +108,10 @@ export default function ManageListingScreen() {
               </View>
               <Text style={styles.blockTitle}>Mark as Sold</Text>
             </View>
-          </TouchableOpacity>
+          </AnimatedPressable>
         )}
 
-        <TouchableOpacity 
+        <AnimatedPressable 
           style={[styles.actionBlock, { borderBottomWidth: 0 }]} 
           activeOpacity={0.8}
           onPress={() => handleAction('Delete Item', 'Are you sure you want to permanently delete this listing?')}
@@ -108,7 +122,7 @@ export default function ManageListingScreen() {
             </View>
             <Text style={[styles.blockTitle, { color: '#FF3B30' }]}>Delete Listing</Text>
           </View>
-        </TouchableOpacity>
+        </AnimatedPressable>
 
       </ScrollView>
     </SafeAreaView>

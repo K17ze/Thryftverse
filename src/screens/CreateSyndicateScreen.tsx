@@ -1,17 +1,18 @@
 import React from 'react';
 import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import {
   View,
   Text,
   StyleSheet,
   StatusBar,
-  TouchableOpacity,
   TextInput,
   Image,
-  FlatList,
+  FlatList
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { Colors } from '../constants/colors';
 import { RootStackParamList } from '../navigation/types';
@@ -19,29 +20,69 @@ import { MOCK_LISTINGS, MOCK_USERS, Listing } from '../data/mockData';
 import type { SyndicateAsset } from '../data/tradeHub';
 import { useStore } from '../store/useStore';
 import { useToast } from '../context/ToastContext';
+import { useFormattedPrice } from '../hooks/useFormattedPrice';
+import { useCurrencyContext } from '../context/CurrencyContext';
+import { toFiat, toIze } from '../utils/currency';
+import { sanitizeDecimalInput, sanitizeIntegerInput } from '../utils/currencyAuthoringFlows';
+import { getCreateSyndicateInitialState } from '../utils/syndicatePrefill';
+import { useBackendData } from '../context/BackendDataContext';
 
 type NavT = StackNavigationProp<RootStackParamList>;
+type RouteT = RouteProp<RootStackParamList, 'CreateSyndicate'>;
 
 const STABLE_COIN = 'TVUSD';
+const COUNTRY_OPTIONS = ['GB', 'EU', 'SG', 'AE', 'US', 'CA'] as const;
+const SETTLEMENT_MODES: Array<{ key: 'GBP' | 'TVUSD' | 'HYBRID' }> = [
+  { key: 'GBP' },
+  { key: 'TVUSD' },
+  { key: 'HYBRID' },
+];
 
 export default function CreateSyndicateScreen() {
   const navigation = useNavigation<NavT>();
+  const route = useRoute<RouteT>();
   const { show } = useToast();
+  const { formatFromFiat } = useFormattedPrice();
+  const { currencyCode, goldRates } = useCurrencyContext();
+  const { listings } = useBackendData();
+
+  const prefill = route.params;
 
   const currentUser = useStore((state) => state.currentUser);
   const addSyndicate = useStore((state) => state.addSyndicate);
+  const syndicateCompliance = useStore((state) => state.syndicateCompliance);
+  const updateSyndicateCompliance = useStore((state) => state.updateSyndicateCompliance);
+  const checkSyndicateEligibility = useStore((state) => state.checkSyndicateEligibility);
 
   const issuerId = currentUser?.id ?? MOCK_USERS[0]?.id ?? 'u1';
 
   const issuerListings = React.useMemo(() => {
-    const own = MOCK_LISTINGS.filter((item) => item.sellerId === issuerId);
-    return own.length ? own : MOCK_LISTINGS.slice(0, 12);
-  }, [issuerId]);
+    const sourceListings = listings.length ? listings : MOCK_LISTINGS;
+    const own = sourceListings.filter((item) => item.sellerId === issuerId);
+    return own.length ? own : sourceListings.slice(0, 12);
+  }, [issuerId, listings]);
 
-  const [selectedListingId, setSelectedListingId] = React.useState(issuerListings[0]?.id ?? '');
-  const [totalUnitsInput, setTotalUnitsInput] = React.useState('1000');
-  const [unitPriceInput, setUnitPriceInput] = React.useState('1.00');
+  const initialState = React.useMemo(
+    () => getCreateSyndicateInitialState(prefill, issuerListings[0]?.id ?? ''),
+    [prefill, issuerListings]
+  );
+
+  const [selectedListingId, setSelectedListingId] = React.useState(initialState.selectedListingId);
+  const [totalUnitsInput, setTotalUnitsInput] = React.useState(initialState.totalUnitsInput);
+  const [unitPriceInput, setUnitPriceInput] = React.useState(initialState.unitPriceInput);
   const [stablePriceInput, setStablePriceInput] = React.useState('1.28');
+  const [settlementMode, setSettlementMode] = React.useState<'GBP' | 'TVUSD' | 'HYBRID'>('HYBRID');
+
+  const fromDisplayToGbp = React.useCallback(
+    (amountDisplay: number) => {
+      if (currencyCode === 'GBP') {
+        return amountDisplay;
+      }
+      const amountIze = toIze(amountDisplay, currencyCode, goldRates);
+      return toFiat(amountIze, 'GBP', goldRates);
+    },
+    [currencyCode, goldRates]
+  );
 
   React.useEffect(() => {
     if (!issuerListings.length) {
@@ -70,15 +111,21 @@ export default function CreateSyndicateScreen() {
       return;
     }
 
-    const unitPriceGBP = Number(unitPriceInput);
+    const unitPriceGBP = fromDisplayToGbp(Number(unitPriceInput));
     if (!Number.isFinite(unitPriceGBP) || unitPriceGBP <= 0) {
-      show('Enter a valid GBP unit price', 'error');
+      show(`Enter a valid ${currencyCode} unit price`, 'error');
       return;
     }
 
     const unitPriceStable = Number(stablePriceInput);
     if (!Number.isFinite(unitPriceStable) || unitPriceStable <= 0) {
       show('Enter a valid stable coin unit price', 'error');
+      return;
+    }
+
+    const eligibility = checkSyndicateEligibility(settlementMode);
+    if (!eligibility.ok) {
+      show(eligibility.message ?? 'Complete compliance checks before issuing', 'error');
       return;
     }
 
@@ -94,10 +141,14 @@ export default function CreateSyndicateScreen() {
       availableUnits: totalUnits,
       unitPriceGBP,
       unitPriceStable,
+      settlementMode,
+      issuerJurisdiction: syndicateCompliance.countryCode,
       marketMovePct24h: 0,
       holders: 0,
       volume24hGBP: 0,
       yourUnits: 0,
+      avgEntryPriceGBP: unitPriceGBP,
+      realizedProfitGBP: 0,
       isOpen: true,
     };
 
@@ -108,20 +159,20 @@ export default function CreateSyndicateScreen() {
 
   const estimatedValue = React.useMemo(() => {
     const units = Number(totalUnitsInput);
-    const unitPrice = Number(unitPriceInput);
+    const unitPrice = fromDisplayToGbp(Number(unitPriceInput));
 
     if (!Number.isFinite(units) || !Number.isFinite(unitPrice)) {
       return 0;
     }
 
     return units * unitPrice;
-  }, [totalUnitsInput, unitPriceInput]);
+  }, [fromDisplayToGbp, totalUnitsInput, unitPriceInput]);
 
   const renderListingCard = ({ item }: { item: Listing }) => {
     const selected = item.id === selectedListingId;
 
     return (
-      <TouchableOpacity
+      <AnimatedPressable
         style={[styles.listingCard, selected && styles.listingCardSelected]}
         onPress={() => setSelectedListingId(item.id)}
         activeOpacity={0.9}
@@ -129,14 +180,14 @@ export default function CreateSyndicateScreen() {
         <Image source={{ uri: item.images[0] }} style={styles.listingImage} />
         <View style={styles.listingMeta}>
           <Text style={styles.listingTitle} numberOfLines={1}>{item.title}</Text>
-          <Text style={styles.listingPrice}>GBP {item.price.toFixed(2)}</Text>
+          <Text style={styles.listingPrice}>{formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}</Text>
         </View>
         {selected ? (
           <View style={styles.selectedTick}>
             <Ionicons name="checkmark" size={12} color={Colors.background} />
           </View>
         ) : null}
-      </TouchableOpacity>
+      </AnimatedPressable>
     );
   };
 
@@ -147,18 +198,18 @@ export default function CreateSyndicateScreen() {
       <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
 
       <View style={styles.header}>
-        <TouchableOpacity style={styles.closeBtn} onPress={() => navigation.goBack()} activeOpacity={0.85}>
+        <AnimatedPressable style={styles.closeBtn} onPress={() => navigation.goBack()} activeOpacity={0.85}>
           <Ionicons name="close" size={20} color={Colors.textPrimary} />
-        </TouchableOpacity>
+        </AnimatedPressable>
 
         <View>
           <Text style={styles.headerLabel}>ISSUER CONSOLE</Text>
           <Text style={styles.headerTitle}>Create Syndicate</Text>
         </View>
 
-        <TouchableOpacity style={styles.issueBtn} onPress={issueSyndicate} activeOpacity={0.9}>
+        <AnimatedPressable style={styles.issueBtn} onPress={issueSyndicate} activeOpacity={0.9}>
           <Text style={styles.issueBtnText}>Issue</Text>
-        </TouchableOpacity>
+        </AnimatedPressable>
       </View>
 
       <View style={styles.content}>
@@ -166,28 +217,131 @@ export default function CreateSyndicateScreen() {
           <Image source={{ uri: previewImage }} style={styles.previewImage} />
           <View style={styles.previewOverlay}>
             <Text style={styles.previewTitle} numberOfLines={1}>{selectedListing?.title ?? 'Select listing'}</Text>
-            <Text style={styles.previewMeta}>Estimated cap GBP {estimatedValue.toFixed(2)}</Text>
+            <Text style={styles.previewMeta}>
+              Estimated cap {formatFromFiat(estimatedValue, 'GBP', { displayMode: 'fiat' })}
+            </Text>
+          </View>
+        </View>
+
+        {prefill?.offeringWindowHours ? (
+          <View style={styles.prefillBanner}>
+            <Ionicons name="sparkles-outline" size={14} color="#8de5dc" />
+            <Text style={styles.prefillBannerText}>
+              Imported from Sell flow · {prefill.offeringWindowHours}h offer window · {prefill.authPhotos?.length ?? 0} auth photos
+            </Text>
+          </View>
+        ) : null}
+
+        <View style={styles.section}>
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionTitle}>Compliance Profile</Text>
+            <Text style={styles.sectionHint}>Required before issuance</Text>
+          </View>
+
+          <Text style={styles.inputLabel}>Country</Text>
+          <View style={styles.rowWrap}>
+            {COUNTRY_OPTIONS.map((countryCode) => {
+              const active = syndicateCompliance.countryCode === countryCode;
+              return (
+                <AnimatedPressable
+                  key={countryCode}
+                  style={[styles.chipBtn, active && styles.chipBtnActive]}
+                  onPress={() => updateSyndicateCompliance({ countryCode })}
+                  activeOpacity={0.9}
+                >
+                  <Text style={[styles.chipBtnText, active && styles.chipBtnTextActive]}>{countryCode}</Text>
+                </AnimatedPressable>
+              );
+            })}
+          </View>
+
+          <View style={styles.toggleRow}>
+            <Text style={styles.toggleLabel}>KYC verified</Text>
+            <AnimatedPressable
+              style={[styles.toggleBtn, syndicateCompliance.kycVerified && styles.toggleBtnActive]}
+              onPress={() => updateSyndicateCompliance({ kycVerified: !syndicateCompliance.kycVerified })}
+              activeOpacity={0.9}
+            >
+              <Text style={[styles.toggleText, syndicateCompliance.kycVerified && styles.toggleTextActive]}>
+                {syndicateCompliance.kycVerified ? 'ON' : 'OFF'}
+              </Text>
+            </AnimatedPressable>
+          </View>
+
+          <View style={styles.toggleRow}>
+            <Text style={styles.toggleLabel}>Risk disclosure accepted</Text>
+            <AnimatedPressable
+              style={[styles.toggleBtn, syndicateCompliance.riskDisclosureAccepted && styles.toggleBtnActive]}
+              onPress={() =>
+                updateSyndicateCompliance({ riskDisclosureAccepted: !syndicateCompliance.riskDisclosureAccepted })
+              }
+              activeOpacity={0.9}
+            >
+              <Text style={[styles.toggleText, syndicateCompliance.riskDisclosureAccepted && styles.toggleTextActive]}>
+                {syndicateCompliance.riskDisclosureAccepted ? 'ON' : 'OFF'}
+              </Text>
+            </AnimatedPressable>
+          </View>
+
+          <View style={styles.toggleRow}>
+            <Text style={styles.toggleLabel}>{STABLE_COIN} wallet connected</Text>
+            <AnimatedPressable
+              style={[styles.toggleBtn, syndicateCompliance.stableCoinWalletConnected && styles.toggleBtnActive]}
+              onPress={() =>
+                updateSyndicateCompliance({
+                  stableCoinWalletConnected: !syndicateCompliance.stableCoinWalletConnected,
+                })
+              }
+              activeOpacity={0.9}
+            >
+              <Text style={[styles.toggleText, syndicateCompliance.stableCoinWalletConnected && styles.toggleTextActive]}>
+                {syndicateCompliance.stableCoinWalletConnected ? 'ON' : 'OFF'}
+              </Text>
+            </AnimatedPressable>
           </View>
         </View>
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Token Split</Text>
 
+          <Text style={styles.inputLabel}>Settlement mode</Text>
+          <View style={styles.rowWrap}>
+            {SETTLEMENT_MODES.map((mode) => {
+              const active = settlementMode === mode.key;
+              const modeLabel =
+                mode.key === 'GBP'
+                  ? `${currencyCode} only`
+                  : mode.key === 'TVUSD'
+                    ? `${STABLE_COIN} only`
+                    : `Hybrid (${currencyCode} + ${STABLE_COIN})`;
+              return (
+                <AnimatedPressable
+                  key={mode.key}
+                  style={[styles.chipBtn, active && styles.chipBtnActive]}
+                  onPress={() => setSettlementMode(mode.key)}
+                  activeOpacity={0.9}
+                >
+                  <Text style={[styles.chipBtnText, active && styles.chipBtnTextActive]}>{modeLabel}</Text>
+                </AnimatedPressable>
+              );
+            })}
+          </View>
+
           <Text style={styles.inputLabel}>Total Units</Text>
           <TextInput
             style={styles.input}
             value={totalUnitsInput}
-            onChangeText={setTotalUnitsInput}
+            onChangeText={(value) => setTotalUnitsInput(sanitizeIntegerInput(value))}
             keyboardType="number-pad"
             placeholder="1000"
             placeholderTextColor={Colors.textMuted}
           />
 
-          <Text style={styles.inputLabel}>Unit Price (GBP)</Text>
+          <Text style={styles.inputLabel}>Unit Price ({currencyCode})</Text>
           <TextInput
             style={styles.input}
             value={unitPriceInput}
-            onChangeText={setUnitPriceInput}
+            onChangeText={(value) => setUnitPriceInput(sanitizeDecimalInput(value))}
             keyboardType="decimal-pad"
             placeholder="0.00"
             placeholderTextColor={Colors.textMuted}
@@ -197,7 +351,7 @@ export default function CreateSyndicateScreen() {
           <TextInput
             style={styles.input}
             value={stablePriceInput}
-            onChangeText={setStablePriceInput}
+            onChangeText={(value) => setStablePriceInput(sanitizeDecimalInput(value))}
             keyboardType="decimal-pad"
             placeholder="0.00"
             placeholderTextColor={Colors.textMuted}
@@ -309,6 +463,24 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: 'Inter_600SemiBold',
   },
+  prefillBanner: {
+    marginBottom: 12,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: '#2f4944',
+    backgroundColor: '#152520',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  prefillBannerText: {
+    flex: 1,
+    color: '#8de5dc',
+    fontSize: 11,
+    fontFamily: 'Inter_600SemiBold',
+  },
   section: {
     marginBottom: 15,
   },
@@ -328,6 +500,70 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     fontSize: 11,
     fontFamily: 'Inter_500Medium',
+  },
+  rowWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 10,
+  },
+  chipBtn: {
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: '#2e2e2e',
+    backgroundColor: '#151515',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  chipBtnActive: {
+    borderColor: '#4ECDC4',
+    backgroundColor: '#17302b',
+  },
+  chipBtnText: {
+    color: Colors.textSecondary,
+    fontSize: 11,
+    fontFamily: 'Inter_700Bold',
+  },
+  chipBtnTextActive: {
+    color: '#8de5dc',
+  },
+  toggleRow: {
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: '#2c2c2c',
+    backgroundColor: '#161616',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginBottom: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  toggleLabel: {
+    color: Colors.textPrimary,
+    fontSize: 12,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  toggleBtn: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#333333',
+    backgroundColor: '#121212',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  toggleBtnActive: {
+    borderColor: '#4ECDC4',
+    backgroundColor: '#17302b',
+  },
+  toggleText: {
+    color: Colors.textSecondary,
+    fontSize: 10,
+    fontFamily: 'Inter_700Bold',
+    letterSpacing: 0.5,
+  },
+  toggleTextActive: {
+    color: '#8de5dc',
   },
   inputLabel: {
     color: Colors.textSecondary,

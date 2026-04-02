@@ -1,14 +1,16 @@
 import React from 'react';
 import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import {
   View,
   Text,
   StyleSheet,
   Image,
   ScrollView,
-  TouchableOpacity,
   StatusBar,
   Dimensions,
   FlatList,
+  Share
 } from 'react-native';
 import Reanimated, {
   useAnimatedScrollHandler,
@@ -30,6 +32,8 @@ import { ImageViewer } from '../components/ImageViewer';
 import { AnimatedHeart } from '../components/AnimatedHeart';
 import { useToast } from '../context/ToastContext';
 import { useHaptic } from '../hooks/useHaptic';
+import { useFormattedPrice } from '../hooks/useFormattedPrice';
+import { useBackendData } from '../context/BackendDataContext';
 
 const { width, height } = Dimensions.get('window');
 
@@ -40,19 +44,32 @@ export default function ItemDetailScreen() {
   
   const isFav = useStore(state => state.isWishlisted(route.params?.itemId));
   const toggleFav = useStore(state => state.toggleWishlist);
+  const { listings } = useBackendData();
 
   const { itemId } = route.params || {};
-  const item: Listing = MOCK_LISTINGS.find(l => l.id === itemId) || MOCK_LISTINGS[0];
+  const fallbackItem = listings[0] || MOCK_LISTINGS[0];
+  const item: Listing = listings.find(l => l.id === itemId) || fallbackItem;
   const seller: User = MOCK_USERS.find(u => u.id === item.sellerId) || MOCK_USERS[0];
-  const sellerItems = MOCK_LISTINGS.filter(l => l.sellerId === seller.id && l.id !== item.id);
+  const sellerItems = listings.filter(l => l.sellerId === seller.id && l.id !== item.id);
 
   const { show } = useToast();
   const haptic = useHaptic();
+  const { formatFromFiat } = useFormattedPrice();
 
   const handleToggleFav = () => {
     toggleFav(item.id);
     if (!isFav) {
       show('Added to wishlist ♥', 'success');
+    }
+  };
+
+  const handleShare = async () => {
+    try {
+      await Share.share({
+        message: `Check out ${item.title} on Thryftverse for ${formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}.`,
+      });
+    } catch {
+      show('Unable to open share sheet right now.', 'error');
     }
   };
 
@@ -126,13 +143,13 @@ export default function ItemDetailScreen() {
           )}
 
           <View style={[styles.floatingHeader, { paddingTop: Math.max(insets.top, 20) }]}>
-            <TouchableOpacity style={styles.blurBtn} onPress={() => navigation.goBack()}>
+            <AnimatedPressable style={styles.blurBtn} onPress={() => navigation.goBack()}>
               <Ionicons name="arrow-back" size={24} color="#fff" />
-            </TouchableOpacity>
+            </AnimatedPressable>
             <View style={styles.headerRight}>
-              <TouchableOpacity style={styles.blurBtn}>
+              <AnimatedPressable style={styles.blurBtn} onPress={handleShare}>
                 <Ionicons name="share-outline" size={24} color="#fff" />
-              </TouchableOpacity>
+              </AnimatedPressable>
               <View style={styles.blurBtn}>
                 <AnimatedHeart
                   isActive={isFav}
@@ -148,11 +165,13 @@ export default function ItemDetailScreen() {
 
         <View style={styles.detailsContainer}>
           <View style={styles.priceRow}>
-            <Text style={styles.price}>£{item.price.toFixed(2)}</Text>
+            <Text style={styles.price}>{formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}</Text>
             <Text style={styles.brand}>{item.brand}</Text>
           </View>
           {item.priceWithProtection && (
-            <Text style={styles.protectionText}>incl. £{(item.priceWithProtection - item.price).toFixed(2)} Buyer Protection fee</Text>
+            <Text style={styles.protectionText}>
+              incl. {formatFromFiat(item.priceWithProtection - item.price, 'GBP', { displayMode: 'fiat' })} Buyer Protection fee
+            </Text>
           )}
 
           <Text style={styles.title}>{item.title}</Text>
@@ -170,17 +189,17 @@ export default function ItemDetailScreen() {
           </View>
 
           {/* ── Seller Card ── */}
-          <TouchableOpacity style={styles.sellerCard} onPress={() => navigation.navigate('UserProfile', { userId: seller.id })} activeOpacity={0.8}>
+          <AnimatedPressable style={styles.sellerCard} onPress={() => navigation.navigate('UserProfile', { userId: seller.id })} activeOpacity={0.8}>
             <Image source={{ uri: seller.avatar }} style={styles.sellerAvatar} />
             <View style={styles.sellerInfo}>
               <Text style={styles.sellerName}>{seller.username}</Text>
               <Text style={styles.sellerStats}>{seller.rating} ★ • {seller.reviewCount} Reviews</Text>
               <Text style={styles.sellerLastSeen}>Last seen: {seller.lastSeen}</Text>
             </View>
-            <TouchableOpacity style={styles.followBtn} onPress={(e) => { e.stopPropagation(); navigation.navigate('Chat', { conversationId: `${seller.id}_${item.id}` }); }}>
+            <AnimatedPressable style={styles.followBtn} onPress={(e) => { e.stopPropagation(); navigation.navigate('Chat', { conversationId: `${seller.id}_${item.id}` }); }}>
               <Text style={styles.followBtnText}>Message</Text>
-            </TouchableOpacity>
-          </TouchableOpacity>
+            </AnimatedPressable>
+          </AnimatedPressable>
 
           {/* Restored Similar Items Feature */}
           {sellerItems.length > 0 && (
@@ -188,14 +207,14 @@ export default function ItemDetailScreen() {
               <Text style={styles.sectionTitle}>More from {seller.username}</Text>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
                 {sellerItems.map(sItem => (
-                  <TouchableOpacity 
+                  <AnimatedPressable 
                     key={sItem.id} 
                     style={styles.sellerItemCard}
                     onPress={() => navigation.push('ItemDetail', { itemId: sItem.id })}
                   >
                     <Image source={{ uri: sItem.images[0] }} style={styles.sellerItemImg} />
-                    <Text style={styles.sellerItemPrice}>£{sItem.price}</Text>
-                  </TouchableOpacity>
+                    <Text style={styles.sellerItemPrice}>{formatFromFiat(sItem.price, 'GBP', { displayMode: 'fiat' })}</Text>
+                  </AnimatedPressable>
                 ))}
               </ScrollView>
             </View>
@@ -206,20 +225,20 @@ export default function ItemDetailScreen() {
       {/* ── Floating Buy Bar ── */}
       {!item.isSold && (
         <Reanimated.View style={[styles.floatingBuyBar, { paddingBottom: Math.max(insets.bottom, 20) }, buyBarStyle]}>
-          <TouchableOpacity
+          <AnimatedPressable
             style={styles.buyBtn}
             activeOpacity={0.9}
             onPress={() => navigation.navigate('Checkout', { itemId: item.id })}
           >
             <Text style={styles.buyBtnText}>Buy Now</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
+          </AnimatedPressable>
+          <AnimatedPressable
             style={styles.offerBtn}
             activeOpacity={0.9}
             onPress={() => navigation.navigate('MakeOffer', { itemId: item.id, price: item.price, title: item.title })}
           >
             <Text style={styles.offerBtnText}>Offer</Text>
-          </TouchableOpacity>
+          </AnimatedPressable>
         </Reanimated.View>
       )}
     </View>

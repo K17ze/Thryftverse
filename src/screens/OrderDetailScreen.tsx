@@ -1,12 +1,13 @@
 import React from 'react';
 import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import {
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
   ScrollView,
   StatusBar,
-  Image,
+  Image
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,6 +16,8 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { Colors } from '../constants/colors';
 import { RootStackParamList } from '../navigation/types';
 import { MOCK_LISTINGS, MOCK_USERS } from '../data/mockData';
+import { useFormattedPrice } from '../hooks/useFormattedPrice';
+import { useBackendData } from '../context/BackendDataContext';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 type RouteT = RouteProp<RootStackParamList, 'OrderDetail'>;
@@ -31,11 +34,16 @@ type TrackingStep = {
 export default function OrderDetailScreen() {
   const navigation = useNavigation<NavT>();
   const route = useRoute<RouteT>();
+  const { formatFromFiat } = useFormattedPrice();
+  const { listings } = useBackendData();
   const { orderId } = route.params;
 
   // Find order from mock data  
-  const listing = MOCK_LISTINGS[0];
+  const listing = listings[0] || MOCK_LISTINGS[0];
   const seller = MOCK_USERS[0];
+  const buyerProtectionFee = listing.price * 0.05 + 0.7;
+  const postageFee = 2.89;
+  const totalPaid = listing.price + buyerProtectionFee + postageFee;
 
   const trackingSteps: TrackingStep[] = [
     {
@@ -80,19 +88,19 @@ export default function OrderDetailScreen() {
 
       {/* ── Header ── */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={22} color={Colors.textPrimary} />
-        </TouchableOpacity>
+        </AnimatedPressable>
         <Text style={styles.headerTitle}>Order Details</Text>
-        <TouchableOpacity style={styles.moreBtn}>
+        <AnimatedPressable style={styles.moreBtn}>
           <Ionicons name="ellipsis-horizontal" size={22} color={Colors.textPrimary} />
-        </TouchableOpacity>
+        </AnimatedPressable>
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
 
         {/* ── Item Card ── */}
-        <TouchableOpacity
+        <AnimatedPressable
           style={styles.itemCard}
           onPress={() => navigation.navigate('ItemDetail', { itemId: listing.id })}
           activeOpacity={0.88}
@@ -101,10 +109,10 @@ export default function OrderDetailScreen() {
           <View style={styles.itemInfo}>
             <Text style={styles.itemTitle} numberOfLines={2}>{listing.title}</Text>
             <Text style={styles.itemMeta}>{listing.size} · {listing.condition}</Text>
-            <Text style={styles.itemPrice}>£{listing.price.toFixed(2)}</Text>
+            <Text style={styles.itemPrice}>{formatFromFiat(listing.price, 'GBP', { displayMode: 'fiat' })}</Text>
           </View>
           <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
-        </TouchableOpacity>
+        </AnimatedPressable>
 
         {/* ── Status Banner ── */}
         <View style={styles.statusBanner}>
@@ -149,7 +157,7 @@ export default function OrderDetailScreen() {
 
         {/* ── Seller Info ── */}
         <Text style={styles.sectionTitle}>Seller</Text>
-        <TouchableOpacity
+        <AnimatedPressable
           style={styles.sellerCard}
           onPress={() => navigation.navigate('UserProfile', { userId: seller.id })}
           activeOpacity={0.88}
@@ -162,41 +170,41 @@ export default function OrderDetailScreen() {
               <Text style={styles.sellerRating}>{seller.rating} ({seller.reviewCount} reviews)</Text>
             </View>
           </View>
-          <TouchableOpacity
+          <AnimatedPressable
             style={styles.msgBtn}
             onPress={() => navigation.navigate('Chat', { conversationId: 'c1' })}
           >
             <Text style={styles.msgBtnText}>Message</Text>
-          </TouchableOpacity>
-        </TouchableOpacity>
+          </AnimatedPressable>
+        </AnimatedPressable>
 
         {/* ── Transaction Info ── */}
         <Text style={styles.sectionTitle}>Transaction</Text>
         <View style={styles.txCard}>
-          <TxRow label="Item price" value={`£${listing.price.toFixed(2)}`} />
-          <TxRow label="Buyer protection" value={`£${(listing.price * 0.05 + 0.7).toFixed(2)}`} />
-          <TxRow label="Postage" value="from £2.89" />
+          <TxRow label="Item price" value={formatFromFiat(listing.price, 'GBP', { displayMode: 'fiat' })} />
+          <TxRow label="Buyer protection" value={formatFromFiat(buyerProtectionFee, 'GBP', { displayMode: 'fiat' })} />
+          <TxRow label="Postage" value={`from ${formatFromFiat(postageFee, 'GBP', { displayMode: 'fiat' })}`} />
           <View style={styles.txDivider} />
-          <TxRow label="Total paid" value={`£${(listing.price + listing.price * 0.05 + 0.7 + 2.89).toFixed(2)}`} bold />
+          <TxRow label="Total paid" value={formatFromFiat(totalPaid, 'GBP', { displayMode: 'fiat' })} bold />
         </View>
 
         {/* ── Actions ── */}
         <View style={styles.actionsRow}>
-          <TouchableOpacity 
+          <AnimatedPressable 
             style={styles.actionBtnSecondary} 
             activeOpacity={0.85}
             onPress={() => navigation.navigate('Report', { type: 'item' })}
           >
             <Ionicons name="alert-circle-outline" size={18} color={Colors.textPrimary} />
             <Text style={styles.actionBtnSecondaryText}>Report issue</Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
+          </AnimatedPressable>
+          <AnimatedPressable 
             style={styles.actionBtnPrimary} 
             activeOpacity={0.85}
             onPress={() => navigation.navigate('WriteReview', { orderId: listing.id })}
           >
             <Text style={styles.actionBtnPrimaryText}>Mark as received</Text>
-          </TouchableOpacity>
+          </AnimatedPressable>
         </View>
 
         <View style={{ height: 40 }} />

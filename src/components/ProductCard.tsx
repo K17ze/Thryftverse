@@ -3,9 +3,8 @@ import {
   View,
   Text,
   Image,
-  TouchableOpacity,
   StyleSheet,
-  Dimensions,
+  Dimensions
 } from 'react-native';
 import { Colors } from '../constants/colors';
 import { Listing } from '../data/mockData';
@@ -13,7 +12,8 @@ import { useStore } from '../store/useStore';
 import { AnimatedHeart } from './AnimatedHeart';
 import { AnimatedPressable } from './AnimatedPressable';
 import { useToast } from '../context/ToastContext';
-import Reanimated from 'react-native-reanimated';
+import { useFormattedPrice } from '../hooks/useFormattedPrice';
+import { SharedTransitionImage } from './SharedTransitionImage';
 
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = (width - 48) / 2;
@@ -27,6 +27,7 @@ export function ProductCard({ item, onPress }: Props) {
   const isFav = useStore((state) => state.isWishlisted(item.id));
   const toggleFav = useStore((state) => state.toggleWishlist);
   const { show } = useToast();
+  const { formatFromFiat } = useFormattedPrice();
 
   const handleToggle = () => {
     toggleFav(item.id);
@@ -38,11 +39,10 @@ export function ProductCard({ item, onPress }: Props) {
   return (
     <AnimatedPressable style={styles.container} onPress={onPress}>
       <View style={styles.imageContainer}>
-        <Reanimated.Image
+        <SharedTransitionImage
           source={{ uri: item.images[0] }}
           style={styles.image}
           resizeMode="cover"
-          // @ts-ignore
           sharedTransitionTag={`image-${item.id}-0`}
         />
         {/* Sold overlay */}
@@ -65,7 +65,7 @@ export function ProductCard({ item, onPress }: Props) {
       </View>
 
       <View style={styles.info}>
-        <Text style={styles.price}>£{item.price.toFixed(2)}</Text>
+        <Text style={styles.price}>{formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}</Text>
         <Text style={styles.brand} numberOfLines={1}>@{item.brand.toLowerCase()}</Text>
       </View>
     </AnimatedPressable>

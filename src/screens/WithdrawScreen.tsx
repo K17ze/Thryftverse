@@ -1,22 +1,53 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, StatusBar, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
+import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import { View,
+  Text,
+  StyleSheet,
+  TextInput,
+  StatusBar,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView
+} from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../constants/colors';
+import { useFormattedPrice } from '../hooks/useFormattedPrice';
+import { useCurrencyContext } from '../context/CurrencyContext';
+import { CURRENCIES } from '../constants/currencies';
+import {
+  convertDisplayToGbpAmount,
+  getDefaultWithdrawDisplayAmount,
+  sanitizeDecimalInput,
+} from '../utils/currencyAuthoringFlows';
 
 export default function WithdrawScreen() {
   const navigation = useNavigation<any>();
-  const [amount, setAmount] = useState('120.50');
+  const [amount, setAmount] = useState('');
+  const { formatFromFiat } = useFormattedPrice();
+  const { currencyCode, goldRates } = useCurrencyContext();
+  const currencySymbol = CURRENCIES[currencyCode].symbol;
+
+  const availableBalance = 120.5;
+
+  React.useEffect(() => {
+    const displayAmount = getDefaultWithdrawDisplayAmount(availableBalance, currencyCode, goldRates);
+    setAmount(displayAmount.toFixed(2));
+  }, [currencyCode, goldRates]);
+
+  const numericAmountDisplay = Number(amount) || 0;
+  const numericAmount = convertDisplayToGbpAmount(numericAmountDisplay, currencyCode, goldRates);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
 
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
-        </TouchableOpacity>
+        </AnimatedPressable>
         <Text style={styles.headerTitle}>Withdraw Balance</Text>
         <View style={{ width: 44 }} />
       </View>
@@ -25,20 +56,20 @@ export default function WithdrawScreen() {
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
           
           <View style={styles.amountWrap}>
-            <Text style={styles.currencySymbol}>£</Text>
+            <Text style={styles.currencySymbol}>{currencySymbol}</Text>
             <TextInput
               style={styles.amountInput}
               value={amount}
-              onChangeText={setAmount}
+              onChangeText={(value) => setAmount(sanitizeDecimalInput(value))}
               keyboardType="decimal-pad"
               autoFocus
               selectionColor={Colors.accent}
             />
           </View>
-          <Text style={styles.availableText}>Available: £120.50</Text>
+          <Text style={styles.availableText}>Available: {formatFromFiat(availableBalance, 'GBP', { displayMode: 'fiat' })}</Text>
 
           <Text style={styles.sectionTitle}>Transfer to</Text>
-          <TouchableOpacity style={styles.bankCard} activeOpacity={0.8}>
+          <AnimatedPressable style={styles.bankCard} activeOpacity={0.8}>
             <View style={styles.bankLeft}>
               <View style={styles.bankIcon}>
                 <Ionicons name="business" size={24} color={Colors.textPrimary} />
@@ -49,18 +80,18 @@ export default function WithdrawScreen() {
               </View>
             </View>
             <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
-          </TouchableOpacity>
+          </AnimatedPressable>
 
-          <TouchableOpacity style={styles.addBankBtn} onPress={() => navigation.navigate('AddBankAccount')}>
+          <AnimatedPressable style={styles.addBankBtn} onPress={() => navigation.navigate('AddBankAccount')}>
             <Ionicons name="add" size={18} color={Colors.accent} />
             <Text style={styles.addBankText}>Add a new bank account</Text>
-          </TouchableOpacity>
+          </AnimatedPressable>
 
         </ScrollView>
 
         <View style={styles.footer}>
           <Text style={styles.feeText}>Withdrawals take 3-5 working days. No fees apply.</Text>
-          <TouchableOpacity 
+          <AnimatedPressable 
             style={styles.primaryBtn} 
             activeOpacity={0.9} 
             onPress={() => {
@@ -68,8 +99,8 @@ export default function WithdrawScreen() {
               navigation.goBack();
             }}
           >
-            <Text style={styles.primaryText}>Withdraw £{amount || '0'}</Text>
-          </TouchableOpacity>
+            <Text style={styles.primaryText}>Withdraw {formatFromFiat(numericAmount, 'GBP', { displayMode: 'fiat' })}</Text>
+          </AnimatedPressable>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>

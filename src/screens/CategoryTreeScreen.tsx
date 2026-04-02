@@ -1,5 +1,13 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, StatusBar, ImageBackground } from 'react-native';
+import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import { View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  StatusBar,
+  ImageBackground
+} from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -50,28 +58,28 @@ export default function CategoryTreeScreen() {
       <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
 
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
-        </TouchableOpacity>
+        </AnimatedPressable>
         <Text style={styles.headerTitle}>{categoryPrefix}</Text>
         <View style={{ width: 44 }} />
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false}>
         {/* View All Master Button */}
-        <TouchableOpacity 
+        <AnimatedPressable 
           style={styles.viewAllRow}
           onPress={() => navigation.navigate('Browse', { categoryId: categoryPrefix.toLowerCase(), title: `All ${categoryPrefix}` })}
           activeOpacity={0.9}
         >
           <Text style={styles.viewAllText}>View All {categoryPrefix}</Text>
           <Ionicons name="arrow-forward" size={20} color={Colors.background} />
-        </TouchableOpacity>
+        </AnimatedPressable>
 
         {sections.map((section, index) => (
           <View key={section.title} style={styles.section}>
              {/* Edge-to-edge imagery for category headers */}
-            <TouchableOpacity 
+            <AnimatedPressable 
               activeOpacity={0.9} 
               onPress={() => navigation.navigate('Browse', { 
                 categoryId: categoryPrefix.toLowerCase(), 
@@ -88,12 +96,12 @@ export default function CategoryTreeScreen() {
                   <Ionicons name="arrow-forward" size={24} color="#fff" />
                 </View>
               </ImageBackground>
-            </TouchableOpacity>
+            </AnimatedPressable>
 
             {/* Premium Pilled Subcategories instead of standard rows */}
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.subsScroll}>
               {section.subs.map(sub => (
-                <TouchableOpacity 
+                <AnimatedPressable 
                   key={sub} 
                   style={styles.subPill}
                   activeOpacity={0.8}
@@ -104,7 +112,7 @@ export default function CategoryTreeScreen() {
                   })}
                 >
                   <Text style={styles.subPillText}>{sub}</Text>
-                </TouchableOpacity>
+                </AnimatedPressable>
               ))}
             </ScrollView>
           </View>

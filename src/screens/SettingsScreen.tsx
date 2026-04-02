@@ -1,5 +1,12 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, StatusBar } from 'react-native';
+import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import { View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  StatusBar
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../constants/colors';
@@ -7,6 +14,9 @@ import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
 import { useStore } from '../store/useStore';
 import { Alert } from 'react-native';
+import { CURRENCIES, SupportedCurrencyCode } from '../constants/currencies';
+import { useCurrencyPref } from '../hooks/useCurrencyPref';
+import { BottomSheetPicker } from '../components/BottomSheetPicker';
 
 type Props = StackScreenProps<RootStackParamList, 'Settings'>;
 const TEAL = '#4ECDC4';
@@ -21,9 +31,37 @@ interface SettingItem {
 
 export default function SettingsScreen({ navigation }: Props) {
   const logout = useStore(state => state.logout);
+  const [currencyPickerVisible, setCurrencyPickerVisible] = React.useState(false);
+  const {
+    currencyCode,
+    displayModeLabel,
+    setCurrencyCode,
+    cycleDisplayMode,
+  } = useCurrencyPref();
+
+  const currencyOptions = React.useMemo(
+    () =>
+      (Object.keys(CURRENCIES) as SupportedCurrencyCode[]).map(
+        (code) => `${code} · ${CURRENCIES[code].name} (${CURRENCIES[code].symbol})`
+      ),
+    []
+  );
+
+  const selectedCurrencyOption = React.useMemo(
+    () =>
+      currencyOptions.find((option) => option.startsWith(`${currencyCode} ·`)),
+    [currencyCode, currencyOptions]
+  );
+
+  const handleCurrencySelect = (option: string) => {
+    const selectedCode = option.split(' · ')[0] as SupportedCurrencyCode;
+    if (selectedCode !== currencyCode) {
+      setCurrencyCode(selectedCode);
+    }
+  };
 
   const renderSettingRow = (item: SettingItem, isLast: boolean = false) => (
-    <TouchableOpacity
+    <AnimatedPressable
       key={item.title}
       style={[styles.settingRow, !isLast && styles.settingRowBorder]}
       activeOpacity={0.7}
@@ -37,7 +75,7 @@ export default function SettingsScreen({ navigation }: Props) {
         {item.subtitle && <Text style={styles.settingSubtitle}>{item.subtitle}</Text>}
       </View>
       <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
-    </TouchableOpacity>
+    </AnimatedPressable>
   );
 
   const accountItems: SettingItem[] = [
@@ -54,6 +92,20 @@ export default function SettingsScreen({ navigation }: Props) {
 
   const appItems: SettingItem[] = [
     { icon: 'language-outline', title: 'Language', subtitle: 'English EN', color: '#FFD700', onPress: () => Alert.alert('Language', 'Language switching coming soon.') },
+    {
+      icon: 'swap-horizontal-outline',
+      title: 'Currency Display',
+      subtitle: displayModeLabel,
+      color: TEAL,
+      onPress: cycleDisplayMode,
+    },
+    {
+      icon: 'globe-outline',
+      title: 'Local Fiat Currency',
+      subtitle: `${currencyCode} (${CURRENCIES[currencyCode].symbol})`,
+      color: '#64B5F6',
+      onPress: () => setCurrencyPickerVisible(true),
+    },
     { icon: 'moon-outline', title: 'Dark Mode', subtitle: 'Always on', color: '#BB86FC', onPress: () => Alert.alert('Dark Mode', 'Dark mode is always on.') },
   ];
 
@@ -68,9 +120,9 @@ export default function SettingsScreen({ navigation }: Props) {
       <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
 
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+        <AnimatedPressable onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={22} color={Colors.textPrimary} />
-        </TouchableOpacity>
+        </AnimatedPressable>
         <View>
           <Text style={styles.headerLabel}>PREFERENCES</Text>
           <Text style={styles.hugeTitle}>Settings</Text>
@@ -116,7 +168,7 @@ export default function SettingsScreen({ navigation }: Props) {
         </View>
 
         {/* Logout */}
-        <TouchableOpacity 
+        <AnimatedPressable 
           style={styles.logoutPill} 
           activeOpacity={0.8}
           onPress={() => {
@@ -126,12 +178,22 @@ export default function SettingsScreen({ navigation }: Props) {
         >
           <Ionicons name="log-out-outline" size={20} color={Colors.danger} style={{ marginRight: 8 }} />
           <Text style={styles.logoutText}>Log out</Text>
-        </TouchableOpacity>
+        </AnimatedPressable>
 
         {/* Version */}
         <Text style={styles.versionText}>Thryftverse v1.0.0</Text>
 
       </ScrollView>
+
+      <BottomSheetPicker
+        visible={currencyPickerVisible}
+        onClose={() => setCurrencyPickerVisible(false)}
+        title="Choose Local Currency"
+        options={currencyOptions}
+        selectedValue={selectedCurrencyOption}
+        onSelect={handleCurrencySelect}
+        searchable
+      />
     </SafeAreaView>
   );
 }

@@ -1,5 +1,12 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ImageBackground, StatusBar } from 'react-native';
+import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import { View,
+  Text,
+  StyleSheet,
+  ImageBackground,
+  StatusBar
+} from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors } from '../constants/colors';
@@ -26,21 +33,21 @@ export default function AuthLandingScreen() {
         </View>
 
         <View style={styles.footer}>
-          <TouchableOpacity 
+          <AnimatedPressable 
             style={styles.primaryBtn} 
             activeOpacity={0.9} 
             onPress={() => navigation.navigate('SignUp')}
           >
             <Text style={styles.primaryText}>Sign Up</Text>
-          </TouchableOpacity>
+          </AnimatedPressable>
           
-          <TouchableOpacity 
+          <AnimatedPressable 
             style={styles.secondaryBtn} 
             activeOpacity={0.8}
             onPress={() => navigation.navigate('Login')}
           >
             <Text style={styles.secondaryText}>Log In</Text>
-          </TouchableOpacity>
+          </AnimatedPressable>
         </View>
       </SafeAreaView>
     </ImageBackground>

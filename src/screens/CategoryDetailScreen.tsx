@@ -1,10 +1,21 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, StatusBar, Dimensions, Image } from 'react-native';
+import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import { View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  StatusBar,
+  Dimensions,
+  Image
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors } from '../constants/colors';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import { MOCK_CATEGORIES, MOCK_LISTINGS } from '../data/mockData';
+import { MOCK_CATEGORIES } from '../data/mockData';
+import { useFormattedPrice } from '../hooks/useFormattedPrice';
+import { useBackendData } from '../context/BackendDataContext';
 
 const { width } = Dimensions.get('window');
 const GRID_SPACING = 2;
@@ -13,11 +24,13 @@ const ITEM_SIZE = (width - (GRID_SPACING * 2)) / 3;
 export default function CategoryDetailScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
+  const { formatFromFiat } = useFormattedPrice();
+  const { listings } = useBackendData();
   const { categoryId } = route.params || {};
   
   const category = MOCK_CATEGORIES.find((c) => c.id === categoryId) || MOCK_CATEGORIES[0];
   // Filter listings based on the selected category instead of using dummy mock data
-  const gridData = MOCK_LISTINGS.filter(l => l.category.toLowerCase() === category.name.toLowerCase() || categoryId === 'cat1');
+  const gridData = listings.filter(l => l.category.toLowerCase() === category.name.toLowerCase() || categoryId === 'cat1');
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -25,9 +38,9 @@ export default function CategoryDetailScreen() {
       
       {/* Heavy Typography Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
-        </TouchableOpacity>
+        </AnimatedPressable>
         <Text style={styles.hugeTitle}>{category.name}</Text>
       </View>
 
@@ -35,19 +48,19 @@ export default function CategoryDetailScreen() {
         {/* Horizontal Subcategory Pills */}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsScroll}>
           {category.subItems?.map((sub, idx) => (
-            <TouchableOpacity 
+            <AnimatedPressable 
               key={idx} style={styles.chip}
               onPress={() => navigation.navigate('Browse', { categoryId: category.id, subcategoryId: sub.id, title: sub.name })}
             >
               <Text style={styles.chipText}>{sub.name}</Text>
-            </TouchableOpacity>
+            </AnimatedPressable>
           ))}
         </ScrollView>
 
         {/* Dense Grid - Restored Navigation & Real Data Mapping */}
         <View style={styles.grid}>
           {gridData.map((item) => (
-            <TouchableOpacity 
+            <AnimatedPressable 
               key={item.id} 
               style={styles.gridItem} 
               activeOpacity={0.9}
@@ -55,9 +68,9 @@ export default function CategoryDetailScreen() {
             >
               <Image source={{ uri: item.images[0] }} style={styles.gridImage} resizeMode="cover" />
               <View style={styles.pricePill}>
-                <Text style={styles.priceText}>£{item.price}</Text>
+                <Text style={styles.priceText}>{formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}</Text>
               </View>
-            </TouchableOpacity>
+            </AnimatedPressable>
           ))}
         </View>
         {gridData.length === 0 && (

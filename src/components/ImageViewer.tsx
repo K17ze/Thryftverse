@@ -14,6 +14,7 @@ import {
   Gesture,
   FlatList,
 } from 'react-native-gesture-handler';
+import { SharedTransitionImage } from './SharedTransitionImage';
 
 const { width: W } = Dimensions.get('window');
 const MAX_ZOOM = 4;
@@ -98,11 +99,10 @@ function ImagePage({ uri, onDoubleTap, sharedTransitionTag }: ImagePageProps) {
   return (
     <GestureDetector gesture={composed}>
       <Reanimated.View style={[styles.page, animStyle]}>
-        <Reanimated.Image
+        <SharedTransitionImage
           source={{ uri }}
           style={styles.image}
           resizeMode="cover"
-          // @ts-ignore
           sharedTransitionTag={sharedTransitionTag}
         />
       </Reanimated.View>

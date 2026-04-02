@@ -1,5 +1,13 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, StatusBar, ScrollView } from 'react-native';
+import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import { View,
+  Text,
+  StyleSheet,
+  TextInput,
+  StatusBar,
+  ScrollView
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors } from '../constants/colors';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,21 +27,21 @@ export default function EditProfileScreen() {
       <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
       
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
-        </TouchableOpacity>
+        </AnimatedPressable>
         <Text style={styles.hugeTitle}>Edit Profile</Text>
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.avatarSection}>
-          <TouchableOpacity 
+          <AnimatedPressable 
             style={styles.avatarPlaceholder}
             onPress={() => Alert.alert('Change Avatar', 'Camera / photo library integration would open here.')}
             activeOpacity={0.8}
           >
             <Ionicons name="camera-outline" size={32} color={Colors.textPrimary} />
-          </TouchableOpacity>
+          </AnimatedPressable>
           <Text style={styles.changeText}>Change Avatar</Text>
         </View>
 
@@ -47,10 +55,10 @@ export default function EditProfileScreen() {
 
         <View style={styles.inputGroup}>
           <Text style={styles.label}>Gender</Text>
-          <TouchableOpacity style={styles.pillInput} activeOpacity={0.8}>
+          <AnimatedPressable style={styles.pillInput} activeOpacity={0.8}>
             <Text style={styles.inputText}>{gender}</Text>
             <Ionicons name="chevron-down" size={16} color={Colors.textMuted} />
-          </TouchableOpacity>
+          </AnimatedPressable>
         </View>
 
         <View style={styles.inputGroup}>
@@ -87,7 +95,7 @@ export default function EditProfileScreen() {
           </View>
         </View>
 
-        <TouchableOpacity 
+        <AnimatedPressable 
           style={styles.saveBtn} 
           activeOpacity={0.8} 
           onPress={() => {
@@ -97,7 +105,7 @@ export default function EditProfileScreen() {
           }}
         >
           <Text style={styles.saveText}>Save Changes</Text>
-        </TouchableOpacity>
+        </AnimatedPressable>
       </ScrollView>
     </SafeAreaView>
   );

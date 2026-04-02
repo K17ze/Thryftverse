@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import {
   View,
   Text,
   StyleSheet,
   SafeAreaView,
-  TouchableOpacity,
   Switch,
   ScrollView,
-  StatusBar,
+  StatusBar
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { StackScreenProps } from '@react-navigation/stack';
@@ -45,9 +46,9 @@ export default function PushNotificationsScreen({ navigation }: Props) {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={BG} />
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
+        <AnimatedPressable onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={TEXT} />
-        </TouchableOpacity>
+        </AnimatedPressable>
         <Text style={styles.headerTitle}>Push notifications</Text>
         <View style={{ width: 24 }} />
       </View>

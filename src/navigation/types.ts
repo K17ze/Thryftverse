@@ -5,17 +5,40 @@ export type RootStackParamList = {
   SignUp: undefined;
   MainTabs: undefined;
   CategoryDetail: { categoryId: string };
-  Browse: { categoryId: string; subcategoryId?: string; title: string };
+  Browse: {
+    categoryId: string;
+    subcategoryId?: string;
+    title: string;
+    searchQuery?: string;
+  };
   ItemDetail: { itemId: string };
+  Favourites: undefined;
   PosterViewer: { posterId: string };
   CreatePoster: undefined;
   CreateAuction: undefined;
-  CreateSyndicate: undefined;
+  CreateSyndicate:
+    | {
+        listingId?: string;
+        totalUnits?: number;
+        unitPriceDisplay?: number;
+        offeringWindowHours?: number;
+        authPhotos?: string[];
+      }
+    | undefined;
   MarketLedger: undefined;
+  SyndicateHub: undefined;
+  AssetDetail: { assetId: string };
+  Trade: { assetId: string; side: 'buy' | 'sell' };
+  Portfolio: undefined;
+  SyndicateOrderHistory: undefined;
+  AssetLeaderboard: undefined;
+  Buyout: { assetId: string };
+  SyndicateOnboarding: undefined;
   Chat: { conversationId: string };
   UserProfile: { userId: string; isMe?: boolean };
   // Profile sub-screens
   Balance: undefined;
+  Wallet: undefined;
   MyOrders: undefined;
   Personalisation: undefined;
   Settings: undefined;
@@ -44,13 +67,20 @@ export type RootStackParamList = {
   GlobalSearch: undefined;
   AddAddress: undefined;
   // Phase 25 new screens
-  Filter: undefined;
+  Filter:
+    | {
+        categoryId?: string;
+        title?: string;
+        subcategoryId?: string;
+      }
+    | undefined;
   ListingSuccess: undefined;
   // Phase 27
   NotificationsList: undefined;
   // Phase 28
   ForgotPassword: undefined;
   ChangePassword: undefined;
+  TwoFactorSetup: undefined;
   WriteReview: { orderId: string };
   Report: { type: 'item' | 'user' };
 };

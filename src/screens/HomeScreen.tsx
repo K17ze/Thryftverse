@@ -1,21 +1,22 @@
 import React, { useState } from 'react';
 import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import {
   View,
   Text,
   StyleSheet,
   StatusBar,
-  TouchableOpacity,
   ScrollView,
   FlatList,
   Image,
   Dimensions,
-  RefreshControl,
+  RefreshControl
 } from 'react-native';
 import Reanimated, { useSharedValue, useAnimatedScrollHandler, FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../constants/colors';
-import { MOCK_USERS, MOCK_LISTINGS } from '../data/mockData';
+import { MOCK_USERS } from '../data/mockData';
 import { getFreshPosters } from '../data/posters';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -24,6 +25,8 @@ import { useStore } from '../store/useStore';
 import { RefreshIndicator } from '../components/RefreshIndicator';
 import { useTabScroll } from '../context/TabScrollContext';
 import { AnimatedBadge } from '../components/AnimatedBadge';
+import { useFormattedPrice } from '../hooks/useFormattedPrice';
+import { useBackendData } from '../context/BackendDataContext';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -94,6 +97,8 @@ export default function HomeScreen() {
   const notificationCount = useStore(state => state.notificationCount);
   const hasSeenPoster = useStore(state => state.hasSeenPoster);
   const customPosters = useStore(state => state.customPosters);
+  const { formatFromFiat } = useFormattedPrice();
+  const { listings, source, refreshListings } = useBackendData();
   const [refreshing, setRefreshing] = useState(false);
 
   const scrollY = useSharedValue(0);
@@ -112,9 +117,10 @@ export default function HomeScreen() {
     },
   });
 
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 2000);
+    await refreshListings();
+    setTimeout(() => setRefreshing(false), 400);
   };
 
   const freshPosters = React.useMemo(
@@ -126,11 +132,11 @@ export default function HomeScreen() {
     <View style={styles.postersContainer}>
       <View style={styles.postersHeaderRow}>
         <Text style={styles.postersTitle}>Fresh Posters</Text>
-        <Text style={styles.postersHint}>Square ads with custom expiry</Text>
+        <Text style={styles.postersHint}>{source === 'api' ? 'Live API listings active' : 'Mock fallback active'}</Text>
       </View>
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.postersScroll}>
-        <TouchableOpacity
+        <AnimatedPressable
           style={styles.posterCard}
           activeOpacity={0.85}
           onPress={() => navigation.navigate('CreatePoster')}
@@ -140,10 +146,10 @@ export default function HomeScreen() {
           </View>
           <Text style={styles.posterUserName}>Create Poster</Text>
           <Text style={styles.posterMeta}>Set expiry before posting</Text>
-        </TouchableOpacity>
+        </AnimatedPressable>
 
         {freshPosters.map((poster) => (
-          <TouchableOpacity
+          <AnimatedPressable
             key={poster.id}
             style={styles.posterCard}
             activeOpacity={0.9}
@@ -180,26 +186,39 @@ export default function HomeScreen() {
                 {hasSeenPoster(poster.id) ? 'Seen' : 'New'}
               </Text>
             </View>
-          </TouchableOpacity>
+          </AnimatedPressable>
         ))}
       </ScrollView>
     </View>
   );
 
   // ── Explore Grid Mix ──
+  const listingById = React.useMemo(
+    () => new Map(listings.map((listing) => [listing.id, listing])),
+    [listings]
+  );
+
+  const fallbackListingId = listings[0]?.id;
+
   const EXPLORE_DATA = React.useMemo(() => {
     return [
-      ...FEED_LOOKS.map(l => ({ type: 'look', id: `l_${l.id}`, cover: l.coverImage, likes: l.likes, routeId: l.items[0]?.id })),
-      ...MOCK_LISTINGS.map(i => ({ type: 'listing', id: `i_${i.id}`, cover: i.images[0], likes: Math.floor(Math.random() * 50) + 1, price: i.price, routeId: i.id }))
+      ...FEED_LOOKS.map(l => ({
+        type: 'look',
+        id: `l_${l.id}`,
+        cover: l.coverImage,
+        likes: l.likes,
+        routeId: l.items.find((lookItem) => listingById.has(lookItem.id))?.id ?? fallbackListingId,
+      })),
+      ...listings.map(i => ({ type: 'listing', id: `i_${i.id}`, cover: i.images[0], likes: Math.floor(Math.random() * 50) + 1, price: i.price, routeId: i.id }))
     ].sort(() => Math.random() - 0.5);
-  }, []);
+  }, [fallbackListingId, listingById, listings]);
 
   const renderExploreItem = ({ item, index }: { item: any, index: number }) => (
     <Reanimated.View
       entering={FadeInDown.delay(Math.min(index, 12) * 50).duration(400)}
       style={styles.exploreItemBox}
     >
-      <TouchableOpacity
+      <AnimatedPressable
         style={{ flex: 1 }}
         activeOpacity={0.9}
         onPress={() => item.routeId ? navigation.navigate('ItemDetail', { itemId: item.routeId }) : null}
@@ -209,7 +228,7 @@ export default function HomeScreen() {
           {item.type === 'listing' ? (
             <View style={styles.exploreTag}>
               <Ionicons name="pricetag" size={10} color="#fff" />
-              <Text style={styles.exploreTagText}>£{item.price}</Text>
+              <Text style={styles.exploreTagText}>{formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}</Text>
             </View>
           ) : (
             <View style={styles.exploreTag}>
@@ -218,7 +237,7 @@ export default function HomeScreen() {
             </View>
           )}
         </View>
-      </TouchableOpacity>
+      </AnimatedPressable>
     </Reanimated.View>
   );
 
@@ -232,13 +251,13 @@ export default function HomeScreen() {
       <View style={styles.header}>
         <Text style={styles.brandTitle}>Thryftverse</Text>
         <View style={styles.headerRight}>
-          <TouchableOpacity style={styles.headerBtn} onPress={() => navigation.navigate('GlobalSearch')}>
+          <AnimatedPressable style={styles.headerBtn} onPress={() => navigation.navigate('GlobalSearch')}>
             <Ionicons name="search" size={22} color={Colors.textPrimary} />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.headerBtn} onPress={() => navigation.navigate('NotificationsList')}>
+          </AnimatedPressable>
+          <AnimatedPressable style={styles.headerBtn} onPress={() => navigation.navigate('NotificationsList')}>
             <Ionicons name="notifications-outline" size={22} color={Colors.textPrimary} />
             <AnimatedBadge count={notificationCount} size={16} />
-          </TouchableOpacity>
+          </AnimatedPressable>
         </View>
       </View>
 

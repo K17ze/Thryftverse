@@ -6,11 +6,22 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "docker:up": "docker compose up --build -d",
+    "docker:down": "docker compose down",
+    "docker:logs": "docker compose logs -f api ml-service key-service postgres redis minio",
+    "docker:check": "node backend/scripts/docker-smoke-check.mjs",
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck",
+    "doctor": "expo doctor",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:smoke": "vitest run src/__tests__/smoke-flows.test.ts"
   },
   "dependencies": {
     "@expo-google-fonts/inter": "^0.4.2",
     "@expo/vector-icons": "^15.0.3",
+    "@react-native-async-storage/async-storage": "^3.0.2",
     "@react-navigation/bottom-tabs": "^7.15.6",
     "@react-navigation/native": "^7.1.34",
     "@react-navigation/stack": "^7.8.6",
@@ -34,7 +45,8 @@
   "devDependencies": {
     "@types/react": "~19.1.10",
     "babel-preset-expo": "~54.0.10",
-    "typescript": "~5.9.2"
+    "typescript": "~5.9.2",
+    "vitest": "^4.1.2"
   },
   "private": true
 }

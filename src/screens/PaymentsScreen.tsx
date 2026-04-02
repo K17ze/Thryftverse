@@ -1,24 +1,35 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, StatusBar } from 'react-native';
+import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import { View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  StatusBar
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors } from '../constants/colors';
 import { Ionicons } from '@expo/vector-icons';
 import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
+import { useStore } from '../store/useStore';
+import { useFormattedPrice } from '../hooks/useFormattedPrice';
 
 type Props = StackScreenProps<RootStackParamList, 'Payments'>;
 
 export default function PaymentsScreen({ navigation }: Props) {
   const [useBalance, setUseBalance] = useState(true);
+  const savedPaymentMethod = useStore((state) => state.savedPaymentMethod);
+  const { formatFromFiat } = useFormattedPrice();
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
       
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
-        </TouchableOpacity>
+        </AnimatedPressable>
         <Text style={styles.hugeTitle}>Payments</Text>
       </View>
 
@@ -30,54 +41,78 @@ export default function PaymentsScreen({ navigation }: Props) {
           <View style={styles.paymentRow}>
             <View style={{ flex: 1 }}>
               <Text style={styles.paymentTitle}>Use Thryftverse Balance</Text>
-              <Text style={styles.paymentSub}>Automatically apply £120.50 to purchases</Text>
+              <Text style={styles.paymentSub}>Automatically apply {formatFromFiat(120.5, 'GBP', { displayMode: 'fiat' })} to purchases</Text>
             </View>
-            <TouchableOpacity onPress={() => setUseBalance(!useBalance)}>
+            <AnimatedPressable onPress={() => setUseBalance(!useBalance)}>
               <Ionicons 
                 name={useBalance ? "toggle" : "toggle-outline"} 
                 size={36} 
                 color={useBalance ? Colors.success : Colors.textMuted} 
               />
-            </TouchableOpacity>
+            </AnimatedPressable>
           </View>
         </View>
 
         {/* Restored Complete Payment Methods View */}
         <Text style={styles.sectionTitle}>Cards</Text>
         <View style={styles.cardGroup}>
-          <View style={styles.paymentRow}>
-            <View style={styles.iconCircle}>
-              <Ionicons name="card" size={20} color={Colors.textPrimary} />
+          {savedPaymentMethod?.type === 'card' ? (
+            <View style={styles.paymentRow}>
+              <View style={styles.iconCircle}>
+                <Ionicons name="card" size={20} color={Colors.textPrimary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.paymentTitle}>{savedPaymentMethod.label}</Text>
+                <Text style={styles.paymentSub}>{savedPaymentMethod.details ?? 'Saved card'}</Text>
+              </View>
+              <View style={styles.defaultBadge}>
+                <Text style={styles.defaultText}>Default</Text>
+              </View>
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.paymentTitle}>•••• 4242</Text>
-              <Text style={styles.paymentSub}>Expires 12/26</Text>
+          ) : (
+            <View style={styles.paymentRow}>
+              <View style={styles.iconCircle}>
+                <Ionicons name="card-outline" size={20} color={Colors.textPrimary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.paymentTitle}>No saved cards</Text>
+                <Text style={styles.paymentSub}>Add a card to pay instantly at checkout</Text>
+              </View>
             </View>
-            <View style={styles.defaultBadge}>
-              <Text style={styles.defaultText}>Default</Text>
-            </View>
-          </View>
-          <TouchableOpacity style={styles.addBtn} onPress={() => navigation.navigate('AddCard')}>
+          )}
+          <AnimatedPressable style={styles.addBtn} onPress={() => navigation.navigate('AddCard')}>
             <Ionicons name="add" size={20} color={Colors.textPrimary} />
             <Text style={styles.addText}>Add new card</Text>
-          </TouchableOpacity>
+          </AnimatedPressable>
         </View>
 
         <Text style={styles.sectionTitle}>Bank Accounts</Text>
         <View style={styles.cardGroup}>
-          <View style={styles.paymentRow}>
-            <View style={styles.iconCircle}>
-              <Ionicons name="business" size={20} color={Colors.textPrimary} />
+          {savedPaymentMethod?.type === 'bank_account' ? (
+            <View style={styles.paymentRow}>
+              <View style={styles.iconCircle}>
+                <Ionicons name="business" size={20} color={Colors.textPrimary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.paymentTitle}>{savedPaymentMethod.label}</Text>
+                <Text style={styles.paymentSub}>{savedPaymentMethod.details ?? 'Saved bank account'}</Text>
+              </View>
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.paymentTitle}>Monzo Bank</Text>
-              <Text style={styles.paymentSub}>Sort Code: 04-00-04 •••• 1234</Text>
+          ) : (
+            <View style={styles.paymentRow}>
+              <View style={styles.iconCircle}>
+                <Ionicons name="business-outline" size={20} color={Colors.textPrimary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.paymentTitle}>No linked bank accounts</Text>
+                <Text style={styles.paymentSub}>Add one for withdrawals and payouts</Text>
+              </View>
             </View>
-          </View>
-          <TouchableOpacity style={styles.addBtn} onPress={() => navigation.navigate('AddBankAccount')}>
+          )}
+          <AnimatedPressable style={styles.addBtn} onPress={() => navigation.navigate('AddBankAccount')}>
             <Ionicons name="add" size={20} color={Colors.textPrimary} />
             <Text style={styles.addText}>Add new bank account</Text>
-          </TouchableOpacity>
+          </AnimatedPressable>
         </View>
       </ScrollView>
 

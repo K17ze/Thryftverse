@@ -1,5 +1,14 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, StatusBar } from 'react-native';
+import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import { View,
+  Text,
+  StyleSheet,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+  StatusBar
+} from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -20,9 +29,9 @@ export default function WriteReviewScreen() {
       <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
       
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="close" size={24} color={Colors.textPrimary} />
-        </TouchableOpacity>
+        </AnimatedPressable>
         <Text style={styles.headerTitle}>Write a Review</Text>
         <View style={{ width: 44 }} />
       </View>
@@ -36,13 +45,13 @@ export default function WriteReviewScreen() {
           
           <View style={styles.starsContainer}>
             {[1, 2, 3, 4, 5].map((star) => (
-              <TouchableOpacity key={star} onPress={() => setRating(star)}>
+              <AnimatedPressable key={star} onPress={() => setRating(star)}>
                 <Ionicons 
                   name={rating >= star ? "star" : "star-outline"} 
                   size={44} 
                   color={rating >= star ? Colors.star : Colors.textMuted} 
                 />
-              </TouchableOpacity>
+              </AnimatedPressable>
             ))}
           </View>
 
@@ -61,14 +70,14 @@ export default function WriteReviewScreen() {
         </View>
 
         <View style={styles.footer}>
-          <TouchableOpacity 
+          <AnimatedPressable 
             style={[styles.primaryBtn, rating === 0 && styles.disabledBtn]} 
             onPress={submitReview} 
             activeOpacity={0.9}
             disabled={rating === 0}
           >
             <Text style={styles.primaryText}>Submit Review</Text>
-          </TouchableOpacity>
+          </AnimatedPressable>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>

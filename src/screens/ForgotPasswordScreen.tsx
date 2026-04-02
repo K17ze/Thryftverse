@@ -1,5 +1,14 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, StatusBar } from 'react-native';
+import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import { View,
+  Text,
+  StyleSheet,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+  StatusBar
+} from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -9,12 +18,22 @@ export default function ForgotPasswordScreen() {
   const navigation = useNavigation<any>();
   const [email, setEmail] = useState('');
   const [isSent, setIsSent] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
 
   const handleReset = () => {
-    // Fake APi call
-    if (email.trim() !== '') {
-      setIsSent(true);
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail) {
+      setErrorMsg('Please enter your email address.');
+      return;
     }
+
+    if (!/^\S+@\S+\.\S+$/.test(normalizedEmail)) {
+      setErrorMsg('Enter a valid email address.');
+      return;
+    }
+
+    setErrorMsg('');
+    setIsSent(true);
   };
 
   return (
@@ -22,9 +41,9 @@ export default function ForgotPasswordScreen() {
       <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
       
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
-        </TouchableOpacity>
+        </AnimatedPressable>
       </View>
 
       <KeyboardAvoidingView 
@@ -37,9 +56,9 @@ export default function ForgotPasswordScreen() {
           <View style={styles.successState}>
             <Ionicons name="mail-unread-outline" size={48} color={Colors.success} />
             <Text style={styles.successText}>We have sent a password reset link to {email}.</Text>
-            <TouchableOpacity style={styles.primaryBtn} onPress={() => navigation.goBack()} activeOpacity={0.9}>
+            <AnimatedPressable style={styles.primaryBtn} onPress={() => navigation.goBack()} activeOpacity={0.9}>
               <Text style={styles.primaryText}>Return to Login</Text>
-            </TouchableOpacity>
+            </AnimatedPressable>
           </View>
         ) : (
           <View style={styles.form}>
@@ -53,14 +72,21 @@ export default function ForgotPasswordScreen() {
                 keyboardType="email-address"
                 autoCapitalize="none"
                 value={email}
-                onChangeText={setEmail}
+                onChangeText={(value) => {
+                  setEmail(value);
+                  if (errorMsg) {
+                    setErrorMsg('');
+                  }
+                }}
               />
             </View>
 
+            {!!errorMsg && <Text style={styles.errorText}>{errorMsg}</Text>}
+
             <View style={styles.footer}>
-              <TouchableOpacity style={styles.primaryBtn} onPress={handleReset} activeOpacity={0.9}>
+              <AnimatedPressable style={styles.primaryBtn} onPress={handleReset} activeOpacity={0.9}>
                 <Text style={styles.primaryText}>Send Reset Link</Text>
-              </TouchableOpacity>
+              </AnimatedPressable>
             </View>
           </View>
         )}
@@ -92,6 +118,7 @@ const styles = StyleSheet.create({
   },
   
   footer: { paddingBottom: 40 },
+  errorText: { color: Colors.danger, fontSize: 13, fontFamily: 'Inter_500Medium', marginBottom: 4 },
   primaryBtn: { backgroundColor: Colors.textPrimary, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', width: '100%', marginTop: 20 },
   primaryText: { color: Colors.background, fontSize: 16, fontFamily: 'Inter_700Bold' },
 

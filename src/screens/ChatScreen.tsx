@@ -1,15 +1,16 @@
 import React, { useState, useRef } from 'react';
 import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import {
   View,
   Text,
   StyleSheet,
   SafeAreaView,
-  TouchableOpacity,
   TextInput,
   ScrollView,
   StatusBar,
   KeyboardAvoidingView,
-  Platform,
+  Platform
 } from 'react-native';
 import Reanimated, { 
   SlideInRight, 
@@ -21,6 +22,7 @@ import Reanimated, {
 import { Ionicons } from '@expo/vector-icons';
 import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
+import { useFormattedPrice } from '../hooks/useFormattedPrice';
 
 type Props = StackScreenProps<RootStackParamList, 'Chat'>;
 
@@ -68,6 +70,7 @@ export default function ChatScreen({ navigation }: Props) {
   const [messages, setMessages] = useState<Message[]>(INITIAL_MESSAGES);
   const [input, setInput] = useState('');
   const scrollViewRef = useRef<ScrollView>(null);
+  const { formatFromFiat } = useFormattedPrice();
 
   const sendMessage = () => {
     if (!input.trim()) return;
@@ -101,7 +104,7 @@ export default function ChatScreen({ navigation }: Props) {
           <Text style={styles.statusTitle}>{lines[0]}</Text>
           <Text style={styles.statusBody}>{lines.slice(1).join('\n')}</Text>
           {msg.id === 's2' && (
-            <TouchableOpacity><Text style={styles.tealLink}>Tracking information</Text></TouchableOpacity>
+            <AnimatedPressable><Text style={styles.tealLink}>Tracking information</Text></AnimatedPressable>
           )}
         </Reanimated.View>
       );
@@ -119,9 +122,9 @@ export default function ChatScreen({ navigation }: Props) {
         >
           <View style={[styles.offerBubble, isMe && styles.offerBubbleMe]}>
             <View style={styles.offerTextRow}>
-              <Text style={styles.offerPrice}>£{msg.offer!.price.toFixed(2)}</Text>
+              <Text style={styles.offerPrice}>{formatFromFiat(msg.offer!.price, 'GBP', { displayMode: 'fiat' })}</Text>
               <Text style={styles.offerOriginal}>
-                <Text style={styles.strikethrough}>£{msg.offer!.originalPrice.toFixed(2)}</Text>
+                <Text style={styles.strikethrough}>{formatFromFiat(msg.offer!.originalPrice, 'GBP', { displayMode: 'fiat' })}</Text>
               </Text>
             </View>
             
@@ -133,20 +136,20 @@ export default function ChatScreen({ navigation }: Props) {
             {/* Interactive Buttons for Inbound Offers */}
             {!isMe && !offerStatus && (
               <View style={styles.offerActionRow}>
-                <TouchableOpacity 
+                <AnimatedPressable 
                   style={styles.offerDeclineBtn} 
                   activeOpacity={0.8}
                   onPress={() => handleDeclineOffer(msg.id)}
                 >
                   <Text style={styles.offerDeclineText}>Decline</Text>
-                </TouchableOpacity>
-                <TouchableOpacity 
+                </AnimatedPressable>
+                <AnimatedPressable 
                   style={styles.offerAcceptBtn} 
                   activeOpacity={0.8}
                   onPress={() => handleAcceptOffer(msg.id)}
                 >
                   <Text style={styles.offerAcceptText}>Accept</Text>
-                </TouchableOpacity>
+                </AnimatedPressable>
               </View>
             )}
           </View>
@@ -175,13 +178,13 @@ export default function ChatScreen({ navigation }: Props) {
       
       {/* Editorial Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.headerIconBtn} onPress={() => navigation.goBack()}>
+        <AnimatedPressable style={styles.headerIconBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={TEXT} />
-        </TouchableOpacity>
+        </AnimatedPressable>
         <Text style={styles.headerTitle}>mariefullery</Text>
-        <TouchableOpacity style={styles.headerIconBtn}>
+        <AnimatedPressable style={styles.headerIconBtn}>
           <Ionicons name="information-circle-outline" size={24} color={TEXT} />
-        </TouchableOpacity>
+        </AnimatedPressable>
       </View>
 
       {/* Floating Context Cards (No Dividers) */}
@@ -192,8 +195,8 @@ export default function ChatScreen({ navigation }: Props) {
           </View>
           <View style={styles.itemInfo}>
             <Text style={styles.itemTitle}>Simple striped shirt</Text>
-            <Text style={styles.itemPrice}>£35.00</Text>
-            <Text style={styles.itemProtection}>£37.45 Includes Buyer Protection 🛡</Text>
+            <Text style={styles.itemPrice}>{formatFromFiat(35, 'GBP', { displayMode: 'fiat' })}</Text>
+            <Text style={styles.itemProtection}>{formatFromFiat(37.45, 'GBP', { displayMode: 'fiat' })} Includes Buyer Protection 🛡</Text>
           </View>
         </View>
 
@@ -230,9 +233,9 @@ export default function ChatScreen({ navigation }: Props) {
         {/* Floating Input Row */}
         <View style={styles.inputContainer}>
           <View style={styles.inputFloatingPill}>
-            <TouchableOpacity style={styles.cameraBtn}>
+            <AnimatedPressable style={styles.cameraBtn}>
               <Ionicons name="camera-outline" size={22} color={MUTED} />
-            </TouchableOpacity>
+            </AnimatedPressable>
             <TextInput
               style={styles.textInput}
               placeholder="Write a message..."
@@ -244,9 +247,9 @@ export default function ChatScreen({ navigation }: Props) {
               selectionColor={TEAL}
             />
             {input.length > 0 && (
-              <TouchableOpacity onPress={sendMessage} style={styles.sendBtn}>
+              <AnimatedPressable onPress={sendMessage} style={styles.sendBtn}>
                 <Ionicons name="arrow-up" size={20} color={BG} />
-              </TouchableOpacity>
+              </AnimatedPressable>
             )}
           </View>
         </View>

@@ -1,14 +1,15 @@
 import React from 'react';
 import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import {
   View,
   Text,
   StyleSheet,
   FlatList,
-  TouchableOpacity,
   Image,
   RefreshControl,
   Modal,
-  TextInput,
+  TextInput
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -19,7 +20,6 @@ import {
   AuctionViewModel,
   formatCompact,
   formatCountdown,
-  formatMoney,
   getAuctionMarket,
   getUserLabel,
 } from '../data/tradeHub';
@@ -27,12 +27,21 @@ import { getFreshPosters } from '../data/posters';
 import { useToast } from '../context/ToastContext';
 import { EmptyState } from '../components/EmptyState';
 import { useStore } from '../store/useStore';
+import { useFormattedPrice } from '../hooks/useFormattedPrice';
+import { useCurrencyContext } from '../context/CurrencyContext';
+import {
+  convertDisplayToGbpAmount,
+  getSuggestedBidDisplayAmount,
+  sanitizeDecimalInput,
+} from '../utils/currencyAuthoringFlows';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 
 export default function AuctionsScreen() {
   const navigation = useNavigation<NavT>();
   const { show } = useToast();
+  const { formatFromFiat } = useFormattedPrice();
+  const { currencyCode, goldRates } = useCurrencyContext();
   const currentUser = useStore((state) => state.currentUser);
   const customPosters = useStore((state) => state.customPosters);
   const customAuctions = useStore((state) => state.customAuctions);
@@ -108,10 +117,13 @@ export default function AuctionsScreen() {
   }, [customPosters, nowTs, upcomingAuctions]);
 
   const openBidComposer = (auction: AuctionViewModel) => {
-    const step = Math.max(1, Number((auction.currentBid * 0.03).toFixed(2)));
-    const suggestedBid = Number((auction.currentBid + step).toFixed(2));
+    const suggestedDisplayBid = getSuggestedBidDisplayAmount(
+      auction.currentBid,
+      currencyCode,
+      goldRates
+    );
     setSelectedBidAuction(auction);
-    setBidInput(suggestedBid.toFixed(2));
+    setBidInput(suggestedDisplayBid.toFixed(2));
     setBidComposerVisible(true);
   };
 
@@ -143,12 +155,21 @@ export default function AuctionsScreen() {
       return;
     }
 
-    if (amount <= selectedBidAuction.currentBid) {
-      show(`Bid must be above ${formatMoney(selectedBidAuction.currentBid)}`, 'error');
+    const amountInGbp = convertDisplayToGbpAmount(amount, currencyCode, goldRates);
+    if (!Number.isFinite(amountInGbp) || amountInGbp <= 0) {
+      show('Enter a valid bid amount', 'error');
       return;
     }
 
-    const roundedAmount = Number(amount.toFixed(2));
+    if (amountInGbp <= selectedBidAuction.currentBid) {
+      show(
+        `Bid must be above ${formatFromFiat(selectedBidAuction.currentBid, 'GBP', { displayMode: 'fiat' })}`,
+        'error'
+      );
+      return;
+    }
+
+    const roundedAmount = Number(amountInGbp.toFixed(2));
     const result = placeAuctionBid(selectedBidAuction, actingUserId, roundedAmount);
 
     if (!result.ok) {
@@ -156,7 +177,10 @@ export default function AuctionsScreen() {
       return;
     }
 
-    show(`Bid placed on ${selectedBidAuction.title} at ${formatMoney(roundedAmount)}`, 'success');
+    show(
+      `Bid placed on ${selectedBidAuction.title} at ${formatFromFiat(roundedAmount, 'GBP', { displayMode: 'fiat' })}`,
+      'success'
+    );
     closeBidComposer();
   };
 
@@ -190,7 +214,7 @@ export default function AuctionsScreen() {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.posterListContent}
           renderItem={({ item }) => (
-            <TouchableOpacity
+            <AnimatedPressable
               style={styles.posterCard}
               activeOpacity={0.9}
               onPress={() => navigation.navigate('PosterViewer', { posterId: item.id })}
@@ -202,7 +226,7 @@ export default function AuctionsScreen() {
                 </Text>
                 <Text style={styles.posterTime}>{item.remainingHours}h</Text>
               </View>
-            </TouchableOpacity>
+            </AnimatedPressable>
           )}
         />
       </View>
@@ -228,7 +252,7 @@ export default function AuctionsScreen() {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.upcomingListContent}
           renderItem={({ item }) => (
-            <TouchableOpacity
+            <AnimatedPressable
               style={styles.upcomingCard}
               activeOpacity={0.9}
               onPress={() => navigation.navigate('ItemDetail', { itemId: item.listingId })}
@@ -237,9 +261,11 @@ export default function AuctionsScreen() {
               <View style={styles.upcomingMeta}>
                 <Text style={styles.upcomingTitle} numberOfLines={1}>{item.title}</Text>
                 <Text style={styles.upcomingTimer}>Starts in {formatCountdown(item.msToStart)}</Text>
-                <Text style={styles.upcomingBid}>Starting bid {formatMoney(item.startingBid)}</Text>
+                <Text style={styles.upcomingBid}>
+                  Starting bid {formatFromFiat(item.startingBid, 'GBP', { displayMode: 'fiat' })}
+                </Text>
               </View>
-            </TouchableOpacity>
+            </AnimatedPressable>
           )}
         />
       </View>
@@ -274,14 +300,14 @@ export default function AuctionsScreen() {
           <Text style={styles.launchHint}>Launch a 6-hour auction from your listing</Text>
         </View>
 
-        <TouchableOpacity
+        <AnimatedPressable
           style={styles.launchBtn}
           activeOpacity={0.9}
           onPress={() => navigation.navigate('CreateAuction')}
         >
           <Ionicons name="add" size={15} color={Colors.background} />
           <Text style={styles.launchBtnText}>Launch</Text>
-        </TouchableOpacity>
+        </AnimatedPressable>
       </View>
 
       {renderPosterAds()}
@@ -295,7 +321,7 @@ export default function AuctionsScreen() {
   );
 
   const renderLiveAuction = ({ item }: { item: AuctionViewModel }) => (
-    <TouchableOpacity
+    <AnimatedPressable
       style={styles.liveCard}
       activeOpacity={0.95}
       onPress={() => navigation.navigate('ItemDetail', { itemId: item.listingId })}
@@ -316,7 +342,7 @@ export default function AuctionsScreen() {
 
         <View style={styles.bidRow}>
           <Text style={styles.bidLabel}>Current bid</Text>
-          <Text style={styles.bidValue}>{formatMoney(item.currentBid)}</Text>
+          <Text style={styles.bidValue}>{formatFromFiat(item.currentBid, 'GBP', { displayMode: 'fiat' })}</Text>
         </View>
 
         <View style={styles.progressTrack}>
@@ -325,27 +351,31 @@ export default function AuctionsScreen() {
 
         <View style={styles.bidRow}>
           <Text style={styles.bidMeta}>{item.bidCount} bids</Text>
-          {item.buyNowPrice ? <Text style={styles.buyNowMeta}>Buy now {formatMoney(item.buyNowPrice)}</Text> : null}
+          {item.buyNowPrice ? (
+            <Text style={styles.buyNowMeta}>
+              Buy now {formatFromFiat(item.buyNowPrice, 'GBP', { displayMode: 'fiat' })}
+            </Text>
+          ) : null}
         </View>
 
         <View style={styles.actionRow}>
-          <TouchableOpacity style={styles.bidBtn} onPress={() => openBidComposer(item)} activeOpacity={0.9}>
+          <AnimatedPressable style={styles.bidBtn} onPress={() => openBidComposer(item)} activeOpacity={0.9}>
             <Ionicons name="hammer-outline" size={14} color={Colors.background} />
             <Text style={styles.bidBtnText}>Place Bid</Text>
-          </TouchableOpacity>
+          </AnimatedPressable>
 
           {item.buyNowPrice ? (
-            <TouchableOpacity style={styles.buyBtn} onPress={() => handleBuyNow(item)} activeOpacity={0.9}>
+            <AnimatedPressable style={styles.buyBtn} onPress={() => handleBuyNow(item)} activeOpacity={0.9}>
               <Text style={styles.buyBtnText}>Buy Now</Text>
-            </TouchableOpacity>
+            </AnimatedPressable>
           ) : (
-            <TouchableOpacity style={styles.watchBtn} onPress={() => show('Watching auction', 'info')} activeOpacity={0.9}>
+            <AnimatedPressable style={styles.watchBtn} onPress={() => show('Watching auction', 'info')} activeOpacity={0.9}>
               <Text style={styles.watchBtnText}>Watch</Text>
-            </TouchableOpacity>
+            </AnimatedPressable>
           )}
         </View>
       </View>
-    </TouchableOpacity>
+    </AnimatedPressable>
   );
 
   const renderBidComposer = () => {
@@ -361,19 +391,21 @@ export default function AuctionsScreen() {
         onRequestClose={closeBidComposer}
       >
         <View style={styles.bidModalOverlay}>
-          <TouchableOpacity style={styles.bidModalDismissLayer} activeOpacity={1} onPress={closeBidComposer} />
+          <AnimatedPressable style={styles.bidModalDismissLayer} activeOpacity={1} onPress={closeBidComposer} />
 
           <View style={styles.bidModalCard}>
             <Text style={styles.bidModalLabel}>BID COMPOSER</Text>
             <Text style={styles.bidModalTitle} numberOfLines={1}>{selectedBidAuction.title}</Text>
-            <Text style={styles.bidModalHint}>Current bid {formatMoney(selectedBidAuction.currentBid)}</Text>
+            <Text style={styles.bidModalHint}>
+              Current bid {formatFromFiat(selectedBidAuction.currentBid, 'GBP', { displayMode: 'fiat' })}
+            </Text>
 
             <View style={styles.bidInputWrap}>
-              <Text style={styles.bidCurrency}>GBP</Text>
+              <Text style={styles.bidCurrency}>{currencyCode}</Text>
               <TextInput
                 style={styles.bidInput}
                 value={bidInput}
-                onChangeText={setBidInput}
+                onChangeText={(value) => setBidInput(sanitizeDecimalInput(value))}
                 keyboardType="decimal-pad"
                 placeholder="0.00"
                 placeholderTextColor={Colors.textMuted}
@@ -382,25 +414,25 @@ export default function AuctionsScreen() {
 
             <View style={styles.bumpRow}>
               {[0.01, 0.03, 0.05].map((pct) => (
-                <TouchableOpacity
+                <AnimatedPressable
                   key={pct}
                   style={styles.bumpChip}
                   onPress={() => bumpBid(pct)}
                   activeOpacity={0.9}
                 >
                   <Text style={styles.bumpChipText}>+{Math.round(pct * 100)}%</Text>
-                </TouchableOpacity>
+                </AnimatedPressable>
               ))}
             </View>
 
             <View style={styles.bidModalActions}>
-              <TouchableOpacity style={styles.bidCancelBtn} onPress={closeBidComposer} activeOpacity={0.9}>
+              <AnimatedPressable style={styles.bidCancelBtn} onPress={closeBidComposer} activeOpacity={0.9}>
                 <Text style={styles.bidCancelText}>Cancel</Text>
-              </TouchableOpacity>
+              </AnimatedPressable>
 
-              <TouchableOpacity style={styles.bidSubmitBtn} onPress={submitBid} activeOpacity={0.9}>
+              <AnimatedPressable style={styles.bidSubmitBtn} onPress={submitBid} activeOpacity={0.9}>
                 <Text style={styles.bidSubmitText}>Submit Bid</Text>
-              </TouchableOpacity>
+              </AnimatedPressable>
             </View>
           </View>
         </View>

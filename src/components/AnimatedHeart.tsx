@@ -1,5 +1,4 @@
-import React, { useEffect } from 'react';
-import { TouchableOpacity } from 'react-native';
+import React from 'react';
 import Reanimated, {
   useSharedValue,
   useAnimatedStyle,
@@ -9,6 +8,7 @@ import Reanimated, {
 } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { useHaptic } from '../hooks/useHaptic';
+import { AnimatedPressable } from './AnimatedPressable';
 
 interface Props {
   isActive: boolean;
@@ -53,7 +53,12 @@ export function AnimatedHeart({
   }));
 
   return (
-    <TouchableOpacity onPress={handleToggle} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+    <AnimatedPressable
+      onPress={handleToggle}
+      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+      disableAnimation
+      activeOpacity={1}
+    >
       <Reanimated.View style={animStyle}>
         <Ionicons
           name={isActive ? 'heart' : 'heart-outline'}
@@ -61,6 +66,6 @@ export function AnimatedHeart({
           color={isActive ? activeColor : inactiveColor}
         />
       </Reanimated.View>
-    </TouchableOpacity>
+    </AnimatedPressable>
   );
 }

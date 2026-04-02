@@ -1,11 +1,22 @@
 import React, { useState } from 'react';
 import {
-  View, Text, StyleSheet, SafeAreaView, TouchableOpacity,
-  ScrollView, StatusBar, TextInput, KeyboardAvoidingView, Platform, Alert,
+  AnimatedPressable } from '../components/AnimatedPressable';
+import {
+  View,
+  Text,
+  StyleSheet,
+  SafeAreaView,
+  ScrollView,
+  StatusBar,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+  Alert
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
+import { useFormattedPrice } from '../hooks/useFormattedPrice';
 
 type Props = StackScreenProps<RootStackParamList, 'HelpSupport'>;
 
@@ -15,25 +26,45 @@ const CARD = '#111111';
 const MUTED = '#888888';
 const TEXT = '#FFFFFF';
 
-const FAQS = [
-  { q: 'How does Buyer Protection work?', a: 'Thryftverse Buyer Protection covers you if an item doesn\'t arrive, arrives significantly different from what was described, or is damaged. File a claim within 2 days of the delivery date.' },
-  { q: 'How do I withdraw my balance?', a: 'Go to Profile → Balance → Withdraw. Add a bank account first if you haven\'t already. Withdrawals typically take 1–3 business days.' },
-  { q: 'What fees does Thryftverse charge?', a: 'Thryftverse charges a 5% service fee on each sale, plus a fixed transaction fee of £0.70. The buyer also pays a Buyer Protection fee on top of the item price.' },
-  { q: 'Can I cancel or return an order?', a: 'Buyers can request a cancellation within 1 hour of purchase. Returns are handled through Buyer Protection if the item doesn\'t match the description.' },
-  { q: 'How do I report a fake or misleading listing?', a: 'On any item page, tap the three-dot menu and select "Report". Our trust team reviews flagged items within 24 hours.' },
-];
-
 export default function HelpSupportScreen({ navigation }: Props) {
+  const { formatFromFiat } = useFormattedPrice();
   const [expanded, setExpanded] = useState<string | null>(null);
   const [message, setMessage] = useState('');
+
+  const fixedFeeLabel = formatFromFiat(0.7, 'GBP', { displayMode: 'fiat' });
+  const faqs = React.useMemo(
+    () => [
+      {
+        q: 'How does Buyer Protection work?',
+        a: 'Thryftverse Buyer Protection covers you if an item doesn\'t arrive, arrives significantly different from what was described, or is damaged. File a claim within 2 days of the delivery date.',
+      },
+      {
+        q: 'How do I withdraw my balance?',
+        a: 'Go to Profile → Balance → Withdraw. Add a bank account first if you haven\'t already. Withdrawals typically take 1–3 business days.',
+      },
+      {
+        q: 'What fees does Thryftverse charge?',
+        a: `Thryftverse charges a 5% service fee on each sale, plus a fixed transaction fee of ${fixedFeeLabel}. The buyer also pays a Buyer Protection fee on top of the item price.`,
+      },
+      {
+        q: 'Can I cancel or return an order?',
+        a: 'Buyers can request a cancellation within 1 hour of purchase. Returns are handled through Buyer Protection if the item doesn\'t match the description.',
+      },
+      {
+        q: 'How do I report a fake or misleading listing?',
+        a: 'On any item page, tap the three-dot menu and select "Report". Our trust team reviews flagged items within 24 hours.',
+      },
+    ],
+    [fixedFeeLabel]
+  );
 
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={BG} />
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
+        <AnimatedPressable onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={TEXT} />
-        </TouchableOpacity>
+        </AnimatedPressable>
         <Text style={styles.headerTitle}>Help & Support</Text>
         <View style={{ width: 24 }} />
       </View>
@@ -46,21 +77,21 @@ export default function HelpSupportScreen({ navigation }: Props) {
             { icon: 'mail-outline', label: 'Email Us', onPress: () => Alert.alert('Email Support', 'Email us at support@thryftverse.com') },
             { icon: 'document-text-outline', label: 'My Tickets', onPress: () => Alert.alert('My Tickets', 'You have no open support tickets.') },
           ].map(a => (
-            <TouchableOpacity key={a.label} style={styles.quickBtn} onPress={a.onPress}>
+            <AnimatedPressable key={a.label} style={styles.quickBtn} onPress={a.onPress}>
               <View style={styles.quickIcon}>
                 <Ionicons name={a.icon as any} size={22} color={TEAL} />
               </View>
               <Text style={styles.quickLabel}>{a.label}</Text>
-            </TouchableOpacity>
+            </AnimatedPressable>
           ))}
         </View>
 
         {/* FAQs */}
         <Text style={styles.sectionLabel}>FREQUENTLY ASKED</Text>
         <View style={styles.faqCard}>
-          {FAQS.map((faq, idx) => (
+          {faqs.map((faq, idx) => (
             <View key={faq.q}>
-              <TouchableOpacity
+              <AnimatedPressable
                 style={styles.faqRow}
                 onPress={() => setExpanded(prev => prev === faq.q ? null : faq.q)}
               >
@@ -70,11 +101,11 @@ export default function HelpSupportScreen({ navigation }: Props) {
                   size={18}
                   color={MUTED}
                 />
-              </TouchableOpacity>
+              </AnimatedPressable>
               {expanded === faq.q && (
                 <Text style={styles.faqA}>{faq.a}</Text>
               )}
-              {idx < FAQS.length - 1 && <View style={styles.divider} />}
+              {idx < faqs.length - 1 && <View style={styles.divider} />}
             </View>
           ))}
         </View>
@@ -93,14 +124,14 @@ export default function HelpSupportScreen({ navigation }: Props) {
             textAlignVertical="top"
             selectionColor={TEAL}
           />
-          <TouchableOpacity
+          <AnimatedPressable
             style={[styles.sendBtn, !message.trim() && { opacity: 0.4 }]}
             disabled={!message.trim()}
             onPress={() => setMessage('')}
           >
             <Ionicons name="send" size={16} color="#0a0a0a" />
             <Text style={styles.sendBtnText}>Send message</Text>
-          </TouchableOpacity>
+          </AnimatedPressable>
         </View>
 
         {/* Links */}
@@ -111,11 +142,11 @@ export default function HelpSupportScreen({ navigation }: Props) {
             { icon: 'globe-outline', label: 'Thryftverse Blog' },
           ].map((l, idx) => (
             <View key={l.label}>
-              <TouchableOpacity style={styles.linkRow}>
+              <AnimatedPressable style={styles.linkRow}>
                 <Ionicons name={l.icon as any} size={18} color={MUTED} />
                 <Text style={styles.linkText}>{l.label}</Text>
                 <Ionicons name="open-outline" size={14} color={MUTED} />
-              </TouchableOpacity>
+              </AnimatedPressable>
               {idx < 2 && <View style={styles.divider} />}
             </View>
           ))}

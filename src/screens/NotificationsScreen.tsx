@@ -1,12 +1,13 @@
 import React from 'react';
 import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import {
   View,
   Text,
   FlatList,
-  TouchableOpacity,
   StyleSheet,
   Image,
-  StatusBar,
+  StatusBar
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,6 +16,7 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { Colors } from '../constants/colors';
 import { MOCK_NOTIFICATIONS } from '../data/mockData';
 import { RootStackParamList } from '../navigation/types';
+import { EmptyState } from '../components/EmptyState';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 const TEAL = '#4ECDC4';
@@ -28,9 +30,9 @@ export default function NotificationsScreen() {
 
       {/* ── Header ── */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
-        </TouchableOpacity>
+        </AnimatedPressable>
         <Text style={styles.headerTitle}>Notifications</Text>
         <View style={{ width: 44 }} />
       </View>
@@ -42,7 +44,7 @@ export default function NotificationsScreen() {
         contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 120 }}
         ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
         renderItem={({ item }) => (
-          <TouchableOpacity 
+          <AnimatedPressable 
             style={styles.notifCard}
             activeOpacity={0.8}
             onPress={() => navigation.navigate('ItemDetail', { itemId: '1' })}
@@ -52,16 +54,15 @@ export default function NotificationsScreen() {
               <Text style={styles.notifText} numberOfLines={3}>{item.text}</Text>
               <Text style={styles.notifTime}>{item.time}</Text>
             </View>
-          </TouchableOpacity>
+          </AnimatedPressable>
         )}
         ListEmptyComponent={
-          <View style={styles.emptyState}>
-            <View style={styles.emptyIcon}>
-              <Ionicons name="notifications-outline" size={48} color={Colors.textMuted} />
-            </View>
-            <Text style={styles.emptyTitle}>No notifications</Text>
-            <Text style={styles.emptySubtitle}>We'll notify you about new items and updates</Text>
-          </View>
+          <EmptyState
+            icon="notifications-outline"
+            title="No notifications"
+            subtitle="We'll notify you about new items and account updates."
+            iconColor={Colors.textMuted}
+          />
         }
       />
     </SafeAreaView>

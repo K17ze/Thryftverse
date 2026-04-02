@@ -1,11 +1,25 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, StatusBar, Image, Platform } from 'react-native';
+import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import { View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  StatusBar,
+  Image,
+  Platform
+} from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../constants/colors';
 import { MOCK_LISTINGS, MOCK_USERS } from '../data/mockData';
 import { RootStackParamList } from '../navigation/types';
+import { useStore } from '../store/useStore';
+import { useToast } from '../context/ToastContext';
+import { useFormattedPrice } from '../hooks/useFormattedPrice';
+import { isCheckoutReady } from '../utils/checkoutFlow';
+import { useBackendData } from '../context/BackendDataContext';
 
 type RouteT = RouteProp<RootStackParamList, 'Checkout'>;
 
@@ -13,22 +27,37 @@ export default function CheckoutScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<RouteT>();
   const { itemId } = route.params;
+  const { listings } = useBackendData();
+  const savedAddress = useStore((state) => state.savedAddress);
+  const savedPaymentMethod = useStore((state) => state.savedPaymentMethod);
+  const { show } = useToast();
+  const { formatFromFiat } = useFormattedPrice();
 
-  const item = MOCK_LISTINGS.find(l => l.id === itemId) || MOCK_LISTINGS[0];
+  const item = listings.find((l) => l.id === itemId) || MOCK_LISTINGS.find((l) => l.id === itemId) || listings[0] || MOCK_LISTINGS[0];
   const seller = MOCK_USERS.find(u => u.id === item.sellerId) || MOCK_USERS[0];
 
   const PROTECTION_FEE = parseFloat((item.price * 0.05 + 0.7).toFixed(2));
   const POSTAGE_FEE = 2.89;
-  const TOTAL = (item.price + PROTECTION_FEE + POSTAGE_FEE).toFixed(2);
+  const TOTAL = item.price + PROTECTION_FEE + POSTAGE_FEE;
+  const checkoutReady = isCheckoutReady(savedAddress, savedPaymentMethod);
+
+  const handlePay = () => {
+    if (!checkoutReady) {
+      show('Add delivery address and payment method before paying.', 'error');
+      return;
+    }
+
+    navigation.replace('Success');
+  };
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
 
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="close" size={24} color={Colors.textPrimary} />
-        </TouchableOpacity>
+        </AnimatedPressable>
         <Text style={styles.headerTitle}>Checkout</Text>
         <View style={{ width: 44 }} />
       </View>
@@ -41,23 +70,25 @@ export default function CheckoutScreen() {
           <View style={styles.itemInfo}>
             <Text style={styles.itemTitle} numberOfLines={1}>{item.title}</Text>
             <Text style={styles.itemSeller}>from {seller.username}</Text>
-            <Text style={styles.itemPrice}>£{item.price.toFixed(2)}</Text>
+            <Text style={styles.itemPrice}>{formatFromFiat(item.price, 'GBP')}</Text>
           </View>
         </View>
 
         <Text style={styles.sectionTitle}>Delivery</Text>
-        <TouchableOpacity style={styles.blockBtn} activeOpacity={0.8} onPress={() => navigation.navigate('AddAddress')}>
+        <AnimatedPressable style={styles.blockBtn} activeOpacity={0.8} onPress={() => navigation.navigate('AddAddress')}>
           <View style={styles.blockLeft}>
             <Ionicons name="location-outline" size={24} color={Colors.textPrimary} />
             <View style={styles.blockTextCol}>
-              <Text style={styles.blockTitle}>Add delivery address</Text>
-              <Text style={styles.blockSub}>Required for postage</Text>
+              <Text style={styles.blockTitle}>{savedAddress ? savedAddress.street : 'Add delivery address'}</Text>
+              <Text style={styles.blockSub}>
+                {savedAddress ? `${savedAddress.city} • ${savedAddress.postcode}` : 'Required for postage'}
+              </Text>
             </View>
           </View>
           <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
-        </TouchableOpacity>
+        </AnimatedPressable>
 
-        <TouchableOpacity style={styles.blockBtn} activeOpacity={0.8} onPress={() => navigation.navigate('Postage')}>
+        <AnimatedPressable style={styles.blockBtn} activeOpacity={0.8} onPress={() => navigation.navigate('Postage')}>
           <View style={styles.blockLeft}>
             <Ionicons name="cube-outline" size={24} color={Colors.textPrimary} />
             <View style={styles.blockTextCol}>
@@ -65,33 +96,39 @@ export default function CheckoutScreen() {
               <Text style={styles.blockSub}>2-3 working days</Text>
             </View>
           </View>
-          <Text style={styles.blockRightPrice}>£{POSTAGE_FEE}</Text>
-        </TouchableOpacity>
+          <Text style={styles.blockRightPrice}>{formatFromFiat(POSTAGE_FEE, 'GBP')}</Text>
+        </AnimatedPressable>
 
         <Text style={styles.sectionTitle}>Payment</Text>
-        <TouchableOpacity style={styles.blockBtn} activeOpacity={0.8} onPress={() => navigation.navigate('Payments')}>
+        <AnimatedPressable style={styles.blockBtn} activeOpacity={0.8} onPress={() => navigation.navigate('Payments')}>
           <View style={styles.blockLeft}>
             <Ionicons name="card-outline" size={24} color={Colors.textPrimary} />
             <View style={styles.blockTextCol}>
-              <Text style={styles.blockTitle}>Add payment method</Text>
-              <Text style={styles.blockSub}>Card, Apple Pay, or Google Pay</Text>
+              <Text style={styles.blockTitle}>{savedPaymentMethod ? savedPaymentMethod.label : 'Add payment method'}</Text>
+              <Text style={styles.blockSub}>
+                {savedPaymentMethod?.details ?? 'Card, Apple Pay, or Google Pay'}
+              </Text>
             </View>
           </View>
           <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
-        </TouchableOpacity>
+        </AnimatedPressable>
 
         <Text style={styles.sectionTitle}>Order Summary</Text>
         <View style={styles.summaryCard}>
-          <SummaryRow label="Item price" value={`£${item.price.toFixed(2)}`} />
-          <SummaryRow label="Buyer protection fee" value={`£${PROTECTION_FEE.toFixed(2)}`} info />
-          <SummaryRow label="Postage" value={`£${POSTAGE_FEE.toFixed(2)}`} />
+          <SummaryRow label="Item price" value={formatFromFiat(item.price, 'GBP')} />
+          <SummaryRow label="Buyer protection fee" value={formatFromFiat(PROTECTION_FEE, 'GBP')} info />
+          <SummaryRow label="Postage" value={formatFromFiat(POSTAGE_FEE, 'GBP')} />
           <View style={styles.divider} />
-          <SummaryRow label="Total" value={`£${TOTAL}`} bold />
+          <SummaryRow label="Total" value={formatFromFiat(TOTAL, 'GBP')} bold />
         </View>
 
         <Text style={styles.termsText}>
           By tapping "Pay", you agree to our Terms of Sale and Privacy Policy. You have 2 days to report an issue after delivery.
         </Text>
+
+        {!checkoutReady && (
+          <Text style={styles.requirementText}>Add both delivery details and a payment method to continue.</Text>
+        )}
 
         <View style={{ height: 100 }} />
       </ScrollView>
@@ -100,15 +137,15 @@ export default function CheckoutScreen() {
       <View style={styles.footer}>
         <View style={styles.footerPriceCol}>
           <Text style={styles.footerTotalLabel}>Total</Text>
-          <Text style={styles.footerTotalPrice}>£{TOTAL}</Text>
+          <Text style={styles.footerTotalPrice}>{formatFromFiat(TOTAL, 'GBP')}</Text>
         </View>
-        <TouchableOpacity 
-          style={styles.payBtn} 
+        <AnimatedPressable 
+          style={[styles.payBtn, !checkoutReady && styles.payBtnDisabled]} 
           activeOpacity={0.9} 
-          onPress={() => navigation.replace('Success')}
+          onPress={handlePay}
         >
           <Text style={styles.payBtnText}>Pay</Text>
-        </TouchableOpacity>
+        </AnimatedPressable>
       </View>
     </SafeAreaView>
   );
@@ -162,6 +199,13 @@ const styles = StyleSheet.create({
   divider: { height: 1, backgroundColor: '#222', marginVertical: 12 },
 
   termsText: { fontSize: 12, fontFamily: 'Inter_400Regular', color: Colors.textMuted, lineHeight: 18, textAlign: 'center', paddingHorizontal: 16 },
+  requirementText: {
+    marginTop: 12,
+    fontSize: 12,
+    fontFamily: 'Inter_500Medium',
+    color: Colors.danger,
+    textAlign: 'center',
+  },
 
   footer: { 
     position: 'absolute', bottom: 0, left: 0, right: 0, 
@@ -173,5 +217,6 @@ const styles = StyleSheet.create({
   footerTotalLabel: { fontSize: 13, fontFamily: 'Inter_400Regular', color: Colors.textSecondary },
   footerTotalPrice: { fontSize: 24, fontFamily: 'Inter_700Bold', color: Colors.textPrimary },
   payBtn: { backgroundColor: Colors.textPrimary, height: 56, borderRadius: 28, paddingHorizontal: 48, alignItems: 'center', justifyContent: 'center' },
+  payBtnDisabled: { opacity: 0.45 },
   payBtnText: { color: Colors.background, fontSize: 16, fontFamily: 'Inter_700Bold' }
 });

@@ -1,20 +1,23 @@
 import React, { useState } from 'react';
 import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import {
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
   ScrollView,
   FlatList,
   StatusBar,
-  Dimensions,
+  Dimensions
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
 import { Alert, Image } from 'react-native';
-import { MOCK_LISTINGS } from '../data/mockData';
+import { Listing } from '../data/mockData';
+import { useFormattedPrice } from '../hooks/useFormattedPrice';
+import { useBackendData } from '../context/BackendDataContext';
 
 type Props = StackScreenProps<RootStackParamList, 'UserProfile'>;
 
@@ -30,9 +33,6 @@ const GRID_SPACING = 16;
 const ITEM_SIZE = (width - 40 - GRID_SPACING) / 2;
 
 type Tab = 'Listings' | 'Reviews' | 'About';
-
-// Use real listings from shared data
-const MOCK_ITEMS = MOCK_LISTINGS.slice(0, 6);
 
 const MOCK_REVIEWS = [
   { id: 'r1', from: 'Thryftverse', rating: 5, text: 'Auto-feedback: Sale completed successfully', time: '6 days ago', auto: true },
@@ -57,6 +57,10 @@ export default function UserProfileScreen({ navigation, route }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('Listings');
   const [following, setFollowing] = useState(false);
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>('All');
+  const { formatFromFiat } = useFormattedPrice();
+  const { listings } = useBackendData();
+
+  const profileListings = React.useMemo(() => listings.slice(0, 6), [listings]);
 
   const tabs: Tab[] = ['Listings', 'Reviews', 'About'];
 
@@ -66,8 +70,8 @@ export default function UserProfileScreen({ navigation, route }: Props) {
     return !r.auto;
   });
 
-  const renderItem = ({ item, index }: { item: typeof MOCK_ITEMS[0], index: number }) => (
-    <TouchableOpacity
+  const renderItem = ({ item, index }: { item: Listing; index: number }) => (
+    <AnimatedPressable
       style={[styles.gridItem, index % 2 === 0 ? { marginTop: 0 } : { marginTop: 24 }]}
       activeOpacity={0.9}
       onPress={() => {
@@ -90,12 +94,12 @@ export default function UserProfileScreen({ navigation, route }: Props) {
       </View>
       <View style={styles.gridInfo}>
         <View style={styles.priceRow}>
-          <Text style={styles.gridPrice}>£{item.price.toFixed(2)}</Text>
+          <Text style={styles.gridPrice}>{formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}</Text>
           <Text style={styles.gridBrand}>{item.brand}</Text>
         </View>
         <Text style={styles.gridSizeCondition}>{item.size} • {item.condition}</Text>
       </View>
-    </TouchableOpacity>
+    </AnimatedPressable>
   );
 
   return (
@@ -104,11 +108,11 @@ export default function UserProfileScreen({ navigation, route }: Props) {
 
       {/* Hero Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={TEXT} />
-        </TouchableOpacity>
+        </AnimatedPressable>
         <Text style={styles.headerTitle}>mariefullery</Text>
-        <TouchableOpacity style={styles.backBtn} onPress={() => {
+        <AnimatedPressable style={styles.backBtn} onPress={() => {
           Alert.alert('Report or Block', 'What would you like to do?', [
             { text: 'Report user', onPress: () => navigation.navigate('Report', { type: 'user' }) },
             { text: 'Block user', style: 'destructive', onPress: () => {} },
@@ -116,13 +120,13 @@ export default function UserProfileScreen({ navigation, route }: Props) {
           ]);
         }}>
           <Ionicons name="ellipsis-horizontal" size={22} color={TEXT} />
-        </TouchableOpacity>
+        </AnimatedPressable>
       </View>
 
       {/* Floating Pill Tabs */}
       <View style={styles.tabBarContainer}>
         {tabs.map(tab => (
-          <TouchableOpacity
+          <AnimatedPressable
             key={tab}
             style={[styles.tabPill, activeTab === tab && styles.tabPillActive]}
             onPress={() => setActiveTab(tab)}
@@ -131,14 +135,14 @@ export default function UserProfileScreen({ navigation, route }: Props) {
             <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
               {tab}
             </Text>
-          </TouchableOpacity>
+          </AnimatedPressable>
         ))}
       </View>
 
       {/* Tab Content */}
       {activeTab === 'Listings' && (
         <FlatList
-          data={MOCK_ITEMS}
+          data={profileListings}
           renderItem={renderItem}
           keyExtractor={i => i.id}
           numColumns={2}
@@ -177,7 +181,7 @@ export default function UserProfileScreen({ navigation, route }: Props) {
                 </View>
               </View>
 
-              <TouchableOpacity
+              <AnimatedPressable
                 style={[styles.followCta, following && styles.followCtaActive]}
                 onPress={() => setFollowing(p => !p)}
                 activeOpacity={0.85}
@@ -185,7 +189,7 @@ export default function UserProfileScreen({ navigation, route }: Props) {
                 <Text style={[styles.followCtaText, following && styles.followCtaTextActive]}>
                   {following ? 'Following' : 'Follow user'}
                 </Text>
-              </TouchableOpacity>
+              </AnimatedPressable>
             </View>
           }
         />
@@ -202,13 +206,13 @@ export default function UserProfileScreen({ navigation, route }: Props) {
           <View style={styles.reviewsFilterRow}>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10 }}>
               {(['All', 'From members', 'Automatic'] as ReviewFilter[]).map(f => (
-                <TouchableOpacity
+                <AnimatedPressable
                   key={f}
                   style={[styles.filterChip, reviewFilter === f && styles.filterChipActive]}
                   onPress={() => setReviewFilter(f)}
                 >
                   <Text style={[styles.filterChipText, reviewFilter === f && styles.filterChipTextActive]}>{f}</Text>
-                </TouchableOpacity>
+                </AnimatedPressable>
               ))}
             </ScrollView>
           </View>

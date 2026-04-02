@@ -1,20 +1,22 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import {
   View,
   Text,
   StyleSheet,
   TextInput,
-  TouchableOpacity,
   ScrollView,
   StatusBar,
   KeyboardAvoidingView,
-  Platform,
+  Platform
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../constants/colors';
 import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
+import { useStore } from '../store/useStore';
 
 type Props = StackScreenProps<RootStackParamList, 'GlobalSearch'>;
 
@@ -24,6 +26,7 @@ const TRENDING_TAGS = ['#y2k', '#gorpcore', 'archive', 'japanese denim', 'techwe
 export default function GlobalSearchScreen({ navigation }: Props) {
   const [query, setQuery] = useState('');
   const inputRef = useRef<TextInput>(null);
+  const updateBrowseFilters = useStore((state) => state.updateBrowseFilters);
 
   // Auto-focus the search bar when the screen mounts
   useEffect(() => {
@@ -34,13 +37,41 @@ export default function GlobalSearchScreen({ navigation }: Props) {
   }, []);
 
   const handleSearchSubmit = () => {
-    if (!query.trim()) return;
-    // Perform search and route to Browse map
-    navigation.navigate('Browse', { categoryId: 'search', title: `Search: "${query}"` });
+    const trimmedQuery = query.trim();
+    if (!trimmedQuery) return;
+
+    updateBrowseFilters({
+      query: trimmedQuery,
+      sort: 'Recommended',
+      brands: [],
+      sizes: [],
+      condition: 'Any',
+    });
+
+    navigation.navigate('Browse', {
+      categoryId: 'search',
+      title: `Search: "${trimmedQuery}"`,
+      searchQuery: trimmedQuery,
+    });
   };
 
   const handlePillPress = (tag: string) => {
-    navigation.navigate('Browse', { categoryId: 'search', title: tag });
+    const normalizedTag = tag.trim();
+    if (!normalizedTag) return;
+
+    updateBrowseFilters({
+      query: normalizedTag,
+      sort: 'Recommended',
+      brands: [],
+      sizes: [],
+      condition: 'Any',
+    });
+
+    navigation.navigate('Browse', {
+      categoryId: 'search',
+      title: `Search: "${normalizedTag}"`,
+      searchQuery: normalizedTag,
+    });
   };
 
   return (
@@ -49,9 +80,9 @@ export default function GlobalSearchScreen({ navigation }: Props) {
 
       {/* Hero Search Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={26} color={Colors.textPrimary} />
-        </TouchableOpacity>
+        </AnimatedPressable>
         
         <View style={styles.inputContainer}>
           <TextInput
@@ -67,9 +98,9 @@ export default function GlobalSearchScreen({ navigation }: Props) {
             selectionColor="#4ECDC4"
           />
           {query.length > 0 && (
-            <TouchableOpacity style={styles.clearBtn} onPress={() => setQuery('')}>
+            <AnimatedPressable style={styles.clearBtn} onPress={() => setQuery('')}>
               <Ionicons name="close-circle" size={20} color={Colors.textSecondary} />
-            </TouchableOpacity>
+            </AnimatedPressable>
           )}
         </View>
       </View>
@@ -85,9 +116,9 @@ export default function GlobalSearchScreen({ navigation }: Props) {
           contentContainerStyle={{ paddingHorizontal: 20, gap: 10 }}
         >
           {TRENDING_TAGS.map((tag, idx) => (
-            <TouchableOpacity key={idx} style={styles.trendingPill} activeOpacity={0.8} onPress={() => handlePillPress(tag)}>
+            <AnimatedPressable key={idx} style={styles.trendingPill} activeOpacity={0.8} onPress={() => handlePillPress(tag)}>
               <Text style={styles.trendingPillText}>{tag}</Text>
-            </TouchableOpacity>
+            </AnimatedPressable>
           ))}
         </ScrollView>
 
@@ -95,11 +126,11 @@ export default function GlobalSearchScreen({ navigation }: Props) {
         <View style={styles.recentSection}>
           <Text style={[styles.sectionTitle, { paddingHorizontal: 0, marginBottom: 16 }]}>Recent Searches</Text>
           {RECENT_SEARCHES.map((term, idx) => (
-            <TouchableOpacity key={idx} style={styles.recentRow} activeOpacity={0.7} onPress={() => handlePillPress(term)}>
+            <AnimatedPressable key={idx} style={styles.recentRow} activeOpacity={0.7} onPress={() => handlePillPress(term)}>
               <Ionicons name="time-outline" size={20} color={Colors.textMuted} />
               <Text style={styles.recentText}>{term}</Text>
               <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
-            </TouchableOpacity>
+            </AnimatedPressable>
           ))}
         </View>
 

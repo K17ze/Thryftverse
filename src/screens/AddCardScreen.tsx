@@ -1,19 +1,23 @@
 import React, { useState } from 'react';
 import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import {
   View,
   Text,
   StyleSheet,
   SafeAreaView,
-  TouchableOpacity,
   TextInput,
   ScrollView,
   StatusBar,
   KeyboardAvoidingView,
-  Platform,
+  Platform
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
+import { useStore } from '../store/useStore';
+import { useToast } from '../context/ToastContext';
+import { buildCardPaymentMethod } from '../utils/checkoutFlow';
 
 type Props = StackScreenProps<RootStackParamList, 'AddCard'>;
 
@@ -28,6 +32,8 @@ export default function AddCardScreen({ navigation }: Props) {
   const [expiry, setExpiry] = useState('');
   const [cvv, setCvv] = useState('');
   const [name, setName] = useState('');
+  const savePaymentMethod = useStore((state) => state.savePaymentMethod);
+  const { show } = useToast();
 
   const formatCardNumber = (val: string) =>
     val.replace(/\D/g, '').slice(0, 16).replace(/(.{4})/g, '$1 ').trim();
@@ -37,15 +43,38 @@ export default function AddCardScreen({ navigation }: Props) {
     return clean.length >= 2 ? clean.slice(0, 2) + '/' + clean.slice(2) : clean;
   };
 
-  const isComplete = cardNumber.replace(/\s/g, '').length === 16 && expiry.length === 5 && cvv.length >= 3 && name.length >= 2;
+  const expiryIsValid = (() => {
+    if (!/^\d{2}\/\d{2}$/.test(expiry)) {
+      return false;
+    }
+    const month = Number(expiry.slice(0, 2));
+    return month >= 1 && month <= 12;
+  })();
+
+  const isComplete =
+    cardNumber.replace(/\s/g, '').length === 16 &&
+    expiryIsValid &&
+    cvv.length >= 3 &&
+    name.trim().length >= 2;
+
+  const handleSaveCard = () => {
+    if (!isComplete) {
+      return;
+    }
+
+    const last4 = cardNumber.replace(/\s/g, '').slice(-4);
+    savePaymentMethod(buildCardPaymentMethod(last4, expiry, 'Visa'));
+    show('Card saved', 'success');
+    navigation.goBack();
+  };
 
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={BG} />
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
+        <AnimatedPressable onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={TEXT} />
-        </TouchableOpacity>
+        </AnimatedPressable>
         <Text style={styles.headerTitle}>Add card</Text>
         <View style={{ width: 24 }} />
       </View>
@@ -138,13 +167,13 @@ export default function AddCardScreen({ navigation }: Props) {
         </ScrollView>
 
         <View style={styles.footer}>
-          <TouchableOpacity
+          <AnimatedPressable
             style={[styles.saveBtn, !isComplete && { opacity: 0.4 }]}
             disabled={!isComplete}
-            onPress={() => navigation.goBack()}
+            onPress={handleSaveCard}
           >
             <Text style={styles.saveBtnText}>Save card</Text>
-          </TouchableOpacity>
+          </AnimatedPressable>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>

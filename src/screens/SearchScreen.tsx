@@ -1,29 +1,30 @@
 import React, { useState } from 'react';
 import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import {
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
   FlatList,
   StatusBar,
   TextInput,
   ScrollView,
   Image,
   Dimensions,
-  RefreshControl,
+  RefreshControl
 } from 'react-native';
 import Reanimated, { useSharedValue, useAnimatedScrollHandler, FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { ProductCard } from '../components/ProductCard';
 import { Colors } from '../constants/colors';
-import { MOCK_LISTINGS } from '../data/mockData';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
 import { RefreshIndicator } from '../components/RefreshIndicator';
 import { EmptyState } from '../components/EmptyState';
 import { useStore } from '../store/useStore';
+import { useBackendData } from '../context/BackendDataContext';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -88,7 +89,7 @@ const SAVED_LOOKS: SavedLook[] = [
 // ── Look Card Component ──────────────────────────────────────
 function LookCard({ look, onPress }: { look: SavedLook; onPress: () => void }) {
   return (
-    <TouchableOpacity style={lookStyles.card} onPress={onPress} activeOpacity={0.92}>
+    <AnimatedPressable style={lookStyles.card} onPress={onPress} activeOpacity={0.92}>
       {/* Cover Image */}
       <View style={lookStyles.imageWrap}>
         <Image source={{ uri: look.coverImage }} style={lookStyles.image} resizeMode="cover" />
@@ -119,20 +120,20 @@ function LookCard({ look, onPress }: { look: SavedLook; onPress: () => void }) {
           <Text style={lookStyles.creatorName}>by @{look.creator.name}</Text>
         </View>
         <View style={lookStyles.statsRow}>
-          <TouchableOpacity style={lookStyles.statBtn}>
+          <AnimatedPressable style={lookStyles.statBtn}>
             <Ionicons name="heart" size={18} color={TEAL} />
             <Text style={lookStyles.statCount}>{look.likes}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={lookStyles.statBtn}>
+          </AnimatedPressable>
+          <AnimatedPressable style={lookStyles.statBtn}>
             <Ionicons name="chatbubble-outline" size={16} color={Colors.textSecondary} />
             <Text style={lookStyles.statCount}>{look.comments}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={lookStyles.statBtn}>
+          </AnimatedPressable>
+          <AnimatedPressable style={lookStyles.statBtn}>
             <Ionicons name="bookmark" size={16} color={TEAL} />
-          </TouchableOpacity>
+          </AnimatedPressable>
         </View>
       </View>
-    </TouchableOpacity>
+    </AnimatedPressable>
   );
 }
 
@@ -143,13 +144,14 @@ export default function SearchScreen() {
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const navigation = useNavigation<NavT>();
   const wishlistIds = useStore(state => state.wishlist);
+  const { listings, refreshListings } = useBackendData();
 
   const [refreshing, setRefreshing] = useState(false);
   const scrollY = useSharedValue(0);
 
   const wishlistItems = React.useMemo(
-    () => MOCK_LISTINGS.filter(l => wishlistIds.includes(l.id)),
-    [wishlistIds]
+    () => listings.filter(l => wishlistIds.includes(l.id)),
+    [listings, wishlistIds]
   );
 
   const scrollHandler = useAnimatedScrollHandler({
@@ -158,9 +160,10 @@ export default function SearchScreen() {
     },
   });
 
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 2000);
+    await refreshListings();
+    setTimeout(() => setRefreshing(false), 400);
   };
 
   const AnimatedFlatList = Reanimated.createAnimatedComponent(FlatList);
@@ -204,9 +207,9 @@ export default function SearchScreen() {
             returnKeyType="search"
           />
           {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchQuery('')}>
+            <AnimatedPressable onPress={() => setSearchQuery('')}>
               <Ionicons name="close-circle" size={18} color={Colors.textMuted} />
-            </TouchableOpacity>
+            </AnimatedPressable>
           )}
         </View>
       </View>
@@ -215,7 +218,7 @@ export default function SearchScreen() {
       <View style={styles.tabsContainer}>
         <View style={styles.tabsWrapper}>
           {(['SAVED LOOKS', 'WISHLIST'] as const).map(tab => (
-            <TouchableOpacity
+            <AnimatedPressable
               key={tab}
               style={[styles.tab, activeTab === tab && styles.activeTab]}
               onPress={() => setActiveTab(tab)}
@@ -228,7 +231,7 @@ export default function SearchScreen() {
                 style={{ marginRight: 6 }}
               />
               <Text style={[styles.tabText, activeTab === tab && styles.activeTabText]}>{tab}</Text>
-            </TouchableOpacity>
+            </AnimatedPressable>
           ))}
         </View>
       </View>

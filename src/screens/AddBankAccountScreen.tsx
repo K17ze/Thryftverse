@@ -1,11 +1,23 @@
 import React, { useState } from 'react';
 import {
-  View, Text, StyleSheet, SafeAreaView, TouchableOpacity,
-  TextInput, ScrollView, StatusBar, KeyboardAvoidingView, Platform,
+  AnimatedPressable } from '../components/AnimatedPressable';
+import {
+  View,
+  Text,
+  StyleSheet,
+  SafeAreaView,
+  TextInput,
+  ScrollView,
+  StatusBar,
+  KeyboardAvoidingView,
+  Platform
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
+import { useStore } from '../store/useStore';
+import { useToast } from '../context/ToastContext';
+import { buildBankAccountPaymentMethod } from '../utils/checkoutFlow';
 
 type Props = StackScreenProps<RootStackParamList, 'AddBankAccount'>;
 
@@ -19,6 +31,8 @@ export default function AddBankAccountScreen({ navigation }: Props) {
   const [accountName, setAccountName] = useState('');
   const [accountNumber, setAccountNumber] = useState('');
   const [sortCode, setSortCode] = useState('');
+  const savePaymentMethod = useStore((state) => state.savePaymentMethod);
+  const { show } = useToast();
 
   const formatSortCode = (v: string) => {
     const clean = v.replace(/\D/g, '').slice(0, 6);
@@ -27,15 +41,25 @@ export default function AddBankAccountScreen({ navigation }: Props) {
     return clean;
   };
 
-  const isComplete = accountName.length >= 2 && accountNumber.length === 8 && sortCode.replace(/-/g, '').length === 6;
+  const isComplete = accountName.trim().length >= 2 && accountNumber.length === 8 && sortCode.replace(/-/g, '').length === 6;
+
+  const handleSaveBank = () => {
+    if (!isComplete) {
+      return;
+    }
+
+    savePaymentMethod(buildBankAccountPaymentMethod(accountNumber.slice(-4), sortCode));
+    show('Bank account saved', 'success');
+    navigation.goBack();
+  };
 
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={BG} />
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
+        <AnimatedPressable onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={TEXT} />
-        </TouchableOpacity>
+        </AnimatedPressable>
         <Text style={styles.headerTitle}>Add bank account</Text>
         <View style={{ width: 24 }} />
       </View>
@@ -104,13 +128,13 @@ export default function AddBankAccountScreen({ navigation }: Props) {
         </ScrollView>
 
         <View style={styles.footer}>
-          <TouchableOpacity
+          <AnimatedPressable
             style={[styles.saveBtn, !isComplete && { opacity: 0.4 }]}
             disabled={!isComplete}
-            onPress={() => navigation.goBack()}
+            onPress={handleSaveBank}
           >
             <Text style={styles.saveBtnText}>Save bank account</Text>
-          </TouchableOpacity>
+          </AnimatedPressable>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>

@@ -1,31 +1,89 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, StatusBar, Dimensions, Image, ScrollView, RefreshControl } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import { View,
+  Text,
+  StyleSheet,
+  FlatList,
+  StatusBar,
+  Dimensions,
+  Image,
+  ScrollView,
+  RefreshControl
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Reanimated, { useSharedValue, useAnimatedScrollHandler, FadeInDown } from 'react-native-reanimated';
 import { Colors } from '../constants/colors';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation, useRoute } from '@react-navigation/native';
-import { MOCK_LISTINGS } from '../data/mockData';
+import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { RefreshIndicator } from '../components/RefreshIndicator';
+import { EmptyState } from '../components/EmptyState';
+import { RootStackParamList } from '../navigation/types';
+import { useStore } from '../store/useStore';
+import { useToast } from '../context/ToastContext';
+import { useFormattedPrice } from '../hooks/useFormattedPrice';
+import { useBackendData } from '../context/BackendDataContext';
 
 const { width } = Dimensions.get('window');
 const GRID_SPACING = 16;
 // 2 column grid with margins
 const ITEM_WIDTH = (width - 40 - GRID_SPACING) / 2;
 
+type BrowseRoute = RouteProp<RootStackParamList, 'Browse'>;
+
+const toKey = (value: string) => value.trim().toLowerCase();
+
+function getSubcategoryToken(categoryId: string, subcategoryId?: string, title?: string) {
+  if (subcategoryId) {
+    return subcategoryId
+      .toLowerCase()
+      .replace(/^[^-]+-/, '')
+      .replace(/-/g, ' ')
+      .trim();
+  }
+
+  if (!title) {
+    return '';
+  }
+
+  const loweredTitle = title.toLowerCase().replace(/["']/g, '').trim();
+  if (loweredTitle.startsWith('all ')) {
+    return '';
+  }
+
+  const cleanedCategoryId = categoryId.toLowerCase();
+  if (loweredTitle.startsWith(cleanedCategoryId)) {
+    return loweredTitle.slice(cleanedCategoryId.length).trim();
+  }
+
+  return loweredTitle;
+}
+
 export default function BrowseScreen() {
   const navigation = useNavigation<any>();
-  const route = useRoute<any>();
-  const { title, categoryId } = route.params || { title: 'Browse All' };
-
-  const listData = categoryId 
-    ? MOCK_LISTINGS.filter(l => l.category === title.toLowerCase() || l.subcategory === title)
-    : MOCK_LISTINGS;
-
-  const dataToRender = listData.length > 0 ? listData : MOCK_LISTINGS;
+  const route = useRoute<BrowseRoute>();
+  const { title, categoryId, subcategoryId, searchQuery } = route.params || { title: 'Browse All', categoryId: 'search' };
+  const wishlist = useStore((state) => state.wishlist);
+  const toggleWishlist = useStore((state) => state.toggleWishlist);
+  const browseFilters = useStore((state) => state.browseFilters);
+  const updateBrowseFilters = useStore((state) => state.updateBrowseFilters);
+  const { show } = useToast();
+  const { formatFromFiat } = useFormattedPrice();
+  const { listings, refreshListings } = useBackendData();
 
   const [refreshing, setRefreshing] = useState(false);
   const scrollY = useSharedValue(0);
+
+  useEffect(() => {
+    if (categoryId === 'search' && searchQuery && browseFilters.query !== searchQuery) {
+      updateBrowseFilters({ query: searchQuery });
+      return;
+    }
+
+    if (categoryId !== 'search' && browseFilters.query) {
+      updateBrowseFilters({ query: '' });
+    }
+  }, [categoryId, searchQuery, browseFilters.query, updateBrowseFilters]);
 
   const scrollHandler = useAnimatedScrollHandler({
     onScroll: (e) => {
@@ -33,10 +91,91 @@ export default function BrowseScreen() {
     },
   });
 
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 2000);
+    await refreshListings();
+    setTimeout(() => setRefreshing(false), 400);
   };
+
+  const hasActiveFilters =
+    browseFilters.brands.length > 0 ||
+    browseFilters.sizes.length > 0 ||
+    browseFilters.condition !== 'Any';
+
+  const dataToRender = useMemo(() => {
+    const normalizedCategory = toKey(categoryId);
+    const normalizedSubcategory = getSubcategoryToken(categoryId, subcategoryId, title);
+    const normalizedQuery = browseFilters.query.trim().toLowerCase();
+    const selectedBrands = new Set(browseFilters.brands.map((brand) => brand.toLowerCase()));
+    const selectedSizes = new Set(browseFilters.sizes.map((size) => size.toLowerCase()));
+
+    const baseList = listings.filter((listing) => {
+      if (normalizedCategory !== 'search' && listing.category.toLowerCase() !== normalizedCategory) {
+        return false;
+      }
+
+      if (normalizedCategory !== 'search' && normalizedSubcategory) {
+        return listing.subcategory.toLowerCase().includes(normalizedSubcategory);
+      }
+
+      return true;
+    });
+
+    const filteredList = baseList.filter((listing) => {
+      if (normalizedQuery) {
+        const searchable = [
+          listing.title,
+          listing.brand,
+          listing.description,
+          listing.category,
+          listing.subcategory,
+        ]
+          .join(' ')
+          .toLowerCase();
+
+        if (!searchable.includes(normalizedQuery)) {
+          return false;
+        }
+      }
+
+      if (selectedBrands.size > 0 && !selectedBrands.has(listing.brand.toLowerCase())) {
+        return false;
+      }
+
+      if (selectedSizes.size > 0 && !selectedSizes.has(listing.size.toLowerCase())) {
+        return false;
+      }
+
+      if (browseFilters.condition !== 'Any' && listing.condition !== browseFilters.condition) {
+        return false;
+      }
+
+      return true;
+    });
+
+    const sorted = [...filteredList];
+    switch (browseFilters.sort) {
+      case 'Price: Low to High':
+        sorted.sort((a, b) => a.price - b.price);
+        break;
+      case 'Price: High to Low':
+        sorted.sort((a, b) => b.price - a.price);
+        break;
+      case 'Newest':
+        sorted.sort((a, b) => {
+          const aDate = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const bDate = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+          return bDate - aDate;
+        });
+        break;
+      case 'Recommended':
+      default:
+        sorted.sort((a, b) => b.likes - a.likes);
+        break;
+    }
+
+    return sorted;
+  }, [browseFilters, categoryId, listings, subcategoryId, title]);
 
   const AnimatedFlatList = Reanimated.createAnimatedComponent(FlatList);
 
@@ -46,12 +185,12 @@ export default function BrowseScreen() {
       
       {/* Heavy Typography Header */}
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.8}>
+        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.8}>
           <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.searchBtn} activeOpacity={0.8}>
+        </AnimatedPressable>
+        <AnimatedPressable style={styles.searchBtn} activeOpacity={0.8} onPress={() => navigation.navigate('GlobalSearch')}>
           <Ionicons name="search" size={20} color={Colors.textPrimary} />
-        </TouchableOpacity>
+        </AnimatedPressable>
       </View>
 
       <View style={styles.titleContainer}>
@@ -61,22 +200,44 @@ export default function BrowseScreen() {
 
       <View style={styles.filterBar}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-          <TouchableOpacity style={styles.filterPill} activeOpacity={0.8} onPress={() => navigation.navigate('Filter')}>
+          <AnimatedPressable
+            style={styles.filterPill}
+            activeOpacity={0.8}
+            onPress={() => navigation.navigate('Filter', { categoryId, subcategoryId, title })}
+          >
             <Ionicons name="options-outline" size={16} color={Colors.background} />
-            <Text style={styles.filterPillTextActive}>Filter</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.filterPillOutline} activeOpacity={0.8} onPress={() => navigation.navigate('Filter')}>
-            <Text style={styles.filterPillText}>Brand</Text>
+            <Text style={styles.filterPillTextActive}>{hasActiveFilters ? 'Filter on' : 'Filter'}</Text>
+          </AnimatedPressable>
+          <AnimatedPressable
+            style={styles.filterPillOutline}
+            activeOpacity={0.8}
+            onPress={() => navigation.navigate('Filter', { categoryId, subcategoryId, title })}
+          >
+            <Text style={styles.filterPillText}>
+              {browseFilters.brands.length > 0 ? `Brand (${browseFilters.brands.length})` : 'Brand'}
+            </Text>
             <Ionicons name="chevron-down" size={14} color={Colors.textPrimary} />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.filterPillOutline} activeOpacity={0.8} onPress={() => navigation.navigate('Filter')}>
-            <Text style={styles.filterPillText}>Size</Text>
+          </AnimatedPressable>
+          <AnimatedPressable
+            style={styles.filterPillOutline}
+            activeOpacity={0.8}
+            onPress={() => navigation.navigate('Filter', { categoryId, subcategoryId, title })}
+          >
+            <Text style={styles.filterPillText}>
+              {browseFilters.sizes.length > 0 ? `Size (${browseFilters.sizes.length})` : 'Size'}
+            </Text>
             <Ionicons name="chevron-down" size={14} color={Colors.textPrimary} />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.filterPillOutline} activeOpacity={0.8} onPress={() => navigation.navigate('Filter')}>
-            <Text style={styles.filterPillText}>Condition</Text>
+          </AnimatedPressable>
+          <AnimatedPressable
+            style={styles.filterPillOutline}
+            activeOpacity={0.8}
+            onPress={() => navigation.navigate('Filter', { categoryId, subcategoryId, title })}
+          >
+            <Text style={styles.filterPillText}>
+              {browseFilters.condition !== 'Any' ? browseFilters.condition : 'Condition'}
+            </Text>
             <Ionicons name="chevron-down" size={14} color={Colors.textPrimary} />
-          </TouchableOpacity>
+          </AnimatedPressable>
         </ScrollView>
       </View>
 
@@ -107,27 +268,55 @@ export default function BrowseScreen() {
               entering={FadeInDown.delay(Math.min(index, 10) * 50).duration(400)}
               style={[styles.gridItem, index % 2 === 0 ? { marginTop: 0 } : { marginTop: 24 }]}
             >
-              <TouchableOpacity 
+              <AnimatedPressable 
                 style={{ flex: 1 }}
                 activeOpacity={0.9}
                 onPress={() => navigation.navigate('ItemDetail', { itemId: item.id })}
               >
             <View style={styles.imageWrap}>
               <Image source={{ uri: item.images[0] }} style={styles.gridImage} resizeMode="cover" />
-              <TouchableOpacity style={styles.likeBtn} activeOpacity={0.8}>
-                <Ionicons name="heart-outline" size={20} color="#fff" />
-              </TouchableOpacity>
+              <AnimatedPressable
+                style={styles.likeBtn}
+                activeOpacity={0.8}
+                onPress={(event) => {
+                  event.stopPropagation();
+                  const isCurrentlyWishlisted = wishlist.includes(item.id);
+                  toggleWishlist(item.id);
+                  if (!isCurrentlyWishlisted) {
+                    show('Added to wishlist ♥', 'success');
+                  }
+                }}
+              >
+                <Ionicons name={wishlist.includes(item.id) ? 'heart' : 'heart-outline'} size={20} color="#fff" />
+              </AnimatedPressable>
             </View>
             <View style={styles.infoWrap}>
               <View style={styles.priceRow}>
-                <Text style={styles.priceText}>£{item.price}</Text>
+                <Text style={styles.priceText}>{formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}</Text>
                 <Text style={styles.brandText}>{item.brand}</Text>
               </View>
               <Text style={styles.sizeText}>{item.size} • {item.condition}</Text>
             </View>
-              </TouchableOpacity>
+              </AnimatedPressable>
             </Reanimated.View>
           )}
+          ListEmptyComponent={
+            <EmptyState
+              icon="search-outline"
+              title="No matches found"
+              subtitle="Try clearing filters or searching for another keyword."
+              ctaLabel="Clear filters"
+              onCtaPress={() =>
+                updateBrowseFilters({
+                  query: '',
+                  sort: 'Recommended',
+                  brands: [],
+                  sizes: [],
+                  condition: 'Any',
+                })
+              }
+            />
+          }
         />
       </View>
     </SafeAreaView>

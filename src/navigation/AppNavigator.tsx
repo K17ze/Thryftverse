@@ -10,16 +10,26 @@ import TabNavigator from './TabNavigator';
 import CategoryDetailScreen from '../screens/CategoryDetailScreen';
 import BrowseScreen from '../screens/BrowseScreen';
 import ItemDetailScreen from '../screens/ItemDetailScreen';
+import FavouritesScreen from '../screens/FavouritesScreen';
 import PosterViewerScreen from '../screens/PosterViewerScreen';
 import CreatePosterScreen from '../screens/CreatePosterScreen';
 import CreateAuctionScreen from '../screens/CreateAuctionScreen';
 import CreateSyndicateScreen from '../screens/CreateSyndicateScreen';
 import MarketLedgerScreen from '../screens/MarketLedgerScreen';
+import SyndicateHubScreen from '../screens/SyndicateHubScreen';
+import AssetDetailScreen from '../screens/AssetDetailScreen';
+import TradeScreen from '../screens/TradeScreen';
+import PortfolioScreen from '../screens/PortfolioScreen';
+import SyndicateOrderHistoryScreen from '../screens/SyndicateOrderHistoryScreen';
+import AssetLeaderboardScreen from '../screens/AssetLeaderboardScreen';
+import BuyoutScreen from '../screens/BuyoutScreen';
+import SyndicateOnboardingScreen from '../screens/SyndicateOnboardingScreen';
 import ChatScreen from '../screens/ChatScreen';
 import UserProfileScreen from '../screens/UserProfileScreen';
 
 // Profile Subs
 import BalanceScreen from '../screens/BalanceScreen';
+import WalletScreen from '../screens/WalletScreen';
 import MyOrdersScreen from '../screens/MyOrdersScreen';
 import PersonalisationScreen from '../screens/PersonalisationScreen';
 import SettingsScreen from '../screens/SettingsScreen';
@@ -63,6 +73,7 @@ import NotificationsScreen from '../screens/NotificationsScreen';
 // Phase 28
 import ForgotPasswordScreen from '../screens/ForgotPasswordScreen';
 import ChangePasswordScreen from '../screens/ChangePasswordScreen';
+import TwoFactorSetupScreen from '../screens/TwoFactorSetupScreen';
 import WriteReviewScreen from '../screens/WriteReviewScreen';
 import ReportScreen from '../screens/ReportScreen';
 
@@ -83,14 +94,24 @@ export default function AppNavigator() {
       <Stack.Screen name="CategoryDetail" component={CategoryDetailScreen} />
       <Stack.Screen name="Browse" component={BrowseScreen} />
       <Stack.Screen name="ItemDetail" component={ItemDetailScreen} />
+      <Stack.Screen name="Favourites" component={FavouritesScreen} />
       <Stack.Screen name="PosterViewer" component={PosterViewerScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="CreatePoster" component={CreatePosterScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="CreateAuction" component={CreateAuctionScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="CreateSyndicate" component={CreateSyndicateScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="MarketLedger" component={MarketLedgerScreen} />
+      <Stack.Screen name="SyndicateHub" component={SyndicateHubScreen} />
+      <Stack.Screen name="AssetDetail" component={AssetDetailScreen} />
+      <Stack.Screen name="Trade" component={TradeScreen} options={{ presentation: 'modal' }} />
+      <Stack.Screen name="Portfolio" component={PortfolioScreen} />
+      <Stack.Screen name="SyndicateOrderHistory" component={SyndicateOrderHistoryScreen} />
+      <Stack.Screen name="AssetLeaderboard" component={AssetLeaderboardScreen} />
+      <Stack.Screen name="Buyout" component={BuyoutScreen} />
+      <Stack.Screen name="SyndicateOnboarding" component={SyndicateOnboardingScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="Chat" component={ChatScreen} />
       <Stack.Screen name="UserProfile" component={UserProfileScreen} />
       <Stack.Screen name="Balance" component={BalanceScreen} />
+      <Stack.Screen name="Wallet" component={WalletScreen} />
       <Stack.Screen name="MyOrders" component={MyOrdersScreen} />
       <Stack.Screen name="Personalisation" component={PersonalisationScreen} />
       <Stack.Screen name="Settings" component={SettingsScreen} />
@@ -133,6 +154,7 @@ export default function AppNavigator() {
 
       {/* Phase 28 new screens */}
       <Stack.Screen name="ChangePassword" component={ChangePasswordScreen} />
+      <Stack.Screen name="TwoFactorSetup" component={TwoFactorSetupScreen} />
       <Stack.Screen name="WriteReview" component={WriteReviewScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="Report" component={ReportScreen} options={{ presentation: 'modal' }} />
     </Stack.Navigator>

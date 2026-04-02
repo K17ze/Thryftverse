@@ -1,14 +1,15 @@
 import React from 'react';
 import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import {
   View,
   Text,
   StyleSheet,
   StatusBar,
-  TouchableOpacity,
   TextInput,
   Image,
   FlatList,
-  ActivityIndicator,
+  ActivityIndicator
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -21,6 +22,8 @@ import { MOCK_LISTINGS, MOCK_USERS, Listing } from '../data/mockData';
 import type { Poster } from '../data/posters';
 import { useStore } from '../store/useStore';
 import { useToast } from '../context/ToastContext';
+import { useFormattedPrice } from '../hooks/useFormattedPrice';
+import { useBackendData } from '../context/BackendDataContext';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 
@@ -29,19 +32,36 @@ const EXPIRY_OPTIONS = [6, 12, 24, 48];
 export default function CreatePosterScreen() {
   const navigation = useNavigation<NavT>();
   const { show } = useToast();
+  const { formatFromFiat } = useFormattedPrice();
+  const { listings } = useBackendData();
 
   const currentUser = useStore((state) => state.currentUser);
   const addPoster = useStore((state) => state.addPoster);
 
+  const listingOptions = React.useMemo(
+    () => (listings.length ? listings : MOCK_LISTINGS).slice(0, 12),
+    [listings]
+  );
+
   const [caption, setCaption] = React.useState('');
   const [expiryHours, setExpiryHours] = React.useState(24);
-  const [selectedListingId, setSelectedListingId] = React.useState(MOCK_LISTINGS[0]?.id ?? '');
+  const [selectedListingId, setSelectedListingId] = React.useState(listingOptions[0]?.id ?? '');
   const [posterImageUri, setPosterImageUri] = React.useState<string | null>(null);
   const [isPickingImage, setIsPickingImage] = React.useState(false);
 
+  React.useEffect(() => {
+    if (!listingOptions.length) {
+      return;
+    }
+
+    if (!listingOptions.some((item) => item.id === selectedListingId)) {
+      setSelectedListingId(listingOptions[0].id);
+    }
+  }, [listingOptions, selectedListingId]);
+
   const selectedListing = React.useMemo(
-    () => MOCK_LISTINGS.find((item) => item.id === selectedListingId),
-    [selectedListingId]
+    () => listingOptions.find((item) => item.id === selectedListingId),
+    [listingOptions, selectedListingId]
   );
 
   const previewUri =
@@ -133,7 +153,7 @@ export default function CreatePosterScreen() {
     const selected = item.id === selectedListingId;
 
     return (
-      <TouchableOpacity
+      <AnimatedPressable
         style={[styles.listingCard, selected && styles.listingCardSelected]}
         activeOpacity={0.9}
         onPress={() => setSelectedListingId(item.id)}
@@ -143,14 +163,14 @@ export default function CreatePosterScreen() {
           <Text style={styles.listingTitle} numberOfLines={1}>
             {item.title}
           </Text>
-          <Text style={styles.listingPrice}>GBP {item.price.toFixed(2)}</Text>
+          <Text style={styles.listingPrice}>{formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}</Text>
         </View>
         {selected ? (
           <View style={styles.selectedBadge}>
             <Ionicons name="checkmark" size={12} color={Colors.background} />
           </View>
         ) : null}
-      </TouchableOpacity>
+      </AnimatedPressable>
     );
   };
 
@@ -159,18 +179,18 @@ export default function CreatePosterScreen() {
       <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
 
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} activeOpacity={0.85} onPress={() => navigation.goBack()}>
+        <AnimatedPressable style={styles.backBtn} activeOpacity={0.85} onPress={() => navigation.goBack()}>
           <Ionicons name="close" size={20} color={Colors.textPrimary} />
-        </TouchableOpacity>
+        </AnimatedPressable>
 
         <View>
           <Text style={styles.headerLabel}>POSTER COMPOSER</Text>
           <Text style={styles.headerTitle}>Create Poster</Text>
         </View>
 
-        <TouchableOpacity style={styles.publishBtn} activeOpacity={0.9} onPress={handlePublish}>
+        <AnimatedPressable style={styles.publishBtn} activeOpacity={0.9} onPress={handlePublish}>
           <Text style={styles.publishBtnText}>Publish</Text>
-        </TouchableOpacity>
+        </AnimatedPressable>
       </View>
 
       <View style={styles.content}>
@@ -199,7 +219,7 @@ export default function CreatePosterScreen() {
           </View>
 
           <View style={styles.imagePickerRow}>
-            <TouchableOpacity
+            <AnimatedPressable
               style={styles.imagePickerBtn}
               onPress={pickFromLibrary}
               activeOpacity={0.9}
@@ -207,9 +227,9 @@ export default function CreatePosterScreen() {
             >
               <Ionicons name="images-outline" size={16} color={Colors.textPrimary} />
               <Text style={styles.imagePickerBtnText}>Gallery</Text>
-            </TouchableOpacity>
+            </AnimatedPressable>
 
-            <TouchableOpacity
+            <AnimatedPressable
               style={styles.imagePickerBtn}
               onPress={pickFromCamera}
               activeOpacity={0.9}
@@ -217,9 +237,9 @@ export default function CreatePosterScreen() {
             >
               <Ionicons name="camera-outline" size={16} color={Colors.textPrimary} />
               <Text style={styles.imagePickerBtnText}>Camera</Text>
-            </TouchableOpacity>
+            </AnimatedPressable>
 
-            <TouchableOpacity
+            <AnimatedPressable
               style={[styles.imagePickerBtn, !posterImageUri && styles.imagePickerBtnDisabled]}
               onPress={() => setPosterImageUri(null)}
               activeOpacity={0.9}
@@ -227,7 +247,7 @@ export default function CreatePosterScreen() {
             >
               <Ionicons name="refresh-outline" size={16} color={posterImageUri ? Colors.textPrimary : Colors.textMuted} />
               <Text style={[styles.imagePickerBtnText, !posterImageUri && styles.imagePickerBtnTextDisabled]}>Reset</Text>
-            </TouchableOpacity>
+            </AnimatedPressable>
           </View>
 
           {isPickingImage ? (
@@ -258,14 +278,14 @@ export default function CreatePosterScreen() {
             {EXPIRY_OPTIONS.map((hours) => {
               const active = expiryHours === hours;
               return (
-                <TouchableOpacity
+                <AnimatedPressable
                   key={hours}
                   style={[styles.expiryChip, active && styles.expiryChipActive]}
                   onPress={() => setExpiryHours(hours)}
                   activeOpacity={0.9}
                 >
                   <Text style={[styles.expiryChipText, active && styles.expiryChipTextActive]}>{hours}h</Text>
-                </TouchableOpacity>
+                </AnimatedPressable>
               );
             })}
           </View>
@@ -278,7 +298,7 @@ export default function CreatePosterScreen() {
           </View>
 
           <FlatList
-            data={MOCK_LISTINGS.slice(0, 12)}
+            data={listingOptions}
             horizontal
             keyExtractor={(item) => item.id}
             renderItem={renderListingCard}

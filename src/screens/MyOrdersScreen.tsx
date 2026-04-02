@@ -1,5 +1,15 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, StatusBar, Image, Dimensions, RefreshControl } from 'react-native';
+import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import { View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  StatusBar,
+  Image,
+  Dimensions,
+  RefreshControl
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Reanimated, { useSharedValue, useAnimatedScrollHandler, FadeInDown } from 'react-native-reanimated';
 import { Colors } from '../constants/colors';
@@ -8,6 +18,8 @@ import { useNavigation } from '@react-navigation/native';
 import { MOCK_LISTINGS, MOCK_USERS, Listing, User } from '../data/mockData';
 import { RefreshIndicator } from '../components/RefreshIndicator';
 import { EmptyState } from '../components/EmptyState';
+import { useFormattedPrice } from '../hooks/useFormattedPrice';
+import { useBackendData } from '../context/BackendDataContext';
 
 const { width } = Dimensions.get('window');
 
@@ -21,18 +33,36 @@ type OrderItem = {
 
 export default function MyOrdersScreen() {
   const navigation = useNavigation<any>();
+  const { formatFromFiat } = useFormattedPrice();
+  const { listings, refreshListings } = useBackendData();
   const [activeTab, setActiveTab] = useState<'buying' | 'selling'>('buying');
 
-  // Restored full mock mapping for Buying and Selling tabs
-  const buyingOrders: OrderItem[] = [
-    { id: 'o1', item: MOCK_LISTINGS[0], status: 'In Transit', isDone: false },
-    { id: 'o2', item: MOCK_LISTINGS[2], status: 'Delivered', isDone: true },
-  ];
+  const listingPool = React.useMemo(() => (listings.length ? listings : MOCK_LISTINGS), [listings]);
 
-  const sellingOrders: OrderItem[] = [
-    { id: 'o3', item: MOCK_LISTINGS[6], status: 'Awaiting Dispatch', isDone: false, buyer: MOCK_USERS[1] },
-    { id: 'o4', item: MOCK_LISTINGS[1], status: 'Completed', isDone: true, buyer: MOCK_USERS[2] },
-  ];
+  // Restored full mock mapping for Buying and Selling tabs
+  const buyingOrders: OrderItem[] = React.useMemo(() => {
+    const inTransitItem = listingPool[0];
+    const deliveredItem = listingPool[2] || listingPool[1] || listingPool[0];
+
+    return [
+      ...(inTransitItem ? [{ id: 'o1', item: inTransitItem, status: 'In Transit', isDone: false }] : []),
+      ...(deliveredItem ? [{ id: 'o2', item: deliveredItem, status: 'Delivered', isDone: true }] : []),
+    ];
+  }, [listingPool]);
+
+  const sellingOrders: OrderItem[] = React.useMemo(() => {
+    const awaitingDispatchItem = listingPool[6] || listingPool[0];
+    const completedItem = listingPool[1] || listingPool[0];
+
+    return [
+      ...(awaitingDispatchItem
+        ? [{ id: 'o3', item: awaitingDispatchItem, status: 'Awaiting Dispatch', isDone: false, buyer: MOCK_USERS[1] }]
+        : []),
+      ...(completedItem
+        ? [{ id: 'o4', item: completedItem, status: 'Completed', isDone: true, buyer: MOCK_USERS[2] }]
+        : []),
+    ];
+  }, [listingPool]);
 
   const activeOrders = activeTab === 'buying' ? buyingOrders : sellingOrders;
 
@@ -45,9 +75,10 @@ export default function MyOrdersScreen() {
     },
   });
 
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 2000);
+    await refreshListings();
+    setTimeout(() => setRefreshing(false), 400);
   };
 
   const AnimatedScrollView = Reanimated.createAnimatedComponent(ScrollView);
@@ -57,28 +88,28 @@ export default function MyOrdersScreen() {
       <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
       
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
-        </TouchableOpacity>
+        </AnimatedPressable>
         <Text style={styles.hugeTitle}>My Orders</Text>
       </View>
 
       {/* Restored Custom Tabs */}
       <View style={styles.tabsContainer}>
-        <TouchableOpacity 
+        <AnimatedPressable 
           style={[styles.tabBtn, activeTab === 'buying' && styles.activeTabBtn]} 
           onPress={() => setActiveTab('buying')}
           activeOpacity={0.8}
         >
           <Text style={[styles.tabText, activeTab === 'buying' && styles.activeTabText]}>Buying</Text>
-        </TouchableOpacity>
-        <TouchableOpacity 
+        </AnimatedPressable>
+        <AnimatedPressable 
           style={[styles.tabBtn, activeTab === 'selling' && styles.activeTabBtn]} 
           onPress={() => setActiveTab('selling')}
           activeOpacity={0.8}
         >
           <Text style={[styles.tabText, activeTab === 'selling' && styles.activeTabText]}>Selling</Text>
-        </TouchableOpacity>
+        </AnimatedPressable>
       </View>
 
       {/* Filter Pills Horizontal List */}
@@ -89,13 +120,13 @@ export default function MyOrdersScreen() {
           contentContainerStyle={{ paddingHorizontal: 20, gap: 10 }}
         >
           {['All', 'In Progress', 'Cancelled', 'Completed'].map(f => (
-            <TouchableOpacity 
+            <AnimatedPressable 
               key={f} 
               style={styles.filterPill}
               activeOpacity={0.8}
             >
               <Text style={styles.filterText}>{f}</Text>
-            </TouchableOpacity>
+            </AnimatedPressable>
           ))}
         </ScrollView>
       </View>
@@ -129,7 +160,7 @@ export default function MyOrdersScreen() {
           ) : (
             activeOrders.map((order, index) => (
               <Reanimated.View key={order.id} entering={FadeInDown.delay(index * 60).duration(400)}>
-                <TouchableOpacity 
+                <AnimatedPressable 
                   style={styles.cardGroup}
                   onPress={() => navigation.navigate('OrderDetail', { orderId: order.id })}
                   activeOpacity={0.9}
@@ -142,11 +173,11 @@ export default function MyOrdersScreen() {
                         {order.buyer && <Text style={styles.buyerText}>to {order.buyer.username}</Text>}
                       </View>
                       <Text style={styles.orderTitle} numberOfLines={1}>{order.item.title}</Text>
-                      <Text style={styles.orderPrice}>£{order.item.price.toFixed(2)}</Text>
+                      <Text style={styles.orderPrice}>{formatFromFiat(order.item.price, 'GBP', { displayMode: 'fiat' })}</Text>
                     </View>
                     <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
                   </View>
-                </TouchableOpacity>
+                </AnimatedPressable>
               </Reanimated.View>
             ))
           )}

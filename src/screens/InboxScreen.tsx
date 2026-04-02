@@ -1,14 +1,15 @@
 import React, { useState, useCallback } from 'react';
 import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import {
   View,
   Text,
   FlatList,
-  TouchableOpacity,
   StyleSheet,
   Image,
   StatusBar,
   Alert,
-  RefreshControl,
+  RefreshControl
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -22,6 +23,8 @@ import Reanimated, { FadeInDown, useSharedValue, useAnimatedScrollHandler } from
 import { EmptyState } from '../components/EmptyState';
 import { useToast } from '../context/ToastContext';
 import { RefreshIndicator } from '../components/RefreshIndicator';
+import { useFormattedPrice } from '../hooks/useFormattedPrice';
+import { useBackendData } from '../context/BackendDataContext';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 const TEAL = '#4ECDC4';
@@ -31,6 +34,8 @@ type ConvoItem = typeof MOCK_CONVERSATIONS[0];
 export default function InboxScreen() {
   const navigation = useNavigation<NavT>();
   const { show } = useToast();
+  const { formatFromFiat } = useFormattedPrice();
+  const { listings, refreshListings } = useBackendData();
   const [conversations, setConversations] = useState(MOCK_CONVERSATIONS);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -41,9 +46,10 @@ export default function InboxScreen() {
     },
   });
 
-  const handleRefresh = () => {
+  const handleRefresh = async () => {
     setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 2000);
+    await refreshListings();
+    setTimeout(() => setRefreshing(false), 400);
   };
 
   const AnimatedFlatList = Reanimated.createAnimatedComponent(FlatList);
@@ -59,28 +65,28 @@ export default function InboxScreen() {
   }, []);
 
   const renderRightActions = (id: string) => (
-    <TouchableOpacity
+    <AnimatedPressable
       style={styles.swipeDelete}
       onPress={() => handleDelete(id)}
     >
       <Ionicons name="trash-outline" size={22} color="#fff" />
       <Text style={styles.swipeActionText}>Delete</Text>
-    </TouchableOpacity>
+    </AnimatedPressable>
   );
 
   const renderLeftActions = (id: string) => (
-    <TouchableOpacity
+    <AnimatedPressable
       style={styles.swipeArchive}
       onPress={() => handleArchive(id)}
     >
       <Ionicons name="archive-outline" size={22} color="#fff" />
       <Text style={styles.swipeActionText}>Archive</Text>
-    </TouchableOpacity>
+    </AnimatedPressable>
   );
 
   const renderItem = ({ item, index }: { item: ConvoItem; index: number }) => {
     const seller = MOCK_USERS.find((u) => u.id === item.sellerId);
-    const listing = MOCK_LISTINGS.find((l) => l.id === item.itemId);
+    const listing = listings.find((l) => l.id === item.itemId) || MOCK_LISTINGS.find((l) => l.id === item.itemId);
 
     return (
       <Reanimated.View entering={FadeInDown.delay(Math.min(index, 7) * 60).duration(400)}>
@@ -91,7 +97,7 @@ export default function InboxScreen() {
           renderRightActions={() => renderRightActions(item.id)}
           renderLeftActions={() => renderLeftActions(item.id)}
         >
-          <TouchableOpacity
+          <AnimatedPressable
             style={styles.messageCard}
             onPress={() => navigation.navigate('Chat', { conversationId: item.id })}
             activeOpacity={0.85}
@@ -112,13 +118,13 @@ export default function InboxScreen() {
                 <View style={styles.itemPreview}>
                   <Image source={{ uri: listing.images[0] }} style={styles.itemThumb} />
                   <Text style={styles.itemName} numberOfLines={1}>{listing.title}</Text>
-                  <Text style={styles.itemPrice}>£{listing.price}</Text>
+                  <Text style={styles.itemPrice}>{formatFromFiat(listing.price, 'GBP', { displayMode: 'fiat' })}</Text>
                 </View>
               )}
             </View>
 
             {item.unread && <View style={styles.unreadDot} />}
-          </TouchableOpacity>
+          </AnimatedPressable>
         </Swipeable>
       </Reanimated.View>
     );

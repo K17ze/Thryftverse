@@ -1,14 +1,29 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, StatusBar, ScrollView, Switch, Alert } from 'react-native';
+import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import { View,
+  Text,
+  StyleSheet,
+  TextInput,
+  StatusBar,
+  ScrollView,
+  Switch,
+  Alert
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors } from '../constants/colors';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
+import { useStore } from '../store/useStore';
+import { useToast } from '../context/ToastContext';
 
 export default function AccountSettingsScreen() {
   const navigation = useNavigation<StackNavigationProp<RootStackParamList>>();
+  const twoFactorEnabled = useStore((state) => state.twoFactorEnabled);
+  const setTwoFactorEnabled = useStore((state) => state.setTwoFactorEnabled);
+  const { show } = useToast();
 
   // Expanded Data States restored
   const [email, setEmail] = useState('user@example.com');
@@ -17,16 +32,50 @@ export default function AccountSettingsScreen() {
   const [birthday, setBirthday] = useState('14/05/1996');
   const [holidayMode, setHolidayMode] = useState(false);
   const [privateProfile, setPrivateProfile] = useState(false);
-  const [twoFactor, setTwoFactor] = useState(false);
+  const [facebookLinked, setFacebookLinked] = useState(true);
+  const [googleLinked, setGoogleLinked] = useState(false);
+
+  const handleToggleTwoFactor = (enabled: boolean) => {
+    if (enabled) {
+      navigation.navigate('TwoFactorSetup');
+      return;
+    }
+
+    setTwoFactorEnabled(false);
+    show('Two-factor authentication disabled', 'info');
+  };
+
+  const handleFacebookLink = () => {
+    const next = !facebookLinked;
+    setFacebookLinked(next);
+    show(next ? 'Facebook linked' : 'Facebook unlinked', next ? 'success' : 'info');
+  };
+
+  const handleGoogleLink = () => {
+    const next = !googleLinked;
+    setGoogleLinked(next);
+    show(next ? 'Google linked' : 'Google unlinked', next ? 'success' : 'info');
+  };
+
+  const handleDownloadData = () => {
+    Alert.alert('Download requested', 'We will send your data export link to your account email within 24 hours.');
+  };
+
+  const handleDeleteAccount = () => {
+    Alert.alert('Delete account', 'This action cannot be undone. Contact support to complete account deletion.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Understood', style: 'destructive' },
+    ]);
+  };
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
       
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
-        </TouchableOpacity>
+        </AnimatedPressable>
         <Text style={styles.hugeTitle}>Account</Text>
       </View>
 
@@ -96,21 +145,21 @@ export default function AccountSettingsScreen() {
         {/* Security */}
         <Text style={styles.sectionTitle}>Security</Text>
         <View style={styles.cardGroup}>
-          <TouchableOpacity style={styles.actionRow} onPress={() => navigation.navigate('ChangePassword')}>
+          <AnimatedPressable style={styles.actionRow} onPress={() => navigation.navigate('ChangePassword')}>
             <View>
               <Text style={styles.rowTitle}>Password</Text>
               <Text style={styles.rowSub}>Last changed 2 months ago</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
-          </TouchableOpacity>
+          </AnimatedPressable>
           <View style={[styles.actionRow, { paddingBottom: 0 }]}>
             <View>
               <Text style={styles.rowTitle}>Two-Factor Authentication</Text>
-              <Text style={styles.rowSub}>App Authenticator</Text>
+              <Text style={styles.rowSub}>Authenticator app verification</Text>
             </View>
             <Switch 
-              value={twoFactor} 
-              onValueChange={setTwoFactor}
+              value={twoFactorEnabled} 
+              onValueChange={handleToggleTwoFactor}
               trackColor={{ false: '#333', true: Colors.success }}
               thumbColor="#fff"
             />
@@ -120,35 +169,47 @@ export default function AccountSettingsScreen() {
         {/* Linked Accounts */}
         <Text style={styles.sectionTitle}>Linked Accounts</Text>
         <View style={styles.cardGroup}>
-          <TouchableOpacity style={styles.actionRow}>
+          <AnimatedPressable style={styles.actionRow} onPress={handleFacebookLink} activeOpacity={0.8}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
               <Ionicons name="logo-facebook" size={24} color={Colors.textPrimary} />
               <Text style={styles.rowTitle}>Facebook</Text>
             </View>
-            <View style={styles.linkBadgeActive}>
-              <Text style={styles.linkBadgeTextActive}>Linked</Text>
-            </View>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.actionRow, { paddingBottom: 0 }]}>
+            {facebookLinked ? (
+              <View style={styles.linkBadgeActive}>
+                <Text style={styles.linkBadgeTextActive}>Linked</Text>
+              </View>
+            ) : (
+              <View style={styles.linkBadge}>
+                <Text style={styles.linkBadgeText}>Link</Text>
+              </View>
+            )}
+          </AnimatedPressable>
+          <AnimatedPressable style={[styles.actionRow, { paddingBottom: 0 }]} onPress={handleGoogleLink} activeOpacity={0.8}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
               <Ionicons name="logo-google" size={24} color={Colors.textPrimary} />
               <Text style={styles.rowTitle}>Google</Text>
             </View>
-            <View style={styles.linkBadge}>
-              <Text style={styles.linkBadgeText}>Link</Text>
-            </View>
-          </TouchableOpacity>
+            {googleLinked ? (
+              <View style={styles.linkBadgeActive}>
+                <Text style={styles.linkBadgeTextActive}>Linked</Text>
+              </View>
+            ) : (
+              <View style={styles.linkBadge}>
+                <Text style={styles.linkBadgeText}>Link</Text>
+              </View>
+            )}
+          </AnimatedPressable>
         </View>
 
         {/* Footer Actions */}
-        <TouchableOpacity style={styles.supportRow}>
+        <AnimatedPressable style={styles.supportRow} onPress={handleDownloadData} activeOpacity={0.8}>
           <Ionicons name="download-outline" size={20} color={Colors.textPrimary} style={{ marginRight: 12 }} />
           <Text style={styles.rowTitle}>Download my data</Text>
-        </TouchableOpacity>
+        </AnimatedPressable>
 
-        <TouchableOpacity style={styles.dangerBtn}>
+        <AnimatedPressable style={styles.dangerBtn} onPress={handleDeleteAccount} activeOpacity={0.9}>
           <Text style={styles.dangerText}>Delete Account</Text>
-        </TouchableOpacity>
+        </AnimatedPressable>
       </ScrollView>
 
     </SafeAreaView>

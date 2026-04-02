@@ -1,17 +1,19 @@
 import React, { useState } from 'react';
 import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import {
   View,
   Text,
   StyleSheet,
   SafeAreaView,
-  TouchableOpacity,
   Switch,
   ScrollView,
-  StatusBar,
+  StatusBar
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
+import { useFormattedPrice } from '../hooks/useFormattedPrice';
 
 type Props = StackScreenProps<RootStackParamList, 'Postage'>;
 
@@ -22,13 +24,14 @@ const MUTED = '#888888';
 const TEXT = '#FFFFFF';
 
 const CARRIERS = [
-  { key: 'evri', label: 'Evri', price: 'from £2.89', selected: true },
-  { key: 'royal', label: 'Royal Mail', price: 'from £3.35', selected: false },
-  { key: 'dpd', label: 'DPD', price: 'from £4.50', selected: false },
-  { key: 'inpost', label: 'InPost', price: 'from £2.99', selected: false },
+  { key: 'evri', label: 'Evri', priceFromGBP: 2.89, selected: true },
+  { key: 'royal', label: 'Royal Mail', priceFromGBP: 3.35, selected: false },
+  { key: 'dpd', label: 'DPD', priceFromGBP: 4.5, selected: false },
+  { key: 'inpost', label: 'InPost', priceFromGBP: 2.99, selected: false },
 ];
 
 export default function PostageScreen({ navigation }: Props) {
+  const { formatFromFiat } = useFormattedPrice();
   const [carriers, setCarriers] = useState(CARRIERS);
   const [freeShipping, setFreeShipping] = useState(false);
   const [bundleDiscount, setBundleDiscount] = useState(true);
@@ -40,13 +43,13 @@ export default function PostageScreen({ navigation }: Props) {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={BG} />
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
+        <AnimatedPressable onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={TEXT} />
-        </TouchableOpacity>
+        </AnimatedPressable>
         <Text style={styles.headerTitle}>Postage</Text>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
+        <AnimatedPressable onPress={() => navigation.goBack()}>
           <Text style={styles.saveBtn}>Save</Text>
-        </TouchableOpacity>
+        </AnimatedPressable>
       </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -54,15 +57,15 @@ export default function PostageScreen({ navigation }: Props) {
         <View style={styles.card}>
           {carriers.map((c, idx) => (
             <View key={c.key}>
-              <TouchableOpacity style={styles.row} onPress={() => selectCarrier(c.key)}>
+              <AnimatedPressable style={styles.row} onPress={() => selectCarrier(c.key)}>
                 <View style={styles.rowText}>
                   <Text style={styles.rowLabel}>{c.label}</Text>
-                  <Text style={styles.rowSubtitle}>{c.price}</Text>
+                  <Text style={styles.rowSubtitle}>from {formatFromFiat(c.priceFromGBP, 'GBP', { displayMode: 'fiat' })}</Text>
                 </View>
                 <View style={[styles.radio, c.selected && styles.radioSelected]}>
                   {c.selected && <View style={styles.radioDot} />}
                 </View>
-              </TouchableOpacity>
+              </AnimatedPressable>
               {idx < carriers.length - 1 && <View style={styles.divider} />}
             </View>
           ))}

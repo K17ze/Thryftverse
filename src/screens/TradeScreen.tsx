@@ -1,0 +1,426 @@
+import React from 'react';
+import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import {
+  View,
+  Text,
+  StyleSheet,
+  StatusBar,
+  TextInput,
+  ScrollView
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
+import { StackNavigationProp } from '@react-navigation/stack';
+import { Colors } from '../constants/colors';
+import { RootStackParamList } from '../navigation/types';
+import { getSyndicateMarket } from '../data/tradeHub';
+import { useStore } from '../store/useStore';
+import { resolveAssetMarketState } from '../data/mockSyndicateData';
+import { useFormattedPrice } from '../hooks/useFormattedPrice';
+import { useToast } from '../context/ToastContext';
+import {
+  buildTradeQuote,
+  evaluateTradeSubmit,
+  isTradeSubmitEnabled,
+  sanitizeTradePriceInput,
+  sanitizeTradeQuantityInput,
+  TradeOrderMode,
+  TradeSide,
+} from '../utils/tradeFlow';
+
+type NavT = StackNavigationProp<RootStackParamList>;
+type RouteT = RouteProp<RootStackParamList, 'Trade'>;
+
+export default function TradeScreen() {
+  const navigation = useNavigation<NavT>();
+  const route = useRoute<RouteT>();
+  const { show } = useToast();
+
+  const customSyndicates = useStore((state) => state.customSyndicates);
+  const syndicateRuntime = useStore((state) => state.syndicateRuntime);
+  const currentUser = useStore((state) => state.currentUser);
+  const buySyndicateUnits = useStore((state) => state.buySyndicateUnits);
+  const sellSyndicateUnits = useStore((state) => state.sellSyndicateUnits);
+  const checkSyndicateEligibility = useStore((state) => state.checkSyndicateEligibility);
+
+  const { formatFromFiat } = useFormattedPrice();
+
+  const [side, setSide] = React.useState<TradeSide>(route.params.side);
+  const [orderMode, setOrderMode] = React.useState<TradeOrderMode>('market');
+  const [quantityInput, setQuantityInput] = React.useState('1');
+  const [limitPriceInput, setLimitPriceInput] = React.useState('');
+
+  const baseAssets = React.useMemo(() => getSyndicateMarket(customSyndicates), [customSyndicates]);
+  const marketAssets = React.useMemo(
+    () => baseAssets.map((asset) => resolveAssetMarketState(asset, syndicateRuntime[asset.id])),
+    [baseAssets, syndicateRuntime]
+  );
+
+  const asset = marketAssets.find((item) => item.id === route.params.assetId);
+  const marketPrice = asset?.unitPriceGBP ?? 0;
+
+  const quote = React.useMemo(
+    () => buildTradeQuote({
+      orderMode,
+      side,
+      quantityInput,
+      limitPriceInput,
+      marketPrice,
+    }),
+    [limitPriceInput, marketPrice, orderMode, quantityInput, side]
+  );
+
+  const eligibility = asset ? checkSyndicateEligibility(asset.settlementMode) : { ok: false, message: 'Asset not found' };
+
+  const canSubmit = isTradeSubmitEnabled({
+    assetFound: !!asset,
+    eligibility,
+    quote,
+  });
+
+  const handleSubmit = () => {
+    const decision = evaluateTradeSubmit({
+      orderMode,
+      side,
+      quantityInput,
+      limitPriceInput,
+      marketPrice,
+      assetFound: !!asset,
+      eligibility,
+      maxSellUnits: asset?.yourUnits ?? 0,
+    });
+
+    if (!decision.ok) {
+      show(decision.message, 'error');
+      return;
+    }
+
+    if (decision.kind === 'queue') {
+      show(decision.message, 'info');
+      navigation.goBack();
+      return;
+    }
+
+    if (!asset) {
+      show('Asset not found', 'error');
+      return;
+    }
+
+    const actingUserId = currentUser?.id ?? 'u1';
+    const result = side === 'buy'
+      ? buySyndicateUnits(asset, actingUserId, quote.quantity)
+      : sellSyndicateUnits(asset, actingUserId, quote.quantity);
+
+    if (!result.ok) {
+      show(result.message ?? 'Order failed', 'error');
+      return;
+    }
+
+    show(result.message ?? 'Order filled', 'success');
+    navigation.goBack();
+  };
+
+  if (!asset) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+        <View style={styles.header}>
+          <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
+            <Ionicons name="arrow-back" size={22} color={Colors.textPrimary} />
+          </AnimatedPressable>
+          <Text style={styles.headerTitle}>Trade</Text>
+          <View style={{ width: 40 }} />
+        </View>
+        <View style={styles.emptyWrap}>
+          <Text style={styles.emptyText}>Asset not found.</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+
+      <View style={styles.header}>
+        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
+          <Ionicons name="arrow-back" size={22} color={Colors.textPrimary} />
+        </AnimatedPressable>
+        <Text style={styles.headerTitle}>Trade {asset.id.toUpperCase()}</Text>
+        <View style={{ width: 40 }} />
+      </View>
+
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <Text style={styles.assetTitle}>{asset.title}</Text>
+        <Text style={styles.assetMeta}>Market {formatFromFiat(asset.unitPriceGBP, 'GBP')} · {asset.availableUnits} available</Text>
+
+        <View style={styles.segmentRow}>
+          {(['buy', 'sell'] as TradeSide[]).map((value) => {
+            const active = side === value;
+            return (
+              <AnimatedPressable
+                key={value}
+                style={[styles.segmentBtn, active && styles.segmentBtnActive]}
+                onPress={() => setSide(value)}
+              >
+                <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{value.toUpperCase()}</Text>
+              </AnimatedPressable>
+            );
+          })}
+        </View>
+
+        <View style={styles.segmentRow}>
+          {(['market', 'limit'] as TradeOrderMode[]).map((value) => {
+            const active = orderMode === value;
+            return (
+              <AnimatedPressable
+                key={value}
+                style={[styles.segmentBtn, active && styles.segmentBtnActive]}
+                onPress={() => setOrderMode(value)}
+              >
+                <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{value.toUpperCase()}</Text>
+              </AnimatedPressable>
+            );
+          })}
+        </View>
+
+        {!eligibility.ok && (
+          <View style={styles.alertCard}>
+            <Ionicons name="alert-circle-outline" size={16} color="#ff9d9d" />
+            <Text style={styles.alertText}>{eligibility.message}</Text>
+          </View>
+        )}
+
+        <Text style={styles.label}>Quantity</Text>
+        <TextInput
+          style={styles.input}
+          value={quantityInput}
+          onChangeText={(value) => setQuantityInput(sanitizeTradeQuantityInput(value))}
+          keyboardType="number-pad"
+          placeholder="1"
+          placeholderTextColor={Colors.textMuted}
+        />
+
+        {orderMode === 'limit' && (
+          <>
+            <Text style={styles.label}>Limit price (GBP)</Text>
+            <TextInput
+              style={styles.input}
+              value={limitPriceInput}
+              onChangeText={(value) => setLimitPriceInput(sanitizeTradePriceInput(value))}
+              keyboardType="decimal-pad"
+              placeholder={marketPrice.toFixed(2)}
+              placeholderTextColor={Colors.textMuted}
+            />
+          </>
+        )}
+
+        <View style={styles.summaryCard}>
+          <View style={styles.summaryRow}>
+            <Text style={styles.summaryLabel}>Execution price</Text>
+            <Text style={styles.summaryValue}>{formatFromFiat(quote.executionPrice, 'GBP', { displayMode: 'fiat' })}</Text>
+          </View>
+          <View style={styles.summaryRow}>
+            <Text style={styles.summaryLabel}>Gross</Text>
+            <Text style={styles.summaryValue}>{formatFromFiat(quote.grossValue, 'GBP', { displayMode: 'fiat' })}</Text>
+          </View>
+          <View style={styles.summaryRow}>
+            <Text style={styles.summaryLabel}>Fee (0.5%)</Text>
+            <Text style={styles.summaryValue}>{formatFromFiat(quote.fee, 'GBP', { displayMode: 'fiat' })}</Text>
+          </View>
+          <View style={[styles.summaryRow, styles.summaryRowTotal]}>
+            <Text style={styles.summaryTotalLabel}>{side === 'buy' ? 'Total Cost' : 'Net Receive'}</Text>
+            <Text style={styles.summaryTotalValue}>{formatFromFiat(quote.netValue, 'GBP')}</Text>
+          </View>
+        </View>
+
+        <AnimatedPressable
+          style={[styles.submitBtn, !canSubmit && styles.submitBtnDisabled]}
+          disabled={!canSubmit}
+          onPress={handleSubmit}
+          activeOpacity={0.9}
+        >
+          <Text style={styles.submitText}>{orderMode === 'limit' ? 'Place Limit Order' : `Execute ${side.toUpperCase()}`}</Text>
+        </AnimatedPressable>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: Colors.background,
+  },
+  header: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  backBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#272727',
+    backgroundColor: '#121212',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    color: Colors.textPrimary,
+    fontSize: 17,
+    fontFamily: 'Inter_700Bold',
+  },
+  content: {
+    paddingHorizontal: 16,
+    paddingBottom: 24,
+  },
+  assetTitle: {
+    color: Colors.textPrimary,
+    fontSize: 23,
+    fontFamily: 'Inter_700Bold',
+  },
+  assetMeta: {
+    marginTop: 4,
+    color: Colors.textMuted,
+    fontSize: 12,
+    fontFamily: 'Inter_500Medium',
+  },
+  segmentRow: {
+    marginTop: 12,
+    flexDirection: 'row',
+    gap: 8,
+  },
+  segmentBtn: {
+    flex: 1,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#2f2f2f',
+    backgroundColor: '#151515',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 9,
+  },
+  segmentBtnActive: {
+    borderColor: '#4ECDC4',
+    backgroundColor: '#17302b',
+  },
+  segmentText: {
+    color: Colors.textSecondary,
+    fontSize: 11,
+    fontFamily: 'Inter_700Bold',
+  },
+  segmentTextActive: {
+    color: '#8de5dc',
+  },
+  alertCard: {
+    marginTop: 12,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: '#4a2d2d',
+    backgroundColor: '#221515',
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  alertText: {
+    flex: 1,
+    color: '#ff9d9d',
+    fontSize: 12,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  label: {
+    marginTop: 13,
+    marginBottom: 6,
+    color: Colors.textSecondary,
+    fontSize: 11,
+    fontFamily: 'Inter_700Bold',
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  input: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#2e2e2e',
+    backgroundColor: '#111111',
+    color: Colors.textPrimary,
+    fontSize: 16,
+    fontFamily: 'Inter_600SemiBold',
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+  },
+  summaryCard: {
+    marginTop: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#2a2a2a',
+    backgroundColor: '#101010',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 5,
+  },
+  summaryLabel: {
+    color: Colors.textMuted,
+    fontSize: 12,
+    fontFamily: 'Inter_500Medium',
+  },
+  summaryValue: {
+    color: Colors.textPrimary,
+    fontSize: 12,
+    fontFamily: 'Inter_700Bold',
+  },
+  summaryRowTotal: {
+    marginTop: 4,
+    borderTopWidth: 1,
+    borderTopColor: '#242424',
+    paddingTop: 10,
+  },
+  summaryTotalLabel: {
+    color: Colors.textPrimary,
+    fontSize: 13,
+    fontFamily: 'Inter_700Bold',
+  },
+  summaryTotalValue: {
+    color: Colors.textPrimary,
+    fontSize: 14,
+    fontFamily: 'Inter_800ExtraBold',
+  },
+  submitBtn: {
+    marginTop: 14,
+    borderRadius: 12,
+    backgroundColor: Colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+  },
+  submitBtnDisabled: {
+    opacity: 0.45,
+  },
+  submitText: {
+    color: Colors.background,
+    fontSize: 13,
+    fontFamily: 'Inter_700Bold',
+  },
+  emptyWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyText: {
+    color: Colors.textSecondary,
+    fontSize: 14,
+    fontFamily: 'Inter_500Medium',
+  },
+});

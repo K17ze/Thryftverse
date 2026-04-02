@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import {
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
   ScrollView,
   StatusBar,
   Platform,
@@ -22,19 +23,62 @@ import Reanimated, {
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../constants/colors';
-import { useNavigation } from '@react-navigation/native';
+import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
+import { RootStackParamList } from '../navigation/types';
+import { useStore } from '../store/useStore';
+import { useBackendData } from '../context/BackendDataContext';
 
 const { height, width } = Dimensions.get('window');
 const SNAP_HALF = height * 0.5;
 const SNAP_FULL = height * 0.1;
 
+type SortOption = 'Recommended' | 'Newest' | 'Price: Low to High' | 'Price: High to Low';
+type ConditionOption = 'Any' | 'New with tags' | 'Very good' | 'Good' | 'Satisfactory';
+type FilterRoute = RouteProp<RootStackParamList, 'Filter'>;
+
+const toKey = (value: string) => value.trim().toLowerCase();
+
+function getSubcategoryToken(categoryId: string, subcategoryId?: string, title?: string) {
+  if (subcategoryId) {
+    return subcategoryId
+      .toLowerCase()
+      .replace(/^[^-]+-/, '')
+      .replace(/-/g, ' ')
+      .trim();
+  }
+
+  if (!title) {
+    return '';
+  }
+
+  const loweredTitle = title.toLowerCase().replace(/["']/g, '').trim();
+  if (loweredTitle.startsWith('all ')) {
+    return '';
+  }
+
+  const cleanedCategoryId = categoryId.toLowerCase();
+  if (loweredTitle.startsWith(cleanedCategoryId)) {
+    return loweredTitle.slice(cleanedCategoryId.length).trim();
+  }
+
+  return loweredTitle;
+}
+
 export default function FilterScreen() {
   const navigation = useNavigation<any>();
+  const route = useRoute<FilterRoute>();
+  const browseFilters = useStore((state) => state.browseFilters);
+  const updateBrowseFilters = useStore((state) => state.updateBrowseFilters);
+  const { listings } = useBackendData();
 
-  const [activeSort, setActiveSort] = useState('Recommended');
-  const [selectedBrands, setSelectedBrands] = useState<string[]>(['Nike', 'Stüssy']);
-  const [selectedSizes, setSelectedSizes] = useState<string[]>(['M', 'L']);
-  const [selectedCondition, setSelectedCondition] = useState('Any');
+  const categoryId = route.params?.categoryId ?? 'search';
+  const title = route.params?.title;
+  const subcategoryId = route.params?.subcategoryId;
+
+  const [activeSort, setActiveSort] = useState<SortOption>(browseFilters.sort);
+  const [selectedBrands, setSelectedBrands] = useState<string[]>(browseFilters.brands);
+  const [selectedSizes, setSelectedSizes] = useState<string[]>(browseFilters.sizes);
+  const [selectedCondition, setSelectedCondition] = useState<ConditionOption>(browseFilters.condition);
 
   const translateY = useSharedValue(height);
   const contextY = useSharedValue(0);
@@ -79,9 +123,9 @@ export default function FilterScreen() {
     return { opacity };
   });
 
-  const MOCK_BRANDS = ['Nike', 'Adidas', 'Stüssy', 'Carhartt', 'Arc\'teryx', 'Levi\'s'];
+  const MOCK_BRANDS = ['Nike', 'Adidas', 'Stüssy', 'Carhartt', 'Arc\'teryx', 'Levi\'s', 'Off-White', 'Zara'];
   const MOCK_SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
-  const MOCK_CONDITIONS = ['Any', 'New with tags', 'Like new', 'Good', 'Satisfactory'];
+  const MOCK_CONDITIONS: ConditionOption[] = ['Any', 'New with tags', 'Very good', 'Good', 'Satisfactory'];
 
   const toggleBrand = (b: string) => {
     setSelectedBrands(prev => prev.includes(b) ? prev.filter(x => x !== b) : [...prev, b]);
@@ -92,9 +136,70 @@ export default function FilterScreen() {
   };
 
   const getResultsCount = () => {
-    // Dummy random logic for UI feedback
-    const base = 254;
-    return base - (selectedBrands.length * 15) - (selectedSizes.length * 5);
+    const normalizedCategory = toKey(categoryId);
+    const normalizedSubcategory = getSubcategoryToken(categoryId, subcategoryId, title);
+    const query = browseFilters.query.trim().toLowerCase();
+    const selectedBrandKeys = new Set(selectedBrands.map((brand) => brand.toLowerCase()));
+    const selectedSizeKeys = new Set(selectedSizes.map((size) => size.toLowerCase()));
+
+    return listings.filter((listing) => {
+      if (normalizedCategory !== 'search' && listing.category.toLowerCase() !== normalizedCategory) {
+        return false;
+      }
+
+      if (normalizedCategory !== 'search' && normalizedSubcategory) {
+        if (!listing.subcategory.toLowerCase().includes(normalizedSubcategory)) {
+          return false;
+        }
+      }
+
+      if (query) {
+        const searchable = [
+          listing.title,
+          listing.brand,
+          listing.description,
+          listing.category,
+          listing.subcategory,
+        ]
+          .join(' ')
+          .toLowerCase();
+
+        if (!searchable.includes(query)) {
+          return false;
+        }
+      }
+
+      if (selectedBrandKeys.size > 0 && !selectedBrandKeys.has(listing.brand.toLowerCase())) {
+        return false;
+      }
+
+      if (selectedSizeKeys.size > 0 && !selectedSizeKeys.has(listing.size.toLowerCase())) {
+        return false;
+      }
+
+      if (selectedCondition !== 'Any' && listing.condition !== selectedCondition) {
+        return false;
+      }
+
+      return true;
+    }).length;
+  };
+
+  const handleClear = () => {
+    setActiveSort('Recommended');
+    setSelectedBrands([]);
+    setSelectedSizes([]);
+    setSelectedCondition('Any');
+  };
+
+  const handleApply = () => {
+    updateBrowseFilters({
+      sort: activeSort,
+      brands: selectedBrands,
+      sizes: selectedSizes,
+      condition: selectedCondition,
+    });
+    closeBottomSheet();
   };
 
   return (
@@ -112,9 +217,9 @@ export default function FilterScreen() {
 
           <View style={styles.header}>
             <Text style={styles.headerTitle}>Filter & Sort</Text>
-            <TouchableOpacity hitSlop={15} onPress={() => { setSelectedBrands([]); setSelectedSizes([]); setSelectedCondition('Any'); }} activeOpacity={0.8}>
+            <AnimatedPressable hitSlop={15} onPress={handleClear} activeOpacity={0.8}>
               <Text style={styles.clearText}>Clear</Text>
-            </TouchableOpacity>
+            </AnimatedPressable>
           </View>
 
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
@@ -122,15 +227,15 @@ export default function FilterScreen() {
         {/* Sort Section */}
         <Text style={styles.sectionHeading}>Sort By</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.hScroll}>
-          {['Recommended', 'Newest', 'Price: Low to High', 'Price: High to Low'].map(s => (
-            <TouchableOpacity 
+          {(['Recommended', 'Newest', 'Price: Low to High', 'Price: High to Low'] as SortOption[]).map((s) => (
+            <AnimatedPressable 
               key={s} 
               style={[styles.chip, activeSort === s && styles.chipActive]}
               activeOpacity={0.8}
               onPress={() => setActiveSort(s)}
             >
               <Text style={[styles.chipText, activeSort === s && styles.chipTextActive]}>{s}</Text>
-            </TouchableOpacity>
+            </AnimatedPressable>
           ))}
         </ScrollView>
 
@@ -139,20 +244,20 @@ export default function FilterScreen() {
         {/* Brand Section */}
         <View style={styles.sectionHeaderRow}>
           <Text style={styles.sectionHeading}>Brand</Text>
-          <TouchableOpacity activeOpacity={0.7}><Text style={styles.seeAllText}>See all</Text></TouchableOpacity>
+          <AnimatedPressable activeOpacity={0.7}><Text style={styles.seeAllText}>See all</Text></AnimatedPressable>
         </View>
         <View style={styles.wrapContainer}>
           {MOCK_BRANDS.map(b => {
             const isActive = selectedBrands.includes(b);
             return (
-              <TouchableOpacity
+              <AnimatedPressable
                 key={b}
                 style={[styles.chip, isActive && styles.chipActive]}
                 activeOpacity={0.8}
                 onPress={() => toggleBrand(b)}
               >
                 <Text style={[styles.chipText, isActive && styles.chipTextActive]}>{b}</Text>
-              </TouchableOpacity>
+              </AnimatedPressable>
             );
           })}
         </View>
@@ -165,14 +270,14 @@ export default function FilterScreen() {
           {MOCK_SIZES.map(s => {
             const isActive = selectedSizes.includes(s);
             return (
-              <TouchableOpacity
+              <AnimatedPressable
                 key={s}
                 style={[styles.chip, styles.sizeChip, isActive && styles.chipActive]}
                 activeOpacity={0.8}
                 onPress={() => toggleSize(s)}
               >
                 <Text style={[styles.chipText, isActive && styles.chipTextActive]}>{s}</Text>
-              </TouchableOpacity>
+              </AnimatedPressable>
             );
           })}
         </View>
@@ -183,22 +288,22 @@ export default function FilterScreen() {
         <Text style={styles.sectionHeading}>Condition</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.hScroll}>
           {MOCK_CONDITIONS.map(c => (
-            <TouchableOpacity 
+            <AnimatedPressable 
               key={c} 
               style={[styles.chip, selectedCondition === c && styles.chipActive]}
               activeOpacity={0.8}
               onPress={() => setSelectedCondition(c)}
             >
               <Text style={[styles.chipText, selectedCondition === c && styles.chipTextActive]}>{c}</Text>
-            </TouchableOpacity>
+            </AnimatedPressable>
           ))}
         </ScrollView>
 
             {/* Sticky Bottom Action */}
             <View style={styles.footer}>
-              <TouchableOpacity style={styles.applyBtn} onPress={closeBottomSheet} activeOpacity={0.9}>
+              <AnimatedPressable style={styles.applyBtn} onPress={handleApply} activeOpacity={0.9}>
                 <Text style={styles.applyBtnText}>Show {getResultsCount()} items</Text>
-              </TouchableOpacity>
+              </AnimatedPressable>
             </View>
           </ScrollView>
         </Reanimated.View>

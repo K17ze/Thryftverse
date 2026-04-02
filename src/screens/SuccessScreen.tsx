@@ -1,5 +1,12 @@
 import React, { useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, StatusBar, SafeAreaView } from 'react-native';
+import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import { View,
+  Text,
+  StyleSheet,
+  StatusBar,
+  SafeAreaView
+} from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../constants/colors';
@@ -26,21 +33,21 @@ export default function SuccessScreen() {
       </View>
 
       <View style={styles.footer}>
-        <TouchableOpacity 
+        <AnimatedPressable 
           style={styles.primaryBtn} 
           activeOpacity={0.9} 
           onPress={() => navigation.navigate('MyOrders')}
         >
           <Text style={styles.primaryText}>Track Order</Text>
-        </TouchableOpacity>
+        </AnimatedPressable>
         
-        <TouchableOpacity 
+        <AnimatedPressable 
           style={styles.secondaryBtn} 
           activeOpacity={0.8}
           onPress={() => navigation.navigate('MainTabs')}
         >
           <Text style={styles.secondaryText}>Continue Browsing</Text>
-        </TouchableOpacity>
+        </AnimatedPressable>
       </View>
     </SafeAreaView>
   );

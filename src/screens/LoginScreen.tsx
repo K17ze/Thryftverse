@@ -1,5 +1,14 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, StatusBar } from 'react-native';
+import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import { View,
+  Text,
+  StyleSheet,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+  StatusBar
+} from 'react-native';
 import Reanimated, { useSharedValue, useAnimatedStyle, withSequence, withTiming, withSpring, FadeInUp, FadeOutUp, Layout } from 'react-native-reanimated';
 import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -32,11 +41,26 @@ export default function LoginScreen() {
   }));
 
   const handleLogin = () => {
-    if (!email || !password) {
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!normalizedEmail || !password) {
       setErrorMsg('Please fill in both email and password.');
       shake();
       return;
     }
+
+    if (!/^\S+@\S+\.\S+$/.test(normalizedEmail)) {
+      setErrorMsg('Enter a valid email address.');
+      shake();
+      return;
+    }
+
+    if (password.length < 6) {
+      setErrorMsg('Password must be at least 6 characters.');
+      shake();
+      return;
+    }
+
     setErrorMsg('');
     // Navigate straight to MainTabs temporarily (dummy auth)
     login(MY_USER);
@@ -48,9 +72,9 @@ export default function LoginScreen() {
       <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
       
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
-        </TouchableOpacity>
+        </AnimatedPressable>
       </View>
 
       <KeyboardAvoidingView 
@@ -85,12 +109,12 @@ export default function LoginScreen() {
             />
           </View>
 
-          <TouchableOpacity 
+          <AnimatedPressable 
             style={styles.forgotBtn} 
             onPress={() => navigation.navigate('ForgotPassword')}
           >
             <Text style={styles.forgotText}>Forgot password?</Text>
-          </TouchableOpacity>
+          </AnimatedPressable>
         </View>
 
         <View style={styles.footer}>
@@ -106,9 +130,9 @@ export default function LoginScreen() {
           )}
 
           <Reanimated.View style={shakeStyle} layout={Layout.springify()}>
-            <TouchableOpacity style={styles.primaryBtn} onPress={handleLogin} activeOpacity={0.9}>
+            <AnimatedPressable style={styles.primaryBtn} onPress={handleLogin} activeOpacity={0.9}>
               <Text style={styles.primaryText}>Log In</Text>
-            </TouchableOpacity>
+            </AnimatedPressable>
           </Reanimated.View>
         </View>
       </KeyboardAvoidingView>

@@ -1,0 +1,136 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: thryftverse-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-thryftverse}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-thryftverse}
+      POSTGRES_DB: ${POSTGRES_DB:-thryftverse}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-thryftverse} -d ${POSTGRES_DB:-thryftverse}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  redis:
+    image: redis:7-alpine
+    container_name: thryftverse-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  minio:
+    image: quay.io/minio/minio:latest
+    container_name: thryftverse-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: thryftverse-minio-init
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 ${MINIO_ROOT_USER:-minioadmin} ${MINIO_ROOT_PASSWORD:-minioadmin}; do
+        echo 'Waiting for MinIO...';
+        sleep 1;
+      done;
+      mc mb --ignore-existing local/${S3_BUCKET:-thryftverse-media};
+      mc anonymous set download local/${S3_BUCKET:-thryftverse-media};
+      "
+
+  key-service:
+    build:
+      context: ./backend/key-service
+      dockerfile: Dockerfile
+    container_name: thryftverse-key-service
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      PORT: 4100
+      KEY_SERVICE_ALLOWED_KEYS: profile,message,wallet
+      KEY_SERVICE_REGION: ${KEY_SERVICE_REGION:-eu-west}
+      KEY_SERVICE_COUNTRY: ${KEY_SERVICE_COUNTRY:-NL}
+      KEY_SERVICE_MASTER_KEY_B64: ${KEY_SERVICE_MASTER_KEY_B64:-MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
+      KEY_SERVICE_ADMIN_TOKEN: ${KEY_SERVICE_ADMIN_TOKEN:-local-key-admin-token}
+    ports:
+      - "4100:4100"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4100/health').then((r)=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  api:
+    build:
+      context: ./backend/api
+      dockerfile: Dockerfile
+    container_name: thryftverse-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+      minio-init:
+        condition: service_completed_successfully
+      key-service:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: 4000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-thryftverse}:${POSTGRES_PASSWORD:-thryftverse}@postgres:5432/${POSTGRES_DB:-thryftverse}
+      REDIS_URL: redis://redis:6379
+      KEY_SERVICE_URL: http://key-service:4100
+      KEY_SERVICE_ADMIN_TOKEN: ${KEY_SERVICE_ADMIN_TOKEN:-local-key-admin-token}
+      API_SECURITY_ADMIN_TOKEN: ${API_SECURITY_ADMIN_TOKEN:-local-security-admin-token}
+      S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_ENDPOINT: http://localhost:9000
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      S3_BUCKET: ${S3_BUCKET:-thryftverse-media}
+      S3_FORCE_PATH_STYLE: "true"
+      ML_SERVICE_URL: http://ml-service:8000
+    ports:
+      - "4000:4000"
+
+  ml-service:
+    build:
+      context: ./backend/ml-service
+      dockerfile: Dockerfile
+    container_name: thryftverse-ml-service
+    restart: unless-stopped
+    environment:
+      PORT: 8000
+    ports:
+      - "8000:8000"
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:

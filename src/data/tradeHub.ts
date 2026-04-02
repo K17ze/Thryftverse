@@ -33,10 +33,14 @@ export interface SyndicateAsset {
   availableUnits: number;
   unitPriceGBP: number;
   unitPriceStable: number;
+  settlementMode: 'GBP' | 'TVUSD' | 'HYBRID';
+  issuerJurisdiction?: string;
   marketMovePct24h: number;
   holders: number;
   volume24hGBP: number;
   yourUnits: number;
+  avgEntryPriceGBP?: number;
+  realizedProfitGBP?: number;
   isOpen: boolean;
 }
 
@@ -121,6 +125,8 @@ export const MOCK_SYNDICATE_ASSETS: SyndicateAsset[] = [
     availableUnits: 485,
     unitPriceGBP: 1.52,
     unitPriceStable: 1.95,
+    settlementMode: 'HYBRID',
+    issuerJurisdiction: 'GB',
     marketMovePct24h: 6.4,
     holders: 93,
     volume24hGBP: 2140,
@@ -137,6 +143,8 @@ export const MOCK_SYNDICATE_ASSETS: SyndicateAsset[] = [
     availableUnits: 130,
     unitPriceGBP: 2.08,
     unitPriceStable: 2.66,
+    settlementMode: 'TVUSD',
+    issuerJurisdiction: 'EU',
     marketMovePct24h: -2.1,
     holders: 121,
     volume24hGBP: 3180,
@@ -153,6 +161,8 @@ export const MOCK_SYNDICATE_ASSETS: SyndicateAsset[] = [
     availableUnits: 932,
     unitPriceGBP: 0.96,
     unitPriceStable: 1.23,
+    settlementMode: 'GBP',
+    issuerJurisdiction: 'GB',
     marketMovePct24h: 4.2,
     holders: 56,
     volume24hGBP: 1088,
@@ -169,6 +179,8 @@ export const MOCK_SYNDICATE_ASSETS: SyndicateAsset[] = [
     availableUnits: 0,
     unitPriceGBP: 2.74,
     unitPriceStable: 3.50,
+    settlementMode: 'HYBRID',
+    issuerJurisdiction: 'SG',
     marketMovePct24h: 11.8,
     holders: 149,
     volume24hGBP: 6220,

@@ -1,5 +1,12 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, StatusBar } from 'react-native';
+import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import { View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  StatusBar
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Colors } from '../constants/colors';
 import { Ionicons } from '@expo/vector-icons';
@@ -24,9 +31,9 @@ export default function PersonalisationScreen() {
       <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
 
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
-        </TouchableOpacity>
+        </AnimatedPressable>
         <Text style={styles.hugeTitle}>Personalisation</Text>
       </View>
 
@@ -40,7 +47,7 @@ export default function PersonalisationScreen() {
         {/* Gender Preference Pills */}
         <View style={styles.genderRow}>
           {genderOptions.map(g => (
-            <TouchableOpacity
+            <AnimatedPressable
               key={g}
               style={[styles.genderPill, genderFilter.includes(g) && styles.genderPillActive]}
               onPress={() => toggleGender(g)}
@@ -48,7 +55,7 @@ export default function PersonalisationScreen() {
               <Text style={[styles.genderPillText, genderFilter.includes(g) && styles.genderPillTextActive]}>
                 {g}
               </Text>
-            </TouchableOpacity>
+            </AnimatedPressable>
           ))}
         </View>
 
@@ -61,7 +68,7 @@ export default function PersonalisationScreen() {
             { icon: 'people-outline', label: 'Members', sub: 'Sellers you follow' },
           ].map((row, idx) => (
             <View key={row.label}>
-              <TouchableOpacity style={styles.prefRow}>
+              <AnimatedPressable style={styles.prefRow}>
                 <View style={styles.prefIcon}>
                   <Ionicons name={row.icon as any} size={20} color={Colors.textPrimary} />
                 </View>
@@ -70,7 +77,7 @@ export default function PersonalisationScreen() {
                   <Text style={styles.prefSub}>{row.sub}</Text>
                 </View>
                 <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
-              </TouchableOpacity>
+              </AnimatedPressable>
               {idx < 2 && <View style={styles.divider} />}
             </View>
           ))}

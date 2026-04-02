@@ -1,13 +1,14 @@
 import React from 'react';
 import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import {
   View,
   Text,
   StyleSheet,
   SafeAreaView,
-  TouchableOpacity,
   ScrollView,
   StatusBar,
-  Share,
+  Share
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { StackScreenProps } from '@react-navigation/stack';
@@ -43,9 +44,9 @@ export default function InviteFriendsScreen({ navigation }: Props) {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={BG} />
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
+        <AnimatedPressable onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={TEXT} />
-        </TouchableOpacity>
+        </AnimatedPressable>
         <Text style={styles.headerTitle}>Invite friends</Text>
         <View style={{ width: 24 }} />
       </View>
@@ -67,10 +68,10 @@ export default function InviteFriendsScreen({ navigation }: Props) {
             <Text style={styles.linkText} numberOfLines={1}>
               thryftverse.app/invite/user123
             </Text>
-            <TouchableOpacity style={styles.copyBtn}>
+            <AnimatedPressable style={styles.copyBtn}>
               <Ionicons name="copy-outline" size={16} color={TEAL} />
               <Text style={styles.copyText}>Copy</Text>
-            </TouchableOpacity>
+            </AnimatedPressable>
           </View>
         </View>
 
@@ -82,12 +83,12 @@ export default function InviteFriendsScreen({ navigation }: Props) {
             { icon: 'mail-outline', label: 'Email', color: TEAL },
             { icon: 'share-social-outline', label: 'More', color: MUTED },
           ].map(s => (
-            <TouchableOpacity key={s.label} style={styles.shareIconBtn} onPress={handleShare}>
+            <AnimatedPressable key={s.label} style={styles.shareIconBtn} onPress={handleShare}>
               <View style={[styles.shareIconCircle, { borderColor: s.color }]}>
                 <Ionicons name={s.icon as any} size={22} color={s.color} />
               </View>
               <Text style={styles.shareIconLabel}>{s.label}</Text>
-            </TouchableOpacity>
+            </AnimatedPressable>
           ))}
         </View>
 
@@ -101,9 +102,9 @@ export default function InviteFriendsScreen({ navigation }: Props) {
                   <Text style={styles.avatarText}>{contact.initials}</Text>
                 </View>
                 <Text style={styles.contactName}>{contact.name}</Text>
-                <TouchableOpacity style={styles.inviteBtn} onPress={handleShare}>
+                <AnimatedPressable style={styles.inviteBtn} onPress={handleShare}>
                   <Text style={styles.inviteBtnText}>Invite</Text>
-                </TouchableOpacity>
+                </AnimatedPressable>
               </View>
               {idx < MOCK_CONTACTS.length - 1 && <View style={styles.divider} />}
             </View>

@@ -17,12 +17,17 @@ import AppNavigator from './src/navigation/AppNavigator';
 import { Colors } from './src/constants/colors';
 import { ToastProvider } from './src/context/ToastContext';
 import { TabScrollProvider } from './src/context/TabScrollContext';
+import { CurrencyProvider } from './src/context/CurrencyContext';
+import { BackendDataProvider } from './src/context/BackendDataContext';
 import { ToastContainer } from './src/components/Toast';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
+import { BrandedSplash } from './src/components/BrandedSplash';
 
 SplashScreen.preventAutoHideAsync();
 
 export default function App() {
+  const [showBrandedSplash, setShowBrandedSplash] = React.useState(true);
+
   const [fontsLoaded] = useFonts({
     Inter_400Regular,
     Inter_500Medium,
@@ -45,17 +50,25 @@ export default function App() {
     );
   }
 
+  if (showBrandedSplash) {
+    return <BrandedSplash onFinish={() => setShowBrandedSplash(false)} />;
+  }
+
   return (
     <ErrorBoundary>
       <GestureHandlerRootView style={{ flex: 1 }}>
         <SafeAreaProvider>
           <ToastProvider>
-            <TabScrollProvider>
-              <NavigationContainer>
-                <StatusBar style="light" backgroundColor={Colors.background} />
-                <AppNavigator />
-              </NavigationContainer>
-            </TabScrollProvider>
+            <BackendDataProvider>
+              <CurrencyProvider>
+                <TabScrollProvider>
+                  <NavigationContainer>
+                    <StatusBar style="light" backgroundColor={Colors.background} />
+                    <AppNavigator />
+                  </NavigationContainer>
+                </TabScrollProvider>
+              </CurrencyProvider>
+            </BackendDataProvider>
             <ToastContainer />
           </ToastProvider>
         </SafeAreaProvider>

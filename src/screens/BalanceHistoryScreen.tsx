@@ -1,16 +1,18 @@
 import React from 'react';
 import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import {
   View,
   Text,
   StyleSheet,
   SafeAreaView,
-  TouchableOpacity,
   ScrollView,
-  StatusBar,
+  StatusBar
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
+import { useFormattedPrice } from '../hooks/useFormattedPrice';
 
 type Props = StackScreenProps<RootStackParamList, 'BalanceHistory'>;
 
@@ -74,13 +76,15 @@ const colorForType = (type: TxType) => {
 };
 
 export default function BalanceHistoryScreen({ navigation }: Props) {
+  const { formatFromFiat } = useFormattedPrice();
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={BG} />
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
+        <AnimatedPressable onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={TEXT} />
-        </TouchableOpacity>
+        </AnimatedPressable>
         <Text style={styles.headerTitle}>History</Text>
         <View style={{ width: 24 }} />
       </View>
@@ -104,7 +108,7 @@ export default function BalanceHistoryScreen({ navigation }: Props) {
                       styles.txAmount,
                       { color: tx.amount > 0 ? TEAL : '#FF6B6B' }
                     ]}>
-                      {tx.amount > 0 ? '+' : ''}£{Math.abs(tx.amount).toFixed(2)}
+                      {tx.amount > 0 ? '+' : ''}{formatFromFiat(Math.abs(tx.amount), 'GBP', { displayMode: 'fiat' })}
                     </Text>
                   </View>
                   {idx < group.items.length - 1 && <View style={styles.divider} />}

@@ -1,20 +1,23 @@
 import React, { useState } from 'react';
 import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import {
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
   TextInput,
   ScrollView,
   StatusBar,
   KeyboardAvoidingView,
-  Platform,
+  Platform
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../constants/colors';
 import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
+import { useStore } from '../store/useStore';
+import { useToast } from '../context/ToastContext';
 
 type Props = StackScreenProps<RootStackParamList, 'AddAddress'>;
 
@@ -23,12 +26,20 @@ export default function AddAddressScreen({ navigation }: Props) {
   const [street, setStreet] = useState('');
   const [city, setCity] = useState('');
   const [postcode, setPostcode] = useState('');
+  const saveAddress = useStore((state) => state.saveAddress);
+  const { show } = useToast();
 
   const isFormValid = name.trim() && street.trim() && city.trim() && postcode.trim();
 
   const handleSave = () => {
     if (isFormValid) {
-      // Dummy save logic, just go back to Checkout
+      saveAddress({
+        name: name.trim(),
+        street: street.trim(),
+        city: city.trim(),
+        postcode: postcode.trim().toUpperCase(),
+      });
+      show('Delivery address saved', 'success');
       navigation.goBack();
     }
   };
@@ -38,9 +49,9 @@ export default function AddAddressScreen({ navigation }: Props) {
       <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
 
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.8}>
+        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.8}>
           <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
-        </TouchableOpacity>
+        </AnimatedPressable>
         <Text style={styles.headerTitle}>Delivery Address</Text>
         <View style={{ width: 44 }} />
       </View>
@@ -113,22 +124,22 @@ export default function AddAddressScreen({ navigation }: Props) {
           </View>
 
           {/* Dummy Default Toggle */}
-          <TouchableOpacity style={styles.defaultToggleRow} activeOpacity={0.9}>
+          <AnimatedPressable style={styles.defaultToggleRow} activeOpacity={0.9}>
             <Ionicons name="checkmark-circle" size={24} color={Colors.textPrimary} />
             <Text style={styles.defaultToggleText}>Set as default delivery address</Text>
-          </TouchableOpacity>
+          </AnimatedPressable>
 
         </ScrollView>
 
         <View style={styles.footer}>
-          <TouchableOpacity 
+          <AnimatedPressable 
             style={[styles.saveBtn, !isFormValid && styles.saveBtnDisabled]} 
             onPress={handleSave}
             disabled={!isFormValid}
             activeOpacity={0.9}
           >
             <Text style={[styles.saveBtnText, !isFormValid && styles.saveBtnTextDisabled]}>Save Address</Text>
-          </TouchableOpacity>
+          </AnimatedPressable>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>

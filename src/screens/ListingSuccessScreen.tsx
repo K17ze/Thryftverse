@@ -1,12 +1,13 @@
 import React from 'react';
 import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import {
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
   StatusBar,
   ScrollView,
-  Platform,
+  Platform
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -14,12 +15,16 @@ import { Colors } from '../constants/colors';
 import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
 import { Confetti } from '../components/Confetti';
+import { useFormattedPrice } from '../hooks/useFormattedPrice';
 
 type Props = StackScreenProps<RootStackParamList, 'ListingSuccess'>;
 
 const TEAL = '#4ECDC4';
 
 export default function ListingSuccessScreen({ navigation }: Props) {
+  const { formatFromFiat } = useFormattedPrice();
+  const bumpFeeLabel = formatFromFiat(1.99, 'GBP', { displayMode: 'fiat' });
+
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
@@ -47,13 +52,13 @@ export default function ListingSuccessScreen({ navigation }: Props) {
             Push your item to the top of the feed and search results for 3 days.
           </Text>
 
-          <TouchableOpacity style={styles.bumpBtn} activeOpacity={0.9}>
-            <Text style={styles.bumpBtnText}>Promote for £1.99</Text>
-          </TouchableOpacity>
+          <AnimatedPressable style={styles.bumpBtn} activeOpacity={0.9}>
+            <Text style={styles.bumpBtnText}>Promote for {bumpFeeLabel}</Text>
+          </AnimatedPressable>
         </View>
 
         {/* Standard Actions */}
-        <TouchableOpacity 
+        <AnimatedPressable 
           style={styles.actionRowBtn} 
           activeOpacity={0.8}
           onPress={() => navigation.navigate('MainTabs')} // Dummy routing to view listing later
@@ -65,9 +70,9 @@ export default function ListingSuccessScreen({ navigation }: Props) {
             <Text style={styles.actionText}>View my listing</Text>
           </View>
           <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
-        </TouchableOpacity>
+        </AnimatedPressable>
 
-        <TouchableOpacity 
+        <AnimatedPressable 
           style={styles.actionRowBtn} 
           activeOpacity={0.8}
           onPress={() => navigation.replace('MainTabs')}
@@ -79,7 +84,7 @@ export default function ListingSuccessScreen({ navigation }: Props) {
             <Text style={styles.actionText}>Back to Home</Text>
           </View>
           <Ionicons name="arrow-forward" size={16} color={Colors.textMuted} />
-        </TouchableOpacity>
+        </AnimatedPressable>
 
       </ScrollView>
     </SafeAreaView>

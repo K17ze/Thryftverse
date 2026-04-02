@@ -1,11 +1,12 @@
 import React from 'react';
 import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import {
   View,
   Text,
   StyleSheet,
   FlatList,
-  TouchableOpacity,
-  StatusBar,
+  StatusBar
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -58,6 +59,7 @@ function relativeTime(isoTs: string) {
 export default function MarketLedgerScreen() {
   const navigation = useNavigation<NavT>();
   const entries = useStore((state) => state.marketLedger);
+  const syndicateRuntime = useStore((state) => state.syndicateRuntime);
 
   const [filter, setFilter] = React.useState<LedgerFilter>('ALL');
 
@@ -75,15 +77,10 @@ export default function MarketLedgerScreen() {
     [filteredEntries]
   );
 
-  const realizedSyndicatePL = React.useMemo(() => {
-    const sell = filteredEntries
-      .filter((entry) => entry.action === 'sell-units')
-      .reduce((sum, entry) => sum + entry.amountGBP, 0);
-    const buy = filteredEntries
-      .filter((entry) => entry.action === 'buy-units')
-      .reduce((sum, entry) => sum + entry.amountGBP, 0);
-    return sell - buy;
-  }, [filteredEntries]);
+  const realizedSyndicatePL = React.useMemo(
+    () => Object.values(syndicateRuntime).reduce((sum, runtime) => sum + runtime.realizedProfitGBP, 0),
+    [syndicateRuntime]
+  );
 
   const netCashflow = React.useMemo(
     () => filteredEntries.reduce((sum, entry) => sum + getEntryCashflow(entry), 0),
@@ -143,9 +140,9 @@ export default function MarketLedgerScreen() {
       <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
 
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.85}>
+        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.85}>
           <Ionicons name="arrow-back" size={22} color={Colors.textPrimary} />
-        </TouchableOpacity>
+        </AnimatedPressable>
 
         <View>
           <Text style={styles.headerLabel}>MARKET LEDGER</Text>
@@ -184,14 +181,14 @@ export default function MarketLedgerScreen() {
         {(['ALL', 'AUCTION', 'SYNDICATE'] as const).map((nextFilter) => {
           const active = filter === nextFilter;
           return (
-            <TouchableOpacity
+            <AnimatedPressable
               key={nextFilter}
               style={[styles.filterChip, active && styles.filterChipActive]}
               onPress={() => setFilter(nextFilter)}
               activeOpacity={0.9}
             >
               <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>{nextFilter}</Text>
-            </TouchableOpacity>
+            </AnimatedPressable>
           );
         })}
       </View>

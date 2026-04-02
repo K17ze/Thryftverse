@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
+import {
+  AnimatedPressable } from '../components/AnimatedPressable';
 import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  TextInput, 
-  TouchableOpacity, 
-  ScrollView, 
-  StatusBar, 
+  View,
+  Text,
+  StyleSheet,
+  TextInput,
+  ScrollView,
+  StatusBar,
   Dimensions,
   KeyboardAvoidingView,
   Platform
@@ -20,15 +21,22 @@ import { Alert, Modal } from 'react-native';
 import { useStore } from '../store/useStore';
 import { SortablePhotoStrip } from '../components/SortablePhotoStrip';
 import { BottomSheetPicker } from '../components/BottomSheetPicker';
+import { CURRENCIES } from '../constants/currencies';
+import { useCurrencyPref } from '../hooks/useCurrencyPref';
+import { sanitizeDecimalInput, sanitizeIntegerInput } from '../utils/currencyAuthoringFlows';
+import { buildCreateSyndicatePrefillFromSell } from '../utils/syndicatePrefill';
 
 const CONDITIONS = ['New with tags', 'Very good', 'Good', 'Satisfactory'];
 const SIZES = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', 'One size'];
 const BRANDS = ['Nike', 'Adidas', 'Zara', 'H&M', 'Ralph Lauren', 'Off-White', 'Stone Island', 'Stüssy', 'Other'];
+const OFFERING_WINDOWS_HOURS = [24, 48, 72];
 
 const { width } = Dimensions.get('window');
 
 export default function SellScreen() {
   const navigation = useNavigation<any>();
+  const { currencyCode } = useCurrencyPref();
+  const currencySymbol = CURRENCIES[currencyCode].symbol;
   
   const [pickerMode, setPickerMode] = useState<'Brand' | 'Size' | 'Condition' | null>(null);
 
@@ -36,6 +44,11 @@ export default function SellScreen() {
   const [desc, setDesc] = useState('');
   const [price, setPrice] = useState('');
   const [photos, setPhotos] = useState<string[]>([]);
+  const [syndicateEnabled, setSyndicateEnabled] = useState(false);
+  const [shareCountInput, setShareCountInput] = useState('100');
+  const [sharePriceInput, setSharePriceInput] = useState('');
+  const [offeringWindowHours, setOfferingWindowHours] = useState(24);
+  const [authPhotos, setAuthPhotos] = useState<string[]>([]);
   const [errorMsg, setErrorMsg] = useState('');
   
   const sellDraft = useStore(state => state.sellDraft);
@@ -57,24 +70,92 @@ export default function SellScreen() {
     transform: [{ translateX: shakeOffset.value }]
   }));
 
+  React.useEffect(() => {
+    if (!syndicateEnabled || sharePriceInput) {
+      return;
+    }
+
+    const listingPrice = Number(sanitizeDecimalInput(price));
+    const shareCount = Math.max(1, Math.floor(Number(shareCountInput)));
+    if (Number.isFinite(listingPrice) && listingPrice > 0 && Number.isFinite(shareCount) && shareCount > 0) {
+      setSharePriceInput((listingPrice / shareCount).toFixed(2));
+    }
+  }, [price, shareCountInput, sharePriceInput, syndicateEnabled]);
+
   const handleCameraPress = () => {
     // Fake expo-image-picker by adding 3 mock product photos
-    setPhotos([
+    const samplePhotos = [
       'https://images.unsplash.com/photo-1542272604-787c3835535d?w=400&q=80', // jeans
       'https://images.unsplash.com/photo-1516257984-b1b4d707412e?w=400&q=80', // detail
       'https://images.unsplash.com/photo-1550614000-4b95fcd7dbfc?w=400&q=80', // tag
-    ]);
+    ];
+    setPhotos(samplePhotos);
+    if (syndicateEnabled) {
+      setAuthPhotos(samplePhotos.slice(0, 2));
+    }
   };
 
   const handlePublish = () => {
-    if (!title || !price || !sellDraft.categoryId) {
-      setErrorMsg('Please provide a title, price, and category.');
+    const trimmedTitle = title.trim();
+    const trimmedDescription = desc.trim();
+    const numericPrice = Number(sanitizeDecimalInput(price));
+
+    if (photos.length === 0) {
+      setErrorMsg('Add at least one photo before publishing.');
       shake();
       return;
     }
+
+    if (!trimmedTitle || !sellDraft.categoryId) {
+      setErrorMsg('Please provide a title and category.');
+      shake();
+      return;
+    }
+
+    if (!sellDraft.size || !sellDraft.condition) {
+      setErrorMsg('Please choose both size and condition.');
+      shake();
+      return;
+    }
+
+    if (!trimmedDescription || trimmedDescription.length < 10) {
+      setErrorMsg('Add a description with at least 10 characters.');
+      shake();
+      return;
+    }
+
+    if (!Number.isFinite(numericPrice) || numericPrice <= 0) {
+      setErrorMsg('Enter a valid price greater than 0.');
+      shake();
+      return;
+    }
+
+    if (syndicateEnabled) {
+      const prefillResult = buildCreateSyndicatePrefillFromSell({
+        shareCountInput,
+        sharePriceInput,
+        offeringWindowHours,
+        authPhotos,
+      });
+
+      if (!prefillResult.ok) {
+        setErrorMsg(prefillResult.error ?? 'Unable to prepare syndicate listing.');
+        shake();
+        return;
+      }
+
+      setErrorMsg('');
+      navigation.replace('CreateSyndicate', prefillResult.params);
+      return;
+    }
+
     setErrorMsg('');
-    // Fake publish
+
     navigation.replace('ListingSuccess');
+  };
+
+  const handlePriceChange = (value: string) => {
+    setPrice(sanitizeDecimalInput(value));
   };
 
   const getPickerOptions = () => {
@@ -108,18 +189,18 @@ export default function SellScreen() {
       {/* ── Scan Header / Upload Area ── */}
       <View style={styles.scanHeader}>
         <View style={styles.headerTop}>
-          <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.goBack()} activeOpacity={0.8}>
+          <AnimatedPressable style={styles.iconBtn} onPress={() => navigation.goBack()} activeOpacity={0.8}>
             <Ionicons name="close" size={28} color={Colors.textPrimary} />
-          </TouchableOpacity>
+          </AnimatedPressable>
           <Text style={styles.headerTitle}>Scan Item</Text>
-          <TouchableOpacity style={styles.iconBtn} activeOpacity={0.8}>
+          <AnimatedPressable style={styles.iconBtn} activeOpacity={0.8}>
             <Ionicons name="flash-outline" size={24} color={Colors.textPrimary} />
-          </TouchableOpacity>
+          </AnimatedPressable>
         </View>
 
         {/* Giant Camera-Centric Upload Box or Photo Strip */}
         {photos.length === 0 ? (
-          <TouchableOpacity 
+          <AnimatedPressable 
             style={styles.giantCameraBox} 
             activeOpacity={0.9}
             onPress={handleCameraPress}
@@ -129,7 +210,7 @@ export default function SellScreen() {
             </View>
             <Text style={styles.cameraText}>Take a photo or upload</Text>
             <Text style={styles.cameraSubtext}>Clear photos sell 3x faster</Text>
-          </TouchableOpacity>
+          </AnimatedPressable>
         ) : (
           <SortablePhotoStrip 
             photos={photos} 
@@ -174,7 +255,7 @@ export default function SellScreen() {
 
           {/* ── Pickers (Floating Cards) ── */}
           <View style={styles.cardGroup}>
-            <TouchableOpacity 
+            <AnimatedPressable 
               style={styles.pickerRow} 
               activeOpacity={0.7} 
               onPress={() => navigation.navigate('CategoryTree', { categoryPrefix: 'Sell' })}
@@ -186,11 +267,11 @@ export default function SellScreen() {
                 </Text>
                 <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
               </View>
-            </TouchableOpacity>
+            </AnimatedPressable>
             
             <View style={styles.divider} />
 
-            <TouchableOpacity 
+            <AnimatedPressable 
               style={styles.pickerRow} 
               activeOpacity={0.7}
               onPress={() => setPickerMode('Brand')}
@@ -202,11 +283,11 @@ export default function SellScreen() {
                 </Text>
                 <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
               </View>
-            </TouchableOpacity>
+            </AnimatedPressable>
             
             <View style={styles.divider} />
 
-            <TouchableOpacity 
+            <AnimatedPressable 
               style={styles.pickerRow} 
               activeOpacity={0.7}
               onPress={() => setPickerMode('Size')}
@@ -218,11 +299,11 @@ export default function SellScreen() {
                 </Text>
                 <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
               </View>
-            </TouchableOpacity>
+            </AnimatedPressable>
             
             <View style={styles.divider} />
 
-            <TouchableOpacity 
+            <AnimatedPressable 
               style={styles.pickerRow} 
               activeOpacity={0.7}
               onPress={() => setPickerMode('Condition')}
@@ -234,22 +315,128 @@ export default function SellScreen() {
                 </Text>
                 <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
               </View>
-            </TouchableOpacity>
+            </AnimatedPressable>
           </View>
 
           {/* ── Price Input ── */}
           <Text style={[styles.sectionHeading, { marginTop: 24 }]}>Pricing</Text>
           
           <View style={styles.pricePillBox}>
-            <Text style={styles.priceLabel}>£</Text>
+            <Text style={styles.priceLabel}>{currencySymbol}</Text>
             <TextInput 
               style={styles.priceInputContent} 
               placeholder="0.00" 
               placeholderTextColor="#555"
               value={price} 
-              onChangeText={setPrice} 
+              onChangeText={handlePriceChange} 
               keyboardType="decimal-pad"
             />
+          </View>
+
+          <Text style={styles.priceCurrencyHint}>Listing currency: {currencyCode}</Text>
+
+          <Text style={[styles.sectionHeading, { marginTop: 24 }]}>Syndicate Listing</Text>
+          <View style={styles.syndicateCard}>
+            <View style={styles.syndicateTopRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.syndicateTitle}>Tokenize this item</Text>
+                <Text style={styles.syndicateHint}>Create fractional shares for the Syndicate marketplace.</Text>
+              </View>
+              <View style={styles.syndicateToggleWrap}>
+                <AnimatedPressable
+                  style={[styles.syndicateToggleBtn, !syndicateEnabled && styles.syndicateToggleBtnActive]}
+                  activeOpacity={0.85}
+                  onPress={() => setSyndicateEnabled(false)}
+                >
+                  <Text style={[styles.syndicateToggleText, !syndicateEnabled && styles.syndicateToggleTextActive]}>Off</Text>
+                </AnimatedPressable>
+                <AnimatedPressable
+                  style={[styles.syndicateToggleBtn, syndicateEnabled && styles.syndicateToggleBtnActive]}
+                  activeOpacity={0.85}
+                  onPress={() => {
+                    setSyndicateEnabled(true);
+                    if (authPhotos.length === 0 && photos.length > 0) {
+                      setAuthPhotos(photos.slice(0, 2));
+                    }
+                  }}
+                >
+                  <Text style={[styles.syndicateToggleText, syndicateEnabled && styles.syndicateToggleTextActive]}>On</Text>
+                </AnimatedPressable>
+              </View>
+            </View>
+
+            {syndicateEnabled ? (
+              <View style={styles.syndicateFieldsWrap}>
+                <Text style={styles.inputLabel}>Share count</Text>
+                <TextInput
+                  style={styles.syndicateInput}
+                  value={shareCountInput}
+                  onChangeText={(value) => setShareCountInput(sanitizeIntegerInput(value))}
+                  keyboardType="number-pad"
+                  placeholder="100"
+                  placeholderTextColor="#555"
+                />
+
+                <Text style={styles.inputLabel}>Initial share price ({currencyCode})</Text>
+                <TextInput
+                  style={styles.syndicateInput}
+                  value={sharePriceInput}
+                  onChangeText={(value) => setSharePriceInput(sanitizeDecimalInput(value))}
+                  keyboardType="decimal-pad"
+                  placeholder="0.00"
+                  placeholderTextColor="#555"
+                />
+
+                <Text style={styles.inputLabel}>Offering window</Text>
+                <View style={styles.windowChipsRow}>
+                  {OFFERING_WINDOWS_HOURS.map((hours) => {
+                    const active = offeringWindowHours === hours;
+                    return (
+                      <AnimatedPressable
+                        key={hours}
+                        style={[styles.windowChip, active && styles.windowChipActive]}
+                        onPress={() => setOfferingWindowHours(hours)}
+                        activeOpacity={0.85}
+                      >
+                        <Text style={[styles.windowChipText, active && styles.windowChipTextActive]}>{hours}h</Text>
+                      </AnimatedPressable>
+                    );
+                  })}
+                </View>
+
+                <View style={styles.authRow}>
+                  <View>
+                    <Text style={styles.authTitle}>Authentication photos</Text>
+                    <Text style={styles.authHint}>{authPhotos.length} attached · Required for issuance</Text>
+                  </View>
+                  <View style={styles.authBtnRow}>
+                    <AnimatedPressable
+                      style={styles.authBtn}
+                      activeOpacity={0.85}
+                      onPress={() => {
+                        if (photos.length === 0) {
+                          setErrorMsg('Add listing photos first, then attach auth photos.');
+                          shake();
+                          return;
+                        }
+                        setAuthPhotos(photos.slice(0, Math.min(photos.length, 3)));
+                      }}
+                    >
+                      <Text style={styles.authBtnText}>Use listing</Text>
+                    </AnimatedPressable>
+                    <AnimatedPressable
+                      style={[styles.authBtn, styles.authBtnMuted]}
+                      activeOpacity={0.85}
+                      onPress={() => setAuthPhotos([])}
+                    >
+                      <Text style={[styles.authBtnText, styles.authBtnTextMuted]}>Clear</Text>
+                    </AnimatedPressable>
+                  </View>
+                </View>
+              </View>
+            ) : (
+              <Text style={styles.syndicateHintMuted}>Enable this to route publishing into the Syndicate issuer flow.</Text>
+            )}
           </View>
 
           <View style={{ height: 120 }} />
@@ -269,9 +456,9 @@ export default function SellScreen() {
           </Reanimated.Text>
         )}
         <Reanimated.View style={[shakeStyle, { width: '100%' }]} layout={Layout.springify()}>
-          <TouchableOpacity style={styles.uploadCta} activeOpacity={0.9} onPress={handlePublish}>
+          <AnimatedPressable style={styles.uploadCta} activeOpacity={0.9} onPress={handlePublish}>
             <Text style={styles.uploadCtaText}>Publish Item</Text>
-          </TouchableOpacity>
+          </AnimatedPressable>
         </Reanimated.View>
       </View>
 
@@ -379,6 +566,160 @@ const styles = StyleSheet.create({
   },
   priceLabel: { fontSize: 28, fontFamily: 'Inter_700Bold', color: Colors.textMuted, marginRight: 8 },
   priceInputContent: { flex: 1, fontSize: 32, fontFamily: 'Inter_700Bold', color: Colors.textPrimary, padding: 0 },
+  priceCurrencyHint: {
+    marginTop: -14,
+    marginBottom: 6,
+    color: Colors.textMuted,
+    fontSize: 12,
+    fontFamily: 'Inter_500Medium',
+  },
+  syndicateCard: {
+    backgroundColor: '#111',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#1f1f1f',
+  },
+  syndicateTopRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  syndicateTitle: {
+    fontSize: 15,
+    fontFamily: 'Inter_700Bold',
+    color: Colors.textPrimary,
+    marginBottom: 2,
+  },
+  syndicateHint: {
+    fontSize: 12,
+    fontFamily: 'Inter_500Medium',
+    color: Colors.textSecondary,
+    lineHeight: 18,
+  },
+  syndicateHintMuted: {
+    marginTop: 10,
+    fontSize: 12,
+    fontFamily: 'Inter_500Medium',
+    color: Colors.textMuted,
+    lineHeight: 18,
+  },
+  syndicateToggleWrap: {
+    flexDirection: 'row',
+    backgroundColor: '#181818',
+    borderRadius: 14,
+    padding: 4,
+    borderWidth: 1,
+    borderColor: '#2b2b2b',
+    height: 36,
+  },
+  syndicateToggleBtn: {
+    borderRadius: 10,
+    minWidth: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+  },
+  syndicateToggleBtnActive: {
+    backgroundColor: Colors.accent,
+  },
+  syndicateToggleText: {
+    fontSize: 11,
+    fontFamily: 'Inter_700Bold',
+    color: Colors.textSecondary,
+  },
+  syndicateToggleTextActive: {
+    color: Colors.background,
+  },
+  syndicateFieldsWrap: {
+    marginTop: 14,
+  },
+  syndicateInput: {
+    fontSize: 16,
+    fontFamily: 'Inter_600SemiBold',
+    color: Colors.textPrimary,
+    backgroundColor: '#171717',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#2b2b2b',
+    paddingHorizontal: 12,
+    height: 46,
+    marginBottom: 10,
+  },
+  windowChipsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 10,
+  },
+  windowChip: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#2f2f2f',
+    backgroundColor: '#171717',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  windowChipActive: {
+    borderColor: '#4ECDC4',
+    backgroundColor: '#16302b',
+  },
+  windowChipText: {
+    fontSize: 12,
+    fontFamily: 'Inter_700Bold',
+    color: Colors.textSecondary,
+  },
+  windowChipTextActive: {
+    color: '#8de5dc',
+  },
+  authRow: {
+    marginTop: 2,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#2b2b2b',
+    backgroundColor: '#171717',
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  authTitle: {
+    fontSize: 12,
+    fontFamily: 'Inter_700Bold',
+    color: Colors.textPrimary,
+  },
+  authHint: {
+    marginTop: 3,
+    fontSize: 11,
+    fontFamily: 'Inter_500Medium',
+    color: Colors.textMuted,
+  },
+  authBtnRow: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  authBtn: {
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#3b4a4b',
+    backgroundColor: '#152024',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  authBtnMuted: {
+    borderColor: '#2f2f2f',
+    backgroundColor: '#151515',
+  },
+  authBtnText: {
+    fontSize: 11,
+    fontFamily: 'Inter_700Bold',
+    color: '#8de5dc',
+  },
+  authBtnTextMuted: {
+    color: Colors.textSecondary,
+  },
 
   stickyFooter: {
     position: 'absolute',

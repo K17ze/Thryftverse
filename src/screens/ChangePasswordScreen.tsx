@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, ScrollView, StatusBar } from 'react-native';
+import { View, Text, StyleSheet, TextInput, KeyboardAvoidingView, Platform, ScrollView, StatusBar } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -21,6 +21,14 @@ export default function ChangePasswordScreen() {
       show('Please fill in all fields', 'error');
       return;
     }
+    if (newPassword.length < 8) {
+      show('New password must be at least 8 characters', 'error');
+      return;
+    }
+    if (currentPassword === newPassword) {
+      show('New password must be different from current password', 'error');
+      return;
+    }
     if (newPassword !== confirmPassword) {
       show('New passwords do not match', 'error');
       return;
@@ -34,9 +42,9 @@ export default function ChangePasswordScreen() {
       <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
       
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.8}>
+        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.8}>
           <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
-        </TouchableOpacity>
+        </AnimatedPressable>
         <Text style={styles.hugeTitle}>Change Password</Text>
       </View>
 
@@ -59,9 +67,9 @@ export default function ChangePasswordScreen() {
                 placeholder="Enter current password"
                 placeholderTextColor={Colors.textMuted}
               />
-              <TouchableOpacity onPress={() => setIsSecure(!isSecure)} hitSlop={10}>
+              <AnimatedPressable onPress={() => setIsSecure(!isSecure)} hitSlop={10}>
                 <Ionicons name={isSecure ? "eye-off-outline" : "eye-outline"} size={20} color={Colors.textSecondary} />
-              </TouchableOpacity>
+              </AnimatedPressable>
             </View>
           </View>
 

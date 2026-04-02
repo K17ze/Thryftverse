@@ -1,5 +1,14 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform, StatusBar } from 'react-native';
+import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import { View,
+  Text,
+  StyleSheet,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+  StatusBar
+} from 'react-native';
 import Reanimated, { useSharedValue, useAnimatedStyle, withSequence, withTiming, withSpring, FadeInUp, FadeOutUp, Layout } from 'react-native-reanimated';
 import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -30,11 +39,33 @@ export default function SignUpScreen() {
   }));
 
   const handleSignUp = () => {
-    if (!username || !email || !password) {
+    const normalizedUsername = username.trim();
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!normalizedUsername || !normalizedEmail || !password) {
       setErrorMsg('Please fill in all details.');
       shake();
       return;
     }
+
+    if (normalizedUsername.length < 3) {
+      setErrorMsg('Username must be at least 3 characters.');
+      shake();
+      return;
+    }
+
+    if (!/^\S+@\S+\.\S+$/.test(normalizedEmail)) {
+      setErrorMsg('Enter a valid email address.');
+      shake();
+      return;
+    }
+
+    if (password.length < 8) {
+      setErrorMsg('Password must be at least 8 characters.');
+      shake();
+      return;
+    }
+
     setErrorMsg('');
     // Navigate straight to MainTabs temporarily (dummy auth)
     navigation.replace('MainTabs');
@@ -45,9 +76,9 @@ export default function SignUpScreen() {
       <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
       
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
-        </TouchableOpacity>
+        </AnimatedPressable>
       </View>
 
       <KeyboardAvoidingView 
@@ -112,9 +143,9 @@ export default function SignUpScreen() {
           )}
 
           <Reanimated.View style={shakeStyle} layout={Layout.springify()}>
-            <TouchableOpacity style={styles.primaryBtn} onPress={handleSignUp} activeOpacity={0.9}>
+            <AnimatedPressable style={styles.primaryBtn} onPress={handleSignUp} activeOpacity={0.9}>
               <Text style={styles.primaryText}>Create Account</Text>
-            </TouchableOpacity>
+            </AnimatedPressable>
           </Reanimated.View>
         </View>
       </KeyboardAvoidingView>

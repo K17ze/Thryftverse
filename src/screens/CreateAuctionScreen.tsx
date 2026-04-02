@@ -1,13 +1,14 @@
 import React from 'react';
 import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import {
   View,
   Text,
   StyleSheet,
   StatusBar,
-  TouchableOpacity,
   TextInput,
   Image,
-  FlatList,
+  FlatList
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,6 +20,10 @@ import { MOCK_LISTINGS, MOCK_USERS, Listing } from '../data/mockData';
 import type { AuctionMarketItem } from '../data/tradeHub';
 import { useStore } from '../store/useStore';
 import { useToast } from '../context/ToastContext';
+import { useFormattedPrice } from '../hooks/useFormattedPrice';
+import { useCurrencyContext } from '../context/CurrencyContext';
+import { toFiat, toIze } from '../utils/currency';
+import { useBackendData } from '../context/BackendDataContext';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 
@@ -33,6 +38,9 @@ const START_WINDOWS = [
 export default function CreateAuctionScreen() {
   const navigation = useNavigation<NavT>();
   const { show } = useToast();
+  const { formatFromFiat } = useFormattedPrice();
+  const { currencyCode, goldRates } = useCurrencyContext();
+  const { listings } = useBackendData();
 
   const currentUser = useStore((state) => state.currentUser);
   const addAuction = useStore((state) => state.addAuction);
@@ -40,15 +48,38 @@ export default function CreateAuctionScreen() {
   const sellerId = currentUser?.id ?? MOCK_USERS[0]?.id ?? 'u1';
 
   const sellerListings = React.useMemo(() => {
-    const own = MOCK_LISTINGS.filter((item) => item.sellerId === sellerId);
-    return own.length ? own : MOCK_LISTINGS.slice(0, 12);
-  }, [sellerId]);
+    const sourceListings = listings.length ? listings : MOCK_LISTINGS;
+    const own = sourceListings.filter((item) => item.sellerId === sellerId);
+    return own.length ? own : sourceListings.slice(0, 12);
+  }, [listings, sellerId]);
 
   const [selectedListingId, setSelectedListingId] = React.useState(sellerListings[0]?.id ?? '');
   const [startInMinutes, setStartInMinutes] = React.useState(0);
   const [startingBidInput, setStartingBidInput] = React.useState('');
   const [buyNowEnabled, setBuyNowEnabled] = React.useState(true);
   const [buyNowInput, setBuyNowInput] = React.useState('');
+
+  const fromGbpToDisplay = React.useCallback(
+    (amountGbp: number) => {
+      if (currencyCode === 'GBP') {
+        return amountGbp;
+      }
+      const amountIze = toIze(amountGbp, 'GBP', goldRates);
+      return toFiat(amountIze, currencyCode, goldRates);
+    },
+    [currencyCode, goldRates]
+  );
+
+  const fromDisplayToGbp = React.useCallback(
+    (amountDisplay: number) => {
+      if (currencyCode === 'GBP') {
+        return amountDisplay;
+      }
+      const amountIze = toIze(amountDisplay, currencyCode, goldRates);
+      return toFiat(amountIze, 'GBP', goldRates);
+    },
+    [currencyCode, goldRates]
+  );
 
   React.useEffect(() => {
     if (!sellerListings.length) {
@@ -72,13 +103,15 @@ export default function CreateAuctionScreen() {
 
     if (!startingBidInput) {
       const defaultStartingBid = Math.max(1, Math.round(selectedListing.price * 0.8));
-      setStartingBidInput(String(defaultStartingBid));
+      const defaultStartingBidDisplay = fromGbpToDisplay(defaultStartingBid);
+      setStartingBidInput((Number.isFinite(defaultStartingBidDisplay) ? defaultStartingBidDisplay : defaultStartingBid).toFixed(2));
     }
 
     if (!buyNowInput) {
-      setBuyNowInput(selectedListing.price.toFixed(2));
+      const buyNowDisplay = fromGbpToDisplay(selectedListing.price);
+      setBuyNowInput((Number.isFinite(buyNowDisplay) ? buyNowDisplay : selectedListing.price).toFixed(2));
     }
-  }, [buyNowInput, selectedListing, startingBidInput]);
+  }, [buyNowInput, fromGbpToDisplay, selectedListing, startingBidInput]);
 
   const launchAuction = () => {
     if (!selectedListing) {
@@ -86,7 +119,8 @@ export default function CreateAuctionScreen() {
       return;
     }
 
-    const startingBid = Number(startingBidInput);
+    const startingBidDisplay = Number(startingBidInput);
+    const startingBid = fromDisplayToGbp(startingBidDisplay);
     if (!Number.isFinite(startingBid) || startingBid <= 0) {
       show('Enter a valid starting bid', 'error');
       return;
@@ -94,7 +128,7 @@ export default function CreateAuctionScreen() {
 
     let buyNowPrice: number | undefined;
     if (buyNowEnabled) {
-      buyNowPrice = Number(buyNowInput);
+      buyNowPrice = fromDisplayToGbp(Number(buyNowInput));
       if (!Number.isFinite(buyNowPrice) || buyNowPrice <= startingBid) {
         show('Buy now must be greater than starting bid', 'error');
         return;
@@ -128,7 +162,7 @@ export default function CreateAuctionScreen() {
     const selected = item.id === selectedListingId;
 
     return (
-      <TouchableOpacity
+      <AnimatedPressable
         style={[styles.listingCard, selected && styles.listingCardSelected]}
         onPress={() => setSelectedListingId(item.id)}
         activeOpacity={0.9}
@@ -136,14 +170,14 @@ export default function CreateAuctionScreen() {
         <Image source={{ uri: item.images[0] }} style={styles.listingImage} />
         <View style={styles.listingMeta}>
           <Text style={styles.listingTitle} numberOfLines={1}>{item.title}</Text>
-          <Text style={styles.listingPrice}>GBP {item.price.toFixed(2)}</Text>
+          <Text style={styles.listingPrice}>{formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}</Text>
         </View>
         {selected ? (
           <View style={styles.selectedTick}>
             <Ionicons name="checkmark" size={12} color={Colors.background} />
           </View>
         ) : null}
-      </TouchableOpacity>
+      </AnimatedPressable>
     );
   };
 
@@ -154,18 +188,18 @@ export default function CreateAuctionScreen() {
       <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
 
       <View style={styles.header}>
-        <TouchableOpacity style={styles.closeBtn} onPress={() => navigation.goBack()} activeOpacity={0.85}>
+        <AnimatedPressable style={styles.closeBtn} onPress={() => navigation.goBack()} activeOpacity={0.85}>
           <Ionicons name="close" size={20} color={Colors.textPrimary} />
-        </TouchableOpacity>
+        </AnimatedPressable>
 
         <View>
           <Text style={styles.headerLabel}>SELLER STUDIO</Text>
           <Text style={styles.headerTitle}>Launch Auction</Text>
         </View>
 
-        <TouchableOpacity style={styles.launchBtn} onPress={launchAuction} activeOpacity={0.9}>
+        <AnimatedPressable style={styles.launchBtn} onPress={launchAuction} activeOpacity={0.9}>
           <Text style={styles.launchBtnText}>Launch</Text>
-        </TouchableOpacity>
+        </AnimatedPressable>
       </View>
 
       <View style={styles.content}>
@@ -183,14 +217,14 @@ export default function CreateAuctionScreen() {
             {START_WINDOWS.map((window) => {
               const active = startInMinutes === window.minutes;
               return (
-                <TouchableOpacity
+                <AnimatedPressable
                   key={window.label}
                   style={[styles.windowChip, active && styles.windowChipActive]}
                   activeOpacity={0.9}
                   onPress={() => setStartInMinutes(window.minutes)}
                 >
                   <Text style={[styles.windowChipText, active && styles.windowChipTextActive]}>{window.label}</Text>
-                </TouchableOpacity>
+                </AnimatedPressable>
               );
             })}
           </View>
@@ -198,7 +232,7 @@ export default function CreateAuctionScreen() {
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Pricing</Text>
-          <Text style={styles.inputLabel}>Starting Bid (GBP)</Text>
+          <Text style={styles.inputLabel}>Starting Bid ({currencyCode})</Text>
           <TextInput
             style={styles.input}
             value={startingBidInput}
@@ -211,26 +245,26 @@ export default function CreateAuctionScreen() {
           <View style={styles.buyNowRow}>
             <Text style={styles.inputLabel}>Enable Buy Now</Text>
             <View style={styles.toggleWrap}>
-              <TouchableOpacity
+              <AnimatedPressable
                 style={[styles.toggleBtn, buyNowEnabled && styles.toggleBtnActive]}
                 onPress={() => setBuyNowEnabled(true)}
                 activeOpacity={0.9}
               >
                 <Text style={[styles.toggleText, buyNowEnabled && styles.toggleTextActive]}>On</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
+              </AnimatedPressable>
+              <AnimatedPressable
                 style={[styles.toggleBtn, !buyNowEnabled && styles.toggleBtnActive]}
                 onPress={() => setBuyNowEnabled(false)}
                 activeOpacity={0.9}
               >
                 <Text style={[styles.toggleText, !buyNowEnabled && styles.toggleTextActive]}>Off</Text>
-              </TouchableOpacity>
+              </AnimatedPressable>
             </View>
           </View>
 
           {buyNowEnabled ? (
             <>
-              <Text style={styles.inputLabel}>Buy Now Price (GBP)</Text>
+              <Text style={styles.inputLabel}>Buy Now Price ({currencyCode})</Text>
               <TextInput
                 style={styles.input}
                 value={buyNowInput}

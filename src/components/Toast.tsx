@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import Reanimated, {
   useSharedValue,
   useAnimatedStyle,
@@ -10,6 +10,7 @@ import Reanimated, {
 import { Ionicons } from '@expo/vector-icons';
 import { useToast, ToastType } from '../context/ToastContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { AnimatedPressable } from './AnimatedPressable';
 
 const TYPE_CONFIG: Record<ToastType, { borderColor: string; icon: keyof typeof Ionicons.glyphMap; iconColor: string }> = {
   success: { borderColor: '#4CAF50', icon: 'checkmark-circle', iconColor: '#4CAF50' },
@@ -49,9 +50,15 @@ function ToastItem({ id, message, type }: ToastItemProps) {
     <Reanimated.View style={[styles.toast, { borderLeftColor: config.borderColor }, animStyle]}>
       <Ionicons name={config.icon} size={20} color={config.iconColor} />
       <Text style={styles.message} numberOfLines={2}>{message}</Text>
-      <TouchableOpacity onPress={() => dismiss(id)} style={styles.closeBtn} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+      <AnimatedPressable
+        onPress={() => dismiss(id)}
+        style={styles.closeBtn}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        disableAnimation
+        activeOpacity={1}
+      >
         <Ionicons name="close" size={16} color="#888" />
-      </TouchableOpacity>
+      </AnimatedPressable>
     </Reanimated.View>
   );
 }

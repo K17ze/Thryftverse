@@ -1,5 +1,11 @@
 import React, { useEffect } from 'react';
-import { View, StyleSheet, TouchableOpacity, Text, Platform } from 'react-native';
+import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import { View,
+  StyleSheet,
+  Text,
+  Platform
+} from 'react-native';
 import { createBottomTabNavigator, BottomTabBar, BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -47,11 +53,11 @@ const SellButton = ({ onPress }: { onPress: () => void }) => {
   }));
 
   return (
-    <TouchableOpacity style={styles.sellBtnWrap} onPress={onPress} activeOpacity={0.85}>
+    <AnimatedPressable style={styles.sellBtnWrap} onPress={onPress} activeOpacity={0.85}>
       <Reanimated.View style={[styles.sellBtnInner, animStyle]}>
         <Ionicons name="add" size={28} color={Colors.textInverse} />
       </Reanimated.View>
-    </TouchableOpacity>
+    </AnimatedPressable>
   );
 };
 

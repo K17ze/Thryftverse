@@ -1,13 +1,14 @@
 import React from 'react';
 import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import {
   View,
   Text,
   StyleSheet,
   StatusBar,
   Image,
-  TouchableOpacity,
   Pressable,
-  Dimensions,
+  Dimensions
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -148,17 +149,17 @@ export default function PosterViewerScreen() {
             <Text style={styles.postedTime}>• {postedTimeLabel}</Text>
           </View>
 
-          <TouchableOpacity style={styles.closeBtn} onPress={() => navigation.goBack()} activeOpacity={0.8}>
+          <AnimatedPressable style={styles.closeBtn} onPress={() => navigation.goBack()} activeOpacity={0.8}>
             <Ionicons name="close" size={22} color="#fff" />
-          </TouchableOpacity>
+          </AnimatedPressable>
         </View>
 
         {isOwnedCustomPoster ? (
           <View style={styles.ownerActionsRow}>
-            <TouchableOpacity style={styles.deleteBtn} onPress={handleDeletePoster} activeOpacity={0.85}>
+            <AnimatedPressable style={styles.deleteBtn} onPress={handleDeletePoster} activeOpacity={0.85}>
               <Ionicons name="trash-outline" size={14} color="#ffd4d4" />
               <Text style={styles.deleteBtnText}>Delete Poster</Text>
-            </TouchableOpacity>
+            </AnimatedPressable>
           </View>
         ) : null}
 
@@ -178,14 +179,14 @@ export default function PosterViewerScreen() {
               <Text style={styles.expiryText}>Expires in {activePoster.remainingHours}h</Text>
             </View>
 
-            <TouchableOpacity
+            <AnimatedPressable
               style={styles.viewListingBtn}
               activeOpacity={0.9}
               onPress={() => navigation.navigate('ItemDetail', { itemId: activePoster.listingId })}
             >
               <Text style={styles.viewListingText}>View Listing</Text>
               <Ionicons name="arrow-forward" size={14} color={Colors.background} />
-            </TouchableOpacity>
+            </AnimatedPressable>
           </View>
         </View>
 

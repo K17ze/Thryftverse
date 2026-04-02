@@ -1,40 +1,97 @@
 import React from 'react';
 import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import {
   View,
   Text,
-  TouchableOpacity,
   StyleSheet,
   ScrollView,
   Image,
-  StatusBar,
-  FlatList,
+  StatusBar
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../constants/colors';
-import { MY_USER, MOCK_LISTINGS } from '../data/mockData';
+import { MY_USER } from '../data/mockData';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
+import { useFormattedPrice } from '../hooks/useFormattedPrice';
+import { useBackendData } from '../context/BackendDataContext';
+import { useStore } from '../store/useStore';
+import { getSyndicateMarket } from '../data/tradeHub';
+import { resolveAssetMarketState } from '../data/mockSyndicateData';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 const TEAL = '#4ECDC4';
 
-// My listings (items this user is selling)
-const MY_LISTINGS = MOCK_LISTINGS.filter((_, i) => i < 6);
-
-// Quick access grid items
-const QUICK_ACCESS = [
-  { icon: 'receipt-outline', label: 'Orders', route: 'MyOrders' as const, color: '#4ECDC4' },
-  { icon: 'wallet-outline', label: 'Balance', route: 'Balance' as const, value: '£120', color: '#FFD700' },
-  { icon: 'bookmark-outline', label: 'Wishlist', route: 'MainTabs' as const, color: '#FF6B6B' },
-  { icon: 'color-palette-outline', label: 'Style', route: 'Personalisation' as const, color: '#BB86FC' },
-  { icon: 'people-outline', label: 'Invite', route: 'InviteFriends' as const, color: '#4ECDC4' },
-  { icon: 'settings-outline', label: 'Settings', route: 'Settings' as const, color: '#a0a0a0' },
-];
+interface QuickAccessItem {
+  icon: string;
+  label: string;
+  route: keyof RootStackParamList;
+  value?: string;
+  color: string;
+}
 
 export default function MyProfileScreen() {
   const navigation = useNavigation<NavT>();
+  const { formatFromFiat } = useFormattedPrice();
+  const { listings } = useBackendData();
+  const customSyndicates = useStore((state) => state.customSyndicates);
+  const syndicateRuntime = useStore((state) => state.syndicateRuntime);
+
+  const myListings = React.useMemo(() => listings.slice(0, 6), [listings]);
+
+  const syndicateHoldings = React.useMemo(() => {
+    const marketAssets = getSyndicateMarket(customSyndicates).map((asset) =>
+      resolveAssetMarketState(asset, syndicateRuntime[asset.id])
+    );
+
+    return marketAssets.filter((asset) => asset.yourUnits > 0);
+  }, [customSyndicates, syndicateRuntime]);
+
+  const holdingsValue = React.useMemo(
+    () =>
+      syndicateHoldings.reduce(
+        (sum, asset) => sum + asset.yourUnits * asset.unitPriceGBP,
+        0
+      ),
+    [syndicateHoldings]
+  );
+
+  const holdingsUnrealized = React.useMemo(
+    () =>
+      syndicateHoldings.reduce((sum, asset) => {
+        const avgEntry = asset.avgEntryPriceGBP ?? asset.unitPriceGBP;
+        return sum + (asset.unitPriceGBP - avgEntry) * asset.yourUnits;
+      }, 0),
+    [syndicateHoldings]
+  );
+
+  const quickAccess = React.useMemo<QuickAccessItem[]>(
+    () => [
+      { icon: 'receipt-outline', label: 'Orders', route: 'MyOrders', color: '#4ECDC4' },
+      {
+        icon: 'wallet-outline',
+        label: 'Wallet',
+        route: 'Wallet',
+        value: formatFromFiat(120.5, 'GBP', { displayMode: 'fiat' }),
+        color: '#FFD700',
+      },
+      {
+        icon: 'pie-chart-outline',
+        label: 'My Syndicate Holdings',
+        route: 'Portfolio',
+        value: `${syndicateHoldings.length} assets`,
+        color: '#6dd8ff',
+      },
+      { icon: 'bookmark-outline', label: 'Wishlist', route: 'Favourites', color: '#FF6B6B' },
+      { icon: 'color-palette-outline', label: 'Style', route: 'Personalisation', color: '#BB86FC' },
+      { icon: 'people-outline', label: 'Invite', route: 'InviteFriends', color: '#4ECDC4' },
+      { icon: 'settings-outline', label: 'Settings', route: 'Settings', color: '#a0a0a0' },
+    ],
+    [formatFromFiat, syndicateHoldings.length]
+  );
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -51,12 +108,12 @@ export default function MyProfileScreen() {
                 <Ionicons name="checkmark-circle" size={20} color={TEAL} />
               </View>
             </View>
-            <TouchableOpacity 
+            <AnimatedPressable 
               style={styles.settingsBtn} 
               onPress={() => navigation.navigate('Settings')}
             >
               <Ionicons name="ellipsis-horizontal" size={22} color={Colors.textPrimary} />
-            </TouchableOpacity>
+            </AnimatedPressable>
           </View>
 
           <Text style={styles.heroName}>{MY_USER.username}</Text>
@@ -64,24 +121,24 @@ export default function MyProfileScreen() {
             <Ionicons name="location-outline" size={12} color={Colors.textMuted} /> {MY_USER.location}
           </Text>
 
-          <TouchableOpacity 
+          <AnimatedPressable 
             activeOpacity={0.8}
             style={styles.editProfileBtn}
             onPress={() => navigation.navigate('EditProfile')}
           >
             <Text style={styles.editProfileText}>Edit Profile</Text>
-          </TouchableOpacity>
+          </AnimatedPressable>
 
           {/* Stats row */}
           <View style={styles.statsRow}>
-            <TouchableOpacity 
+            <AnimatedPressable 
               style={styles.statItem}
               onPress={() => navigation.navigate('UserProfile', { userId: MY_USER.id, isMe: true })}
               activeOpacity={0.8}
             >
               <Text style={styles.statNumber}>{MY_USER.listingCount}</Text>
               <Text style={styles.statLabel}>LISTED</Text>
-            </TouchableOpacity>
+            </AnimatedPressable>
             <View style={styles.statDivider} />
             <View style={styles.statItem}>
               <Text style={styles.statNumber}>{MY_USER.followers}</Text>
@@ -103,28 +160,63 @@ export default function MyProfileScreen() {
         {/* ── Quick Access Grid ── */}
         <View style={styles.quickAccessCard}>
           <View style={styles.quickGrid}>
-            {QUICK_ACCESS.map((item) => (
-              <TouchableOpacity
+            {quickAccess.map((item) => (
+              <AnimatedPressable
                 key={item.label}
                 style={styles.quickItem}
                 activeOpacity={0.8}
-                onPress={() => {
-                  if (item.route === 'MainTabs') {
-                    (navigation as any).navigate('Search');
-                    return;
-                  }
-
-                  navigation.navigate(item.route as any);
-                }}
+                onPress={() => navigation.navigate(item.route as any)}
               >
                 <View style={[styles.quickIconCircle, { borderColor: item.color + '40' }]}>
                   <Ionicons name={item.icon as any} size={22} color={item.color} />
                 </View>
                 <Text style={styles.quickLabel}>{item.label}</Text>
                 {item.value && <Text style={styles.quickValue}>{item.value}</Text>}
-              </TouchableOpacity>
+              </AnimatedPressable>
             ))}
           </View>
+        </View>
+
+        <View style={styles.portfolioSummaryCard}>
+          <View style={styles.portfolioSummaryTop}>
+            <Text style={styles.portfolioSummaryLabel}>MY SYNDICATE HOLDINGS</Text>
+            <AnimatedPressable
+              style={styles.portfolioSummaryLinkBtn}
+              activeOpacity={0.8}
+              onPress={() => navigation.navigate('Portfolio')}
+            >
+              <Text style={styles.portfolioSummaryLinkText}>Open</Text>
+              <Ionicons name="arrow-forward" size={14} color={TEAL} />
+            </AnimatedPressable>
+          </View>
+
+          <Text style={styles.portfolioSummaryValue}>{formatFromFiat(holdingsValue, 'GBP')}</Text>
+
+          <View style={styles.portfolioSummaryMetaRow}>
+            <Text style={styles.portfolioSummaryMeta}>
+              {syndicateHoldings.length} active position{syndicateHoldings.length === 1 ? '' : 's'}
+            </Text>
+            <Text
+              style={[
+                styles.portfolioSummaryPnl,
+                holdingsUnrealized >= 0 ? styles.portfolioPnlUp : styles.portfolioPnlDown,
+              ]}
+            >
+              Unrealized {holdingsUnrealized >= 0 ? '+' : '-'}
+              {formatFromFiat(Math.abs(holdingsUnrealized), 'GBP', { displayMode: 'fiat' })}
+            </Text>
+          </View>
+
+          {syndicateHoldings.length === 0 && (
+            <AnimatedPressable
+              style={styles.portfolioSummaryCta}
+              activeOpacity={0.85}
+              onPress={() => navigation.navigate('SyndicateHub')}
+            >
+              <Ionicons name="sparkles-outline" size={14} color={Colors.background} />
+              <Text style={styles.portfolioSummaryCtaText}>Explore Syndicate Hub</Text>
+            </AnimatedPressable>
+          )}
         </View>
 
         {/* ── My Wardrobe Preview ── */}
@@ -134,13 +226,13 @@ export default function MyProfileScreen() {
               <Text style={styles.wardrobeSectionLabel}>YOUR LISTINGS</Text>
               <Text style={styles.wardrobeTitle}>My Wardrobe</Text>
             </View>
-            <TouchableOpacity 
+            <AnimatedPressable 
               style={styles.viewAllBtn}
               onPress={() => navigation.navigate('UserProfile', { userId: MY_USER.id, isMe: true })}
             >
               <Text style={styles.viewAllText}>View All</Text>
               <Ionicons name="arrow-forward" size={14} color={TEAL} />
-            </TouchableOpacity>
+            </AnimatedPressable>
           </View>
 
           <ScrollView 
@@ -148,8 +240,8 @@ export default function MyProfileScreen() {
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.wardrobeScroll}
           >
-            {MY_LISTINGS.map((item) => (
-              <TouchableOpacity
+            {myListings.map((item) => (
+              <AnimatedPressable
                 key={item.id}
                 style={styles.wardrobeItem}
                 activeOpacity={0.9}
@@ -157,14 +249,14 @@ export default function MyProfileScreen() {
               >
                 <Image source={{ uri: item.images[0] }} style={styles.wardrobeImage} />
                 <View style={styles.wardrobeInfo}>
-                  <Text style={styles.wardrobePrice}>£{item.price}</Text>
+                  <Text style={styles.wardrobePrice}>{formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}</Text>
                   <Text style={styles.wardrobeBrand} numberOfLines={1}>@{item.brand.toLowerCase()}</Text>
                 </View>
                 <View style={styles.wardrobeLikes}>
                   <Ionicons name="heart" size={10} color={Colors.textMuted} />
                   <Text style={styles.wardrobeLikeCount}>{item.likes}</Text>
                 </View>
-              </TouchableOpacity>
+              </AnimatedPressable>
             ))}
           </ScrollView>
         </View>
@@ -329,12 +421,91 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: 'Inter_500Medium',
     color: Colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 14,
   },
   quickValue: {
     fontSize: 11,
     fontFamily: 'Inter_600SemiBold',
     color: TEAL,
     marginTop: 2,
+  },
+
+  // Portfolio Summary
+  portfolioSummaryCard: {
+    marginHorizontal: 20,
+    backgroundColor: '#111',
+    borderRadius: 24,
+    padding: 20,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: '#24313b',
+  },
+  portfolioSummaryTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  portfolioSummaryLabel: {
+    fontSize: 11,
+    fontFamily: 'Inter_700Bold',
+    color: TEAL,
+    letterSpacing: 1.2,
+  },
+  portfolioSummaryLinkBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  portfolioSummaryLinkText: {
+    fontSize: 12,
+    fontFamily: 'Inter_600SemiBold',
+    color: TEAL,
+  },
+  portfolioSummaryValue: {
+    fontSize: 28,
+    fontFamily: 'Inter_800ExtraBold',
+    color: Colors.textPrimary,
+    letterSpacing: -0.5,
+  },
+  portfolioSummaryMetaRow: {
+    marginTop: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
+  },
+  portfolioSummaryMeta: {
+    fontSize: 12,
+    fontFamily: 'Inter_500Medium',
+    color: Colors.textSecondary,
+  },
+  portfolioSummaryPnl: {
+    fontSize: 12,
+    fontFamily: 'Inter_700Bold',
+  },
+  portfolioPnlUp: {
+    color: '#8de5dc',
+  },
+  portfolioPnlDown: {
+    color: '#ff9d9d',
+  },
+  portfolioSummaryCta: {
+    marginTop: 14,
+    borderRadius: 999,
+    backgroundColor: Colors.accent,
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  portfolioSummaryCtaText: {
+    color: Colors.background,
+    fontSize: 11,
+    fontFamily: 'Inter_700Bold',
   },
 
   // Wardrobe

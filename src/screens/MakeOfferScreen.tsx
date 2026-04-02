@@ -1,18 +1,27 @@
 import React, { useState } from 'react';
 import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import {
   View,
   Text,
   StyleSheet,
   SafeAreaView,
-  TouchableOpacity,
   TextInput,
   ScrollView,
   StatusBar,
-  Platform,
+  Platform
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
+import { useFormattedPrice } from '../hooks/useFormattedPrice';
+import { useCurrencyContext } from '../context/CurrencyContext';
+import { CURRENCIES } from '../constants/currencies';
+import {
+  calculateOfferSummaryFromDisplay,
+  convertGbpToDisplayAmount,
+  sanitizeDecimalInput,
+} from '../utils/currencyAuthoringFlows';
 
 type Props = StackScreenProps<RootStackParamList, 'MakeOffer'>;
 
@@ -24,11 +33,45 @@ const TEXT = '#FFFFFF';
 
 export default function MakeOfferScreen({ navigation, route }: Props) {
   const { price, title } = route.params;
-  const [offerPrice, setOfferPrice] = useState(String(price));
+  const { formatFromFiat } = useFormattedPrice();
+  const { currencyCode, goldRates } = useCurrencyContext();
+  const currencySymbol = CURRENCIES[currencyCode].symbol;
+  const [offerPrice, setOfferPrice] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
+
+  React.useEffect(() => {
+    const defaultOffer = convertGbpToDisplayAmount(price, currencyCode, goldRates);
+    setOfferPrice((Number.isFinite(defaultOffer) ? defaultOffer : price).toFixed(2));
+  }, [currencyCode, goldRates, price]);
   
   const numericOffer = parseFloat(offerPrice) || 0;
-  const buyerProtectionFee = +(numericOffer * 0.05 + 0.7).toFixed(2);
-  const total = +(numericOffer + buyerProtectionFee).toFixed(2);
+  const {
+    offerGbp: numericOfferGbp,
+    buyerProtectionFeeGbp: buyerProtectionFee,
+    totalGbp: total,
+  } = calculateOfferSummaryFromDisplay(numericOffer, currencyCode, goldRates);
+
+  const handleOfferChange = (value: string) => {
+    setOfferPrice(sanitizeDecimalInput(value));
+    if (errorMsg) {
+      setErrorMsg('');
+    }
+  };
+
+  const handleSendOffer = () => {
+    if (!numericOffer || !Number.isFinite(numericOfferGbp) || numericOfferGbp <= 0) {
+      setErrorMsg('Enter a valid offer amount.');
+      return;
+    }
+
+    if (numericOfferGbp > price * 2) {
+      setErrorMsg('Offer seems too high. Please review the amount.');
+      return;
+    }
+
+    setErrorMsg('');
+    navigation.navigate('MainTabs', { screen: 'Inbox' } as any);
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -36,9 +79,9 @@ export default function MakeOfferScreen({ navigation, route }: Props) {
 
       {/* Editorial Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.headerBtn} activeOpacity={0.8}>
+        <AnimatedPressable onPress={() => navigation.goBack()} style={styles.headerBtn} activeOpacity={0.8}>
           <Ionicons name="close" size={28} color={TEXT} />
-        </TouchableOpacity>
+        </AnimatedPressable>
         <Text style={styles.headerTitle}>Make Offer</Text>
         <View style={{ width: 44 }} />
       </View>
@@ -51,7 +94,7 @@ export default function MakeOfferScreen({ navigation, route }: Props) {
           </View>
           <View>
             <Text style={styles.itemTitle} numberOfLines={1}>{title}</Text>
-            <Text style={styles.itemListingPrice}>Listed at £{price.toFixed(2)}</Text>
+            <Text style={styles.itemListingPrice}>Listed at {formatFromFiat(price, 'GBP')}</Text>
           </View>
         </View>
 
@@ -59,11 +102,11 @@ export default function MakeOfferScreen({ navigation, route }: Props) {
         <View style={styles.section}>
           <Text style={styles.sectionLabel}>Your offer</Text>
           <View style={styles.priceInputRow}>
-            <Text style={styles.currencySymbol}>£</Text>
+            <Text style={styles.currencySymbol}>{currencySymbol}</Text>
             <TextInput
               style={styles.priceInput}
               value={offerPrice}
-              onChangeText={setOfferPrice}
+              onChangeText={handleOfferChange}
               keyboardType="decimal-pad"
               selectionColor={TEAL}
               placeholderTextColor={MUTED}
@@ -78,12 +121,12 @@ export default function MakeOfferScreen({ navigation, route }: Props) {
           <View style={styles.protectionRow}>
             <Ionicons name="shield-checkmark" size={18} color={TEAL} />
             <Text style={styles.protectionLabel}>Buyer Protection</Text>
-            <Text style={styles.protectionValue}>£{buyerProtectionFee.toFixed(2)}</Text>
+            <Text style={styles.protectionValue}>{formatFromFiat(buyerProtectionFee, 'GBP')}</Text>
           </View>
           
           <View style={[styles.protectionRow, { marginTop: 12 }]}>
             <Text style={styles.totalLabel}>Total</Text>
-            <Text style={styles.totalValue}>£{total.toFixed(2)}</Text>
+            <Text style={styles.totalValue}>{formatFromFiat(total, 'GBP')}</Text>
           </View>
           
           <Text style={styles.protectionNote}>
@@ -100,21 +143,20 @@ export default function MakeOfferScreen({ navigation, route }: Props) {
             Offers within 10% of the listing price are <Text style={{ fontFamily: 'Inter_700Bold', color: TEXT }}>3x</Text> more likely to be accepted.
           </Text>
         </View>
+
+        {!!errorMsg && <Text style={styles.errorText}>{errorMsg}</Text>}
       </ScrollView>
 
       {/* Floating CTA matches CheckoutScreen */}
       <View style={styles.footer}>
-        <TouchableOpacity
+        <AnimatedPressable
           style={[styles.sendBtn, numericOffer <= 0 && { opacity: 0.5 }]}
           disabled={numericOffer <= 0}
-          onPress={() => {
-            // Navigate to the inbox tab after sending
-            navigation.navigate('MainTabs', { screen: 'Inbox' } as any);
-          }}
+          onPress={handleSendOffer}
           activeOpacity={0.9}
         >
-          <Text style={styles.sendBtnText}>Send offer · £{total.toFixed(2)}</Text>
-        </TouchableOpacity>
+          <Text style={styles.sendBtnText}>Send offer · {formatFromFiat(total, 'GBP')}</Text>
+        </AnimatedPressable>
       </View>
     </SafeAreaView>
   );
@@ -227,6 +269,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   tipText: { flex: 1, fontSize: 14, fontFamily: 'Inter_500Medium', color: BG, lineHeight: 20 },
+  errorText: {
+    marginTop: 14,
+    color: '#ff6b6b',
+    fontSize: 13,
+    fontFamily: 'Inter_500Medium',
+  },
   
   footer: { 
     paddingHorizontal: 20, 

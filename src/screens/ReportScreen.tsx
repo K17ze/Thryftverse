@@ -1,5 +1,13 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, KeyboardAvoidingView, Platform, StatusBar } from 'react-native';
+import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import { View,
+  Text,
+  StyleSheet,
+  KeyboardAvoidingView,
+  Platform,
+  StatusBar
+} from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -34,9 +42,9 @@ export default function ReportScreen() {
       <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
       
       <View style={styles.header}>
-        <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="close" size={24} color={Colors.textPrimary} />
-        </TouchableOpacity>
+        </AnimatedPressable>
         <Text style={styles.headerTitle}>Report {reportType === 'user' ? 'User' : 'Item'}</Text>
         <View style={{ width: 44 }} />
       </View>
@@ -50,9 +58,9 @@ export default function ReportScreen() {
             <Ionicons name="checkmark-circle-outline" size={64} color={Colors.success} />
             <Text style={styles.successTitle}>Report Submitted</Text>
             <Text style={styles.successText}>Thank you for helping keep the Thryftverse safe. Our moderation team will review this shortly.</Text>
-            <TouchableOpacity style={styles.primaryBtn} onPress={() => navigation.goBack()} activeOpacity={0.9}>
+            <AnimatedPressable style={styles.primaryBtn} onPress={() => navigation.goBack()} activeOpacity={0.9}>
               <Text style={styles.primaryText}>Return</Text>
-            </TouchableOpacity>
+            </AnimatedPressable>
           </View>
         ) : (
           <View style={styles.form}>
@@ -60,7 +68,7 @@ export default function ReportScreen() {
             
             <View style={styles.reasonsList}>
               {REASONS.map((reason) => (
-                <TouchableOpacity 
+                <AnimatedPressable 
                   key={reason} 
                   style={[styles.reasonRow, selectedReason === reason && styles.selectedRow]}
                   onPress={() => setSelectedReason(reason)}
@@ -69,19 +77,19 @@ export default function ReportScreen() {
                   {selectedReason === reason && (
                     <Ionicons name="checkmark" size={20} color={Colors.textInverse} />
                   )}
-                </TouchableOpacity>
+                </AnimatedPressable>
               ))}
             </View>
 
             <View style={styles.footer}>
-              <TouchableOpacity 
+              <AnimatedPressable 
                 style={[styles.primaryBtn, !selectedReason && styles.disabledBtn]} 
                 onPress={handleSubmit} 
                 activeOpacity={0.9}
                 disabled={!selectedReason}
               >
                 <Text style={styles.primaryText}>Submit Report</Text>
-              </TouchableOpacity>
+              </AnimatedPressable>
             </View>
           </View>
         )}

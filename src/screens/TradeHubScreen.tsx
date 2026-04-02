@@ -1,5 +1,11 @@
 import React from 'react';
-import { View, Text, StyleSheet, StatusBar, TouchableOpacity } from 'react-native';
+import {
+  AnimatedPressable } from '../components/AnimatedPressable';
+import { View,
+  Text,
+  StyleSheet,
+  StatusBar
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -9,12 +15,14 @@ import AuctionsScreen from './AuctionsScreen';
 import SyndicateScreen from './SyndicateScreen';
 import { useStore } from '../store/useStore';
 import { RootStackParamList } from '../navigation/types';
+import { useFormattedPrice } from '../hooks/useFormattedPrice';
 
 type TradeHubTab = 'AUCTIONS' | 'SYNDICATE';
 type NavT = StackNavigationProp<RootStackParamList>;
 
 export default function TradeHubScreen() {
   const navigation = useNavigation<NavT>();
+  const { formatFromFiat } = useFormattedPrice();
   const [activeTab, setActiveTab] = React.useState<TradeHubTab>('AUCTIONS');
   const marketLedger = useStore((state) => state.marketLedger);
 
@@ -26,16 +34,21 @@ export default function TradeHubScreen() {
     }
 
     if (latestActivity.channel === 'auction' && latestActivity.action === 'bid') {
-      return `Bid ${latestActivity.amountGBP.toFixed(2)} on ${latestActivity.referenceId}`;
+      return `Bid ${formatFromFiat(latestActivity.amountGBP, 'GBP', { displayMode: 'fiat' })} on ${latestActivity.referenceId}`;
     }
 
     if (latestActivity.channel === 'auction' && latestActivity.action === 'win') {
-      return `Auction settled ${latestActivity.amountGBP.toFixed(2)} on ${latestActivity.referenceId}`;
+      return `Auction settled ${formatFromFiat(latestActivity.amountGBP, 'GBP', { displayMode: 'fiat' })} on ${latestActivity.referenceId}`;
+    }
+
+    if (latestActivity.channel === 'syndicate' && latestActivity.action === 'sell-units') {
+      const units = latestActivity.units ?? 0;
+      return `Sold ${units} unit${units === 1 ? '' : 's'} on ${latestActivity.referenceId}`;
     }
 
     const units = latestActivity.units ?? 0;
     return `Bought ${units} unit${units === 1 ? '' : 's'} on ${latestActivity.referenceId}`;
-  }, [latestActivity]);
+  }, [formatFromFiat, latestActivity]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -50,11 +63,20 @@ export default function TradeHubScreen() {
           </View>
           <Text style={styles.headerSubtitle}>Auctions and asset syndicates in one desk</Text>
         </View>
+
+        <AnimatedPressable
+          style={styles.headerHubBtn}
+          activeOpacity={0.9}
+          onPress={() => navigation.navigate('SyndicateHub')}
+        >
+          <Ionicons name="grid-outline" size={14} color={Colors.background} />
+          <Text style={styles.headerHubBtnText}>Hub</Text>
+        </AnimatedPressable>
       </View>
 
       <View style={styles.tabSwitcher}>
         {(['AUCTIONS', 'SYNDICATE'] as const).map((tab) => (
-          <TouchableOpacity
+          <AnimatedPressable
             key={tab}
             style={[styles.tabBtn, activeTab === tab && styles.tabBtnActive]}
             onPress={() => setActiveTab(tab)}
@@ -66,11 +88,11 @@ export default function TradeHubScreen() {
               color={activeTab === tab ? Colors.textInverse : Colors.textSecondary}
             />
             <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>{tab}</Text>
-          </TouchableOpacity>
+          </AnimatedPressable>
         ))}
       </View>
 
-      <TouchableOpacity
+      <AnimatedPressable
         style={styles.activityCard}
         activeOpacity={0.92}
         onPress={() => navigation.navigate('MarketLedger')}
@@ -83,7 +105,38 @@ export default function TradeHubScreen() {
           </View>
         </View>
         <Text style={styles.activityText} numberOfLines={2}>{latestActivityText}</Text>
-      </TouchableOpacity>
+      </AnimatedPressable>
+
+      {activeTab === 'SYNDICATE' ? (
+        <View style={styles.quickNavRow}>
+          <AnimatedPressable
+            style={styles.quickNavBtn}
+            activeOpacity={0.9}
+            onPress={() => navigation.navigate('Portfolio')}
+          >
+            <Ionicons name="pie-chart-outline" size={14} color={Colors.background} />
+            <Text style={styles.quickNavText}>Portfolio</Text>
+          </AnimatedPressable>
+
+          <AnimatedPressable
+            style={styles.quickNavBtn}
+            activeOpacity={0.9}
+            onPress={() => navigation.navigate('SyndicateOrderHistory')}
+          >
+            <Ionicons name="time-outline" size={14} color={Colors.background} />
+            <Text style={styles.quickNavText}>Orders</Text>
+          </AnimatedPressable>
+
+          <AnimatedPressable
+            style={styles.quickNavBtn}
+            activeOpacity={0.9}
+            onPress={() => navigation.navigate('SyndicateOnboarding')}
+          >
+            <Ionicons name="sparkles-outline" size={14} color={Colors.background} />
+            <Text style={styles.quickNavText}>Guide</Text>
+          </AnimatedPressable>
+        </View>
+      ) : null}
 
       <View style={styles.contentWrap}>
         {activeTab === 'AUCTIONS' ? <AuctionsScreen /> : <SyndicateScreen />}
@@ -101,6 +154,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 10,
     paddingBottom: 14,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
   },
   headerLabel: {
     color: '#4ECDC4',
@@ -125,6 +181,21 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     fontSize: 13,
     fontFamily: 'Inter_500Medium',
+  },
+  headerHubBtn: {
+    marginTop: 4,
+    borderRadius: 999,
+    backgroundColor: Colors.accent,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  headerHubBtnText: {
+    color: Colors.background,
+    fontSize: 11,
+    fontFamily: 'Inter_700Bold',
   },
   tabSwitcher: {
     marginHorizontal: 16,
@@ -174,6 +245,28 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: 'Inter_500Medium',
     lineHeight: 18,
+  },
+  quickNavRow: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+    flexDirection: 'row',
+    gap: 8,
+  },
+  quickNavBtn: {
+    flex: 1,
+    borderRadius: 10,
+    backgroundColor: Colors.accent,
+    paddingVertical: 9,
+    paddingHorizontal: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 4,
+  },
+  quickNavText: {
+    color: Colors.background,
+    fontSize: 11,
+    fontFamily: 'Inter_700Bold',
   },
   tabBtn: {
     flex: 1,

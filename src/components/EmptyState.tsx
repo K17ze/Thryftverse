@@ -1,8 +1,9 @@
-import React, { useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import React from 'react';
+import { View, Text, StyleSheet } from 'react-native';
 import Reanimated, { FadeIn } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../constants/colors';
+import { AnimatedPressable } from './AnimatedPressable';
 
 interface Props {
   icon: keyof typeof Ionicons.glyphMap;
@@ -22,9 +23,9 @@ export function EmptyState({ icon, title, subtitle, ctaLabel, onCtaPress, iconCo
       <Text style={styles.title}>{title}</Text>
       {subtitle && <Text style={styles.subtitle}>{subtitle}</Text>}
       {ctaLabel && onCtaPress && (
-        <TouchableOpacity style={styles.cta} onPress={onCtaPress} activeOpacity={0.8}>
+        <AnimatedPressable style={styles.cta} onPress={onCtaPress} activeOpacity={0.8}>
           <Text style={styles.ctaText}>{ctaLabel}</Text>
-        </TouchableOpacity>
+        </AnimatedPressable>
       )}
     </Reanimated.View>
   );
