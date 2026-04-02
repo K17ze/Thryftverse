@@ -28,7 +28,6 @@ import {
   isTradeSubmitEnabled,
   sanitizeTradePriceInput,
   sanitizeTradeQuantityInput,
-  TradeOrderMode,
   TradeSide,
 } from '../utils/tradeFlow';
 import { placeSyndicateOrder } from '../services/marketApi';
@@ -61,9 +60,8 @@ export default function TradeScreen() {
   const { formatFromIze } = useFormattedPrice();
 
   const [side, setSide] = React.useState<TradeSide>(route.params.side);
-  const [orderMode, setOrderMode] = React.useState<TradeOrderMode>('market');
   const [quantityInput, setQuantityInput] = React.useState('1');
-  const [limitPriceInput, setLimitPriceInput] = React.useState('');
+  const [offerPriceInput, setOfferPriceInput] = React.useState('');
   const [isSubmittingOrder, setIsSubmittingOrder] = React.useState(false);
 
   const baseAssets = React.useMemo(() => getSyndicateMarket(customSyndicates), [customSyndicates]);
@@ -74,16 +72,17 @@ export default function TradeScreen() {
 
   const asset = marketAssets.find((item) => item.id === route.params.assetId);
   const marketPrice = asset ? toIze(asset.unitPriceGBP, 'GBP', goldRates) : 0;
+  const orderMode = offerPriceInput.trim().length > 0 ? 'limit' : 'market';
 
   const quote = React.useMemo(
     () => buildTradeQuote({
       orderMode,
       side,
       quantityInput,
-      limitPriceInput,
+      limitPriceInput: offerPriceInput,
       marketPrice,
     }),
-    [limitPriceInput, marketPrice, orderMode, quantityInput, side]
+    [marketPrice, offerPriceInput, orderMode, quantityInput, side]
   );
 
   const eligibility = asset ? checkSyndicateEligibility(asset.settlementMode) : { ok: false, message: 'Asset not found' };
@@ -103,7 +102,7 @@ export default function TradeScreen() {
       orderMode,
       side,
       quantityInput,
-      limitPriceInput,
+      limitPriceInput: offerPriceInput,
       marketPrice,
       assetFound: !!asset,
       eligibility,
@@ -223,21 +222,6 @@ export default function TradeScreen() {
           })}
         </View>
 
-        <View style={styles.segmentRow}>
-          {(['market', 'limit'] as TradeOrderMode[]).map((value) => {
-            const active = orderMode === value;
-            return (
-              <AnimatedPressable
-                key={value}
-                style={[styles.segmentBtn, active && styles.segmentBtnActive]}
-                onPress={() => setOrderMode(value)}
-              >
-                <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{value.toUpperCase()}</Text>
-              </AnimatedPressable>
-            );
-          })}
-        </View>
-
         {!eligibility.ok && (
           <View style={styles.alertCard}>
             <Ionicons name="alert-circle-outline" size={16} color={Colors.danger} />
@@ -255,19 +239,18 @@ export default function TradeScreen() {
           placeholderTextColor={Colors.textMuted}
         />
 
-        {orderMode === 'limit' && (
-          <>
-            <Text style={styles.label}>Limit price (1ze)</Text>
-            <TextInput
-              style={styles.input}
-              value={limitPriceInput}
-              onChangeText={(value) => setLimitPriceInput(sanitizeTradePriceInput(value))}
-              keyboardType="decimal-pad"
-              placeholder={marketPrice.toFixed(6)}
-              placeholderTextColor={Colors.textMuted}
-            />
-          </>
-        )}
+        <Text style={styles.label}>Offer price to owners (1ze, optional)</Text>
+        <TextInput
+          style={styles.input}
+          value={offerPriceInput}
+          onChangeText={(value) => setOfferPriceInput(sanitizeTradePriceInput(value))}
+          keyboardType="decimal-pad"
+          placeholder={marketPrice.toFixed(6)}
+          placeholderTextColor={Colors.textMuted}
+        />
+        <Text style={styles.offerHint}>
+          Leave blank for instant market execution. Set a lower buy or higher sell offer to send it to owners.
+        </Text>
 
         <View style={styles.summaryCard}>
           <View style={styles.summaryRow}>
@@ -295,7 +278,7 @@ export default function TradeScreen() {
           activeOpacity={0.9}
         >
           <Text style={styles.submitText}>
-            {isSubmittingOrder ? 'Submitting...' : orderMode === 'limit' ? 'Place Limit Order' : `Execute ${side.toUpperCase()}`}
+            {isSubmittingOrder ? 'Submitting...' : orderMode === 'limit' ? 'Send Offer To Owners' : `Execute ${side.toUpperCase()}`}
           </Text>
         </AnimatedPressable>
       </ScrollView>
@@ -429,6 +412,13 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_600SemiBold',
     paddingHorizontal: 12,
     paddingVertical: 11,
+  },
+  offerHint: {
+    marginTop: 7,
+    color: Colors.textMuted,
+    fontSize: 11,
+    lineHeight: 16,
+    fontFamily: 'Inter_500Medium',
   },
   summaryCard: {
     marginTop: 14,

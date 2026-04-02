@@ -26,7 +26,7 @@ const SLIDES = [
   {
     icon: 'trending-up-outline' as const,
     title: 'Trade In Real Time',
-    body: 'Market and limit flows let holders buy, scale out, and rotate between syndicated pools.',
+    body: 'Execute instantly at market or send direct buy/sell offers to owners at your chosen price.',
   },
   {
     icon: 'wallet-outline' as const,

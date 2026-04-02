@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import type { Poster } from '../data/posters';
 import type { AuctionMarketItem, AuctionViewModel, SyndicateAsset } from '../data/tradeHub';
+import type { Conversation } from '../data/mockData';
+import { MOCK_CONVERSATIONS } from '../data/mockData';
 
 interface User {
   id: string;
@@ -165,6 +167,18 @@ interface StoreState {
   sellDraft: DraftListing;
   updateSellDraft: (updates: Partial<DraftListing>) => void;
   clearSellDraft: () => void;
+
+  // Conversations Inbox
+  conversations: Conversation[];
+  markConversationRead: (id: string) => void;
+  archiveConversation: (id: string) => void;
+  deleteConversation: (id: string) => void;
+
+  // Profile Uploads
+  userAvatar: string | null;
+  userCover: string | null;
+  updateUserAvatar: (uri: string) => void;
+  updateUserCover: (uri: string) => void;
 }
 
 export const useStore = create<StoreState>((set, get) => ({
@@ -623,4 +637,25 @@ export const useStore = create<StoreState>((set, get) => ({
   updateSellDraft: (updates) =>
     set((state) => ({ sellDraft: { ...state.sellDraft, ...updates } })),
   clearSellDraft: () => set({ sellDraft: {} }),
+
+  conversations: MOCK_CONVERSATIONS,
+  markConversationRead: (id) =>
+    set((state) => ({
+      conversations: state.conversations.map((c) =>
+        c.id === id ? { ...c, unread: false } : c
+      ),
+    })),
+  archiveConversation: (id) =>
+    set((state) => ({
+      conversations: state.conversations.filter((c) => c.id !== id),
+    })),
+  deleteConversation: (id) =>
+    set((state) => ({
+      conversations: state.conversations.filter((c) => c.id !== id),
+    })),
+
+  userAvatar: null,
+  userCover: null,
+  updateUserAvatar: (uri) => set({ userAvatar: uri }),
+  updateUserCover: (uri) => set({ userCover: uri }),
 }));

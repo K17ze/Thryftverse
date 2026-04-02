@@ -1,15 +1,23 @@
-import React from 'react';
-import {
-  AnimatedPressable } from '../components/AnimatedPressable';
-import { View,
-  StyleSheet
-} from 'react-native';
+import React, { useEffect } from 'react';
+import { View, StyleSheet } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Reanimated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  withRepeat,
+  withSequence,
+  withTiming,
+  Easing,
+} from 'react-native-reanimated';
 import { TabParamList } from './types';
 import { Colors } from '../constants/colors';
 import { Typography } from '../constants/typography';
+import { AnimatedPressable } from '../components/AnimatedPressable';
+import { AnimatedBadge } from '../components/AnimatedBadge';
+import { useHaptic } from '../hooks/useHaptic';
 
 import HomeScreen from '../screens/HomeScreen';
 import TradeHubScreen from '../screens/TradeHubScreen';
@@ -17,33 +25,73 @@ import SearchScreen from '../screens/SearchScreen';
 import SellScreen from '../screens/SellScreen';
 import InboxScreen from '../screens/InboxScreen';
 import MyProfileScreen from '../screens/MyProfileScreen';
-import { useHaptic } from '../hooks/useHaptic';
-import { AnimatedBadge } from '../components/AnimatedBadge';
 
 const Tab = createBottomTabNavigator<TabParamList>();
 
-// Custom Middle Circular Button
+// ── Animated Sell FAB with subtle breathing pulse ──
 const SellButton = ({ onPress }: { onPress: () => void }) => {
+  const scale = useSharedValue(1);
+
+  useEffect(() => {
+    scale.value = withRepeat(
+      withSequence(
+        withTiming(1.06, { duration: 1800, easing: Easing.inOut(Easing.ease) }),
+        withTiming(1, { duration: 1800, easing: Easing.inOut(Easing.ease) })
+      ),
+      -1,
+      true
+    );
+  }, [scale]);
+
+  const pulseStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+
   return (
     <AnimatedPressable style={styles.sellBtnWrap} onPress={onPress} activeOpacity={0.85}>
-      <View style={styles.sellBtnInner}>
+      <Reanimated.View style={[styles.sellBtnInner, pulseStyle]}>
         <Ionicons name="add" size={28} color={Colors.textInverse} />
-      </View>
+      </Reanimated.View>
     </AnimatedPressable>
   );
 };
 
-interface SpringIconProps {
+// ── Tab Icon with spring scale + active indicator dot ──
+interface TabIconProps {
   name: keyof typeof Ionicons.glyphMap;
   color: string;
+  focused: boolean;
   badgeCount?: number;
 }
 
-const TabIcon = ({ name, color, badgeCount }: SpringIconProps) => {
+const TabIcon = ({ name, color, focused, badgeCount }: TabIconProps) => {
+  const iconScale = useSharedValue(focused ? 1.12 : 1);
+
+  useEffect(() => {
+    iconScale.value = withSpring(focused ? 1.12 : 1, { damping: 14, stiffness: 200 });
+  }, [focused, iconScale]);
+
+  const animatedIconStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: iconScale.value }],
+  }));
+
+  const dotOpacity = useSharedValue(focused ? 1 : 0);
+  useEffect(() => {
+    dotOpacity.value = withTiming(focused ? 1 : 0, { duration: 200 });
+  }, [focused, dotOpacity]);
+
+  const dotStyle = useAnimatedStyle(() => ({
+    opacity: dotOpacity.value,
+    transform: [{ scale: dotOpacity.value }],
+  }));
+
   return (
-    <View>
-      <Ionicons name={name} size={22} color={color} />
+    <View style={styles.tabIconWrap}>
+      <Reanimated.View style={animatedIconStyle}>
+        <Ionicons name={name} size={22} color={color} />
+      </Reanimated.View>
       {badgeCount !== undefined && <AnimatedBadge count={badgeCount} />}
+      <Reanimated.View style={[styles.activeIndicator, dotStyle]} />
     </View>
   );
 };
@@ -67,7 +115,7 @@ export default function TabNavigator() {
           tabBarActiveTintColor: Colors.tabActive,
           tabBarInactiveTintColor: Colors.tabInactive,
           tabBarLabelStyle: {
-            fontSize: 11,
+            fontSize: 10,
             fontFamily: Typography.family.semibold,
             letterSpacing: 0.2,
             marginTop: 1,
@@ -86,7 +134,7 @@ export default function TabNavigator() {
           options={{
             tabBarLabel: 'Feed',
             tabBarIcon: ({ color, focused }) => (
-              <TabIcon name={focused ? 'documents' : 'documents-outline'} color={color} />
+              <TabIcon name={focused ? 'documents' : 'documents-outline'} color={color} focused={focused} />
             ),
           }}
         />
@@ -94,9 +142,9 @@ export default function TabNavigator() {
           name="TradeHub"
           component={TradeHubScreen}
           options={{
-            tabBarLabel: 'Trade Hub',
+            tabBarLabel: 'Trade',
             tabBarIcon: ({ color, focused }) => (
-              <TabIcon name={focused ? 'stats-chart' : 'stats-chart-outline'} color={color} />
+              <TabIcon name={focused ? 'stats-chart' : 'stats-chart-outline'} color={color} focused={focused} />
             ),
           }}
         />
@@ -106,7 +154,7 @@ export default function TabNavigator() {
           options={{
             tabBarLabel: 'Closet',
             tabBarIcon: ({ color, focused }) => (
-              <TabIcon name={focused ? 'bookmark' : 'bookmark-outline'} color={color} />
+              <TabIcon name={focused ? 'bookmark' : 'bookmark-outline'} color={color} focused={focused} />
             ),
           }}
         />
@@ -125,7 +173,7 @@ export default function TabNavigator() {
           options={{
             tabBarLabel: 'Inbox',
             tabBarIcon: ({ color, focused }) => (
-              <TabIcon name={focused ? 'chatbubbles' : 'chatbubbles-outline'} color={color} badgeCount={3} />
+              <TabIcon name={focused ? 'chatbubbles' : 'chatbubbles-outline'} color={color} focused={focused} badgeCount={3} />
             ),
           }}
         />
@@ -135,7 +183,7 @@ export default function TabNavigator() {
           options={{
             tabBarLabel: 'Profile',
             tabBarIcon: ({ color, focused }) => (
-              <TabIcon name={focused ? 'person' : 'person-outline'} color={color} />
+              <TabIcon name={focused ? 'person' : 'person-outline'} color={color} focused={focused} />
             ),
           }}
         />
@@ -178,5 +226,15 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 8,
   },
+  tabIconWrap: {
+    alignItems: 'center',
+    position: 'relative',
+  },
+  activeIndicator: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: Colors.tabActive,
+    marginTop: 3,
+  },
 });
-

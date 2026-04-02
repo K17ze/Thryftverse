@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import type { PoolClient } from 'pg';
 import { z } from 'zod';
 import { config } from './config.js';
 import { db, closeDb } from './db/pool.js';
@@ -76,6 +77,862 @@ function parseQueryBoolean(value: unknown, fallback = false): boolean {
   }
 
   return fallback;
+}
+
+interface ApiError extends Error {
+  code: string;
+  details?: Record<string, unknown>;
+}
+
+function createApiError(code: string, message: string, details?: Record<string, unknown>): ApiError {
+  const error = new Error(message) as ApiError;
+  error.code = code;
+  if (details) {
+    error.details = details;
+  }
+  return error;
+}
+
+function getApiError(error: unknown): ApiError | null {
+  if (!error || typeof error !== 'object') {
+    return null;
+  }
+
+  if ('code' in error && typeof (error as { code?: unknown }).code === 'string') {
+    return error as ApiError;
+  }
+
+  return null;
+}
+
+type DbQueryable = Pick<PoolClient, 'query'>;
+type LedgerOwnerType = 'platform' | 'user';
+type LedgerAccountCode =
+  | 'escrow_liability'
+  | 'platform_revenue'
+  | 'seller_payable'
+  | 'buyer_spend'
+  | 'withdrawal_pending'
+  | 'withdrawable_balance';
+type PaymentIntentStatus =
+  | 'requires_payment_method'
+  | 'requires_confirmation'
+  | 'processing'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled';
+type PaymentIntentTerminalStatus = 'succeeded' | 'failed' | 'cancelled';
+type PaymentIntentChannel = 'commerce' | 'syndicate' | 'wallet_topup' | 'wallet_withdrawal';
+
+interface PaymentIntentRow {
+  id: string;
+  user_id: string;
+  gateway_id: string;
+  channel: PaymentIntentChannel;
+  order_id: string | null;
+  syndicate_order_id: number | null;
+  instrument_id: number | null;
+  amount_gbp: number | string;
+  amount_currency: string;
+  status: PaymentIntentStatus;
+  provider_intent_ref: string | null;
+  client_secret: string | null;
+  failure_code: string | null;
+  failure_message: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+type PayoutRequestStatus = 'requested' | 'processing' | 'paid' | 'failed' | 'cancelled';
+
+interface PayoutRequestRow {
+  id: string;
+  user_id: string;
+  payout_account_id: number;
+  amount_gbp: number | string;
+  amount_currency: string;
+  status: PayoutRequestStatus;
+  provider_payout_ref: string | null;
+  failure_reason: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+function createRuntimeId(prefix: string): string {
+  return `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1_000_000)}`;
+}
+
+function toPaymentIntentPayload(row: PaymentIntentRow) {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    gatewayId: row.gateway_id,
+    channel: row.channel,
+    orderId: row.order_id,
+    syndicateOrderId: row.syndicate_order_id,
+    instrumentId: row.instrument_id,
+    amountGbp: Number(row.amount_gbp),
+    amountCurrency: row.amount_currency,
+    status: row.status,
+    providerIntentRef: row.provider_intent_ref,
+    clientSecret: row.client_secret,
+    failureCode: row.failure_code,
+    failureMessage: row.failure_message,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function toPayoutRequestPayload(row: PayoutRequestRow) {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    payoutAccountId: row.payout_account_id,
+    amountGbp: Number(row.amount_gbp),
+    amountCurrency: row.amount_currency,
+    status: row.status,
+    providerPayoutRef: row.provider_payout_ref,
+    failureReason: row.failure_reason,
+    metadata: row.metadata,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function canTransitionPayoutRequestStatus(
+  currentStatus: PayoutRequestStatus,
+  nextStatus: PayoutRequestStatus
+): boolean {
+  if (currentStatus === nextStatus) {
+    return true;
+  }
+
+  if (currentStatus === 'requested') {
+    return ['processing', 'paid', 'failed', 'cancelled'].includes(nextStatus);
+  }
+
+  if (currentStatus === 'processing') {
+    return ['paid', 'failed', 'cancelled'].includes(nextStatus);
+  }
+
+  return false;
+}
+
+async function paymentTablesAvailable(client: DbQueryable): Promise<boolean> {
+  const result = await client.query<{ exists: boolean }>(
+    `
+      SELECT
+        to_regclass('public.payment_gateways') IS NOT NULL
+        AND to_regclass('public.payment_intents') IS NOT NULL
+        AND to_regclass('public.payment_attempts') IS NOT NULL
+        AND to_regclass('public.payment_webhook_events') IS NOT NULL
+        AND to_regclass('public.payout_accounts') IS NOT NULL
+        AND to_regclass('public.payout_requests') IS NOT NULL AS exists
+    `
+  );
+
+  return Boolean(result.rows[0]?.exists);
+}
+
+async function ledgerTablesAvailable(client: DbQueryable): Promise<boolean> {
+  const result = await client.query<{ exists: boolean }>(
+    `
+      SELECT
+        to_regclass('public.ledger_accounts') IS NOT NULL
+        AND to_regclass('public.ledger_entries') IS NOT NULL AS exists
+    `
+  );
+
+  return Boolean(result.rows[0]?.exists);
+}
+
+async function ensureLedgerAccount(
+  client: DbQueryable,
+  ownerType: LedgerOwnerType,
+  ownerId: string,
+  accountCode: LedgerAccountCode,
+  currency = 'GBP'
+): Promise<number> {
+  const result = await client.query<{ id: number }>(
+    `
+      INSERT INTO ledger_accounts (owner_type, owner_id, account_code, currency)
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT (owner_type, owner_id, account_code, currency)
+      DO UPDATE SET owner_id = EXCLUDED.owner_id
+      RETURNING id
+    `,
+    [ownerType, ownerId, accountCode, currency]
+  );
+
+  return result.rows[0].id;
+}
+
+async function appendLedgerEntry(
+  client: DbQueryable,
+  input: {
+    accountId: number;
+    counterpartyAccountId: number;
+    direction: 'debit' | 'credit';
+    amountGbp: number;
+    sourceType: 'order_payment' | 'payout' | 'refund' | 'adjustment';
+    sourceId: string;
+    lineType: string;
+    metadata?: Record<string, unknown>;
+  }
+): Promise<void> {
+  await client.query(
+    `
+      INSERT INTO ledger_entries (
+        account_id,
+        counterparty_account_id,
+        direction,
+        amount_gbp,
+        currency,
+        source_type,
+        source_id,
+        line_type,
+        metadata
+      )
+      VALUES ($1, $2, $3, $4, 'GBP', $5, $6, $7, $8::jsonb)
+    `,
+    [
+      input.accountId,
+      input.counterpartyAccountId,
+      input.direction,
+      input.amountGbp,
+      input.sourceType,
+      input.sourceId,
+      input.lineType,
+      toJsonString(input.metadata ?? {}),
+    ]
+  );
+}
+
+async function getLedgerAccountBalance(
+  client: DbQueryable,
+  ownerType: LedgerOwnerType,
+  ownerId: string,
+  accountCode: LedgerAccountCode
+): Promise<number> {
+  const result = await client.query<{ balance: string }>(
+    `
+      SELECT
+        COALESCE(
+          SUM(
+            CASE
+              WHEN le.direction = 'credit' THEN le.amount_gbp
+              ELSE -le.amount_gbp
+            END
+          ),
+          0
+        )::text AS balance
+      FROM ledger_entries le
+      INNER JOIN ledger_accounts la
+        ON la.id = le.account_id
+      WHERE la.owner_type = $1
+        AND la.owner_id = $2
+        AND la.account_code = $3
+        AND la.currency = 'GBP'
+    `,
+    [ownerType, ownerId, accountCode]
+  );
+
+  return Number(result.rows[0]?.balance ?? '0');
+}
+
+async function getUserCumulativeWithdrawnGbp(client: DbQueryable, userId: string): Promise<number> {
+  const result = await client.query<{ total: string }>(
+    `
+      SELECT
+        COALESCE(SUM(le.amount_gbp), 0)::text AS total
+      FROM ledger_entries le
+      INNER JOIN ledger_accounts la
+        ON la.id = le.account_id
+      WHERE la.owner_type = 'user'
+        AND la.owner_id = $1
+        AND la.account_code = 'withdrawal_pending'
+        AND le.source_type = 'payout'
+        AND le.line_type = 'payout_paid'
+        AND le.direction = 'debit'
+    `,
+    [userId]
+  );
+
+  return Number(result.rows[0]?.total ?? '0');
+}
+
+async function postCommerceOrderLedgerEntries(
+  client: DbQueryable,
+  input: {
+    orderId: string;
+    buyerId: string;
+    sellerId: string;
+    subtotalGbp: number;
+    buyerProtectionFeeGbp: number;
+    totalGbp: number;
+  }
+): Promise<void> {
+  const totalGbp = roundTo(input.totalGbp, 2);
+  const subtotalGbp = roundTo(input.subtotalGbp, 2);
+  const buyerProtectionFeeGbp = roundTo(input.buyerProtectionFeeGbp, 2);
+
+  if (totalGbp <= 0) {
+    return;
+  }
+
+  const buyerSpendAccountId = await ensureLedgerAccount(
+    client,
+    'user',
+    input.buyerId,
+    'buyer_spend'
+  );
+  const sellerPayableAccountId = await ensureLedgerAccount(
+    client,
+    'user',
+    input.sellerId,
+    'seller_payable'
+  );
+  const escrowAccountId = await ensureLedgerAccount(
+    client,
+    'platform',
+    'platform',
+    'escrow_liability'
+  );
+  const platformRevenueAccountId = await ensureLedgerAccount(
+    client,
+    'platform',
+    'platform',
+    'platform_revenue'
+  );
+
+  await appendLedgerEntry(client, {
+    accountId: buyerSpendAccountId,
+    counterpartyAccountId: escrowAccountId,
+    direction: 'debit',
+    amountGbp: totalGbp,
+    sourceType: 'order_payment',
+    sourceId: input.orderId,
+    lineType: 'buyer_charge',
+    metadata: {
+      buyerId: input.buyerId,
+      sellerId: input.sellerId,
+    },
+  });
+
+  await appendLedgerEntry(client, {
+    accountId: escrowAccountId,
+    counterpartyAccountId: buyerSpendAccountId,
+    direction: 'credit',
+    amountGbp: totalGbp,
+    sourceType: 'order_payment',
+    sourceId: input.orderId,
+    lineType: 'buyer_charge',
+    metadata: {
+      buyerId: input.buyerId,
+      sellerId: input.sellerId,
+    },
+  });
+
+  if (subtotalGbp > 0) {
+    await appendLedgerEntry(client, {
+      accountId: escrowAccountId,
+      counterpartyAccountId: sellerPayableAccountId,
+      direction: 'debit',
+      amountGbp: subtotalGbp,
+      sourceType: 'order_payment',
+      sourceId: input.orderId,
+      lineType: 'seller_payable_credit',
+      metadata: {
+        sellerId: input.sellerId,
+      },
+    });
+
+    await appendLedgerEntry(client, {
+      accountId: sellerPayableAccountId,
+      counterpartyAccountId: escrowAccountId,
+      direction: 'credit',
+      amountGbp: subtotalGbp,
+      sourceType: 'order_payment',
+      sourceId: input.orderId,
+      lineType: 'seller_payable_credit',
+      metadata: {
+        sellerId: input.sellerId,
+      },
+    });
+  }
+
+  if (buyerProtectionFeeGbp > 0) {
+    await appendLedgerEntry(client, {
+      accountId: escrowAccountId,
+      counterpartyAccountId: platformRevenueAccountId,
+      direction: 'debit',
+      amountGbp: buyerProtectionFeeGbp,
+      sourceType: 'order_payment',
+      sourceId: input.orderId,
+      lineType: 'platform_commission_credit',
+      metadata: {
+        component: 'buyer_protection_fee',
+      },
+    });
+
+    await appendLedgerEntry(client, {
+      accountId: platformRevenueAccountId,
+      counterpartyAccountId: escrowAccountId,
+      direction: 'credit',
+      amountGbp: buyerProtectionFeeGbp,
+      sourceType: 'order_payment',
+      sourceId: input.orderId,
+      lineType: 'platform_commission_credit',
+      metadata: {
+        component: 'buyer_protection_fee',
+      },
+    });
+  }
+}
+
+async function settlePaymentIntent(
+  client: PoolClient,
+  input: {
+    intentId: string;
+    finalStatus: PaymentIntentTerminalStatus;
+    providerAttemptRef?: string;
+    providerFeeGbp?: number;
+    failureCode?: string;
+    failureMessage?: string;
+    rawPayload?: unknown;
+  }
+): Promise<{
+  intent: ReturnType<typeof toPaymentIntentPayload>;
+  alreadyFinal: boolean;
+  orderSettlement?: {
+    orderId: string;
+    buyerChargedGbp: number;
+    sellerPayableCreditedGbp: number;
+    platformCommissionCreditedGbp: number;
+  };
+}> {
+  const intentResult = await client.query<PaymentIntentRow>(
+    `
+      SELECT
+        id,
+        user_id,
+        gateway_id,
+        channel,
+        order_id,
+        syndicate_order_id,
+        instrument_id,
+        amount_gbp,
+        amount_currency,
+        status,
+        provider_intent_ref,
+        client_secret,
+        failure_code,
+        failure_message,
+        created_at,
+        updated_at
+      FROM payment_intents
+      WHERE id = $1
+      LIMIT 1
+      FOR UPDATE
+    `,
+    [input.intentId]
+  );
+
+  const currentIntent = intentResult.rows[0];
+  if (!currentIntent) {
+    throw new Error('PAYMENT_INTENT_NOT_FOUND');
+  }
+
+  const isTerminal = ['succeeded', 'failed', 'cancelled'].includes(currentIntent.status);
+  if (isTerminal) {
+    return {
+      intent: toPaymentIntentPayload(currentIntent),
+      alreadyFinal: true,
+    };
+  }
+
+  const nextStatus: PaymentIntentStatus = input.finalStatus;
+  const providerFeeGbp = roundTo(Math.max(0, input.providerFeeGbp ?? 0), 2);
+  const attemptRef = input.providerAttemptRef ?? createRuntimeId('attempt');
+  const attemptStatus =
+    nextStatus === 'succeeded' ? 'succeeded' : nextStatus === 'cancelled' ? 'cancelled' : 'failed';
+
+  await client.query(
+    `
+      INSERT INTO payment_attempts (
+        intent_id,
+        gateway_id,
+        status,
+        amount_gbp,
+        provider_fee_gbp,
+        provider_attempt_ref,
+        raw_payload
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+      ON CONFLICT (gateway_id, provider_attempt_ref)
+      DO NOTHING
+    `,
+    [
+      currentIntent.id,
+      currentIntent.gateway_id,
+      attemptStatus,
+      Number(currentIntent.amount_gbp),
+      providerFeeGbp,
+      attemptRef,
+      toJsonString(input.rawPayload ?? {}),
+    ]
+  );
+
+  const updatedIntentResult = await client.query<PaymentIntentRow>(
+    `
+      UPDATE payment_intents
+      SET
+        status = $2,
+        failure_code = $3,
+        failure_message = $4,
+        updated_at = NOW()
+      WHERE id = $1
+      RETURNING
+        id,
+        user_id,
+        gateway_id,
+        channel,
+        order_id,
+        syndicate_order_id,
+        instrument_id,
+        amount_gbp,
+        amount_currency,
+        status,
+        provider_intent_ref,
+        client_secret,
+        failure_code,
+        failure_message,
+        created_at,
+        updated_at
+    `,
+    [
+      currentIntent.id,
+      nextStatus,
+      nextStatus === 'failed' ? input.failureCode ?? 'payment_failed' : null,
+      nextStatus === 'failed' ? input.failureMessage ?? 'Payment failed' : null,
+    ]
+  );
+
+  const updatedIntent = updatedIntentResult.rows[0];
+  if (!updatedIntent) {
+    throw new Error('PAYMENT_INTENT_UPDATE_FAILED');
+  }
+
+  let orderSettlement:
+    | {
+        orderId: string;
+        buyerChargedGbp: number;
+        sellerPayableCreditedGbp: number;
+        platformCommissionCreditedGbp: number;
+      }
+    | undefined;
+
+  if (nextStatus === 'succeeded' && updatedIntent.channel === 'commerce' && updatedIntent.order_id) {
+    const paidOrderResult = await client.query<{
+      id: string;
+      buyer_id: string;
+      seller_id: string;
+      subtotal_gbp: number | string;
+      buyer_protection_fee_gbp: number | string;
+      total_gbp: number | string;
+    }>(
+      `
+        UPDATE orders
+        SET status = 'paid', updated_at = NOW()
+        WHERE id = $1 AND status = 'created'
+        RETURNING
+          id,
+          buyer_id,
+          seller_id,
+          subtotal_gbp,
+          buyer_protection_fee_gbp,
+          total_gbp
+      `,
+      [updatedIntent.order_id]
+    );
+
+    const paidOrder = paidOrderResult.rows[0];
+    if (paidOrder) {
+      if (await ledgerTablesAvailable(client)) {
+        await postCommerceOrderLedgerEntries(client, {
+          orderId: paidOrder.id,
+          buyerId: paidOrder.buyer_id,
+          sellerId: paidOrder.seller_id,
+          subtotalGbp: Number(paidOrder.subtotal_gbp),
+          buyerProtectionFeeGbp: Number(paidOrder.buyer_protection_fee_gbp),
+          totalGbp: Number(paidOrder.total_gbp),
+        });
+      }
+
+      orderSettlement = {
+        orderId: paidOrder.id,
+        buyerChargedGbp: Number(paidOrder.total_gbp),
+        sellerPayableCreditedGbp: Number(paidOrder.subtotal_gbp),
+        platformCommissionCreditedGbp: Number(paidOrder.buyer_protection_fee_gbp),
+      };
+    }
+  }
+
+  return {
+    intent: toPaymentIntentPayload(updatedIntent),
+    alreadyFinal: false,
+    orderSettlement,
+  };
+}
+
+async function settlePayoutRequest(
+  client: PoolClient,
+  input: {
+    userId: string;
+    requestId: string;
+    targetStatus: Exclude<PayoutRequestStatus, 'requested'>;
+    providerPayoutRef?: string;
+    failureReason?: string;
+    metadata?: Record<string, unknown>;
+    source?: string;
+  }
+): Promise<{
+  payoutRequest: ReturnType<typeof toPayoutRequestPayload>;
+  idempotent: boolean;
+  fromStatus: PayoutRequestStatus;
+}> {
+  const payoutRequestResult = await client.query<PayoutRequestRow>(
+    `
+      SELECT
+        id,
+        user_id,
+        payout_account_id,
+        amount_gbp,
+        amount_currency,
+        status,
+        provider_payout_ref,
+        failure_reason,
+        metadata,
+        created_at,
+        updated_at
+      FROM payout_requests
+      WHERE id = $1
+        AND user_id = $2
+      LIMIT 1
+      FOR UPDATE
+    `,
+    [input.requestId, input.userId]
+  );
+
+  const payoutRequest = payoutRequestResult.rows[0];
+  if (!payoutRequest) {
+    throw createApiError('PAYOUT_REQUEST_NOT_FOUND', 'Payout request not found');
+  }
+
+  if (payoutRequest.status === input.targetStatus) {
+    return {
+      payoutRequest: toPayoutRequestPayload(payoutRequest),
+      idempotent: true,
+      fromStatus: payoutRequest.status,
+    };
+  }
+
+  if (!canTransitionPayoutRequestStatus(payoutRequest.status, input.targetStatus)) {
+    throw createApiError(
+      'PAYOUT_INVALID_TRANSITION',
+      `Payout request cannot transition from '${payoutRequest.status}' to '${input.targetStatus}'`
+    );
+  }
+
+  const amountGbp = roundTo(Number(payoutRequest.amount_gbp), 2);
+
+  if (await ledgerTablesAvailable(client)) {
+    if (input.targetStatus === 'paid') {
+      const withdrawalPendingBalance = await getLedgerAccountBalance(
+        client,
+        'user',
+        input.userId,
+        'withdrawal_pending'
+      );
+
+      if (amountGbp > withdrawalPendingBalance + 1e-6) {
+        throw createApiError(
+          'PAYOUT_PENDING_INSUFFICIENT',
+          'Insufficient withdrawal pending balance to complete payout',
+          {
+            withdrawalPendingGbp: withdrawalPendingBalance,
+          }
+        );
+      }
+
+      const withdrawalPendingAccountId = await ensureLedgerAccount(
+        client,
+        'user',
+        input.userId,
+        'withdrawal_pending'
+      );
+      const withdrawableBalanceAccountId = await ensureLedgerAccount(
+        client,
+        'user',
+        input.userId,
+        'withdrawable_balance'
+      );
+
+      await appendLedgerEntry(client, {
+        accountId: withdrawalPendingAccountId,
+        counterpartyAccountId: withdrawableBalanceAccountId,
+        direction: 'debit',
+        amountGbp,
+        sourceType: 'payout',
+        sourceId: input.requestId,
+        lineType: 'payout_paid',
+        metadata: {
+          fromStatus: payoutRequest.status,
+          toStatus: input.targetStatus,
+          source: input.source ?? 'manual_status',
+        },
+      });
+
+      await appendLedgerEntry(client, {
+        accountId: withdrawableBalanceAccountId,
+        counterpartyAccountId: withdrawalPendingAccountId,
+        direction: 'credit',
+        amountGbp,
+        sourceType: 'payout',
+        sourceId: input.requestId,
+        lineType: 'payout_paid',
+        metadata: {
+          fromStatus: payoutRequest.status,
+          toStatus: input.targetStatus,
+          source: input.source ?? 'manual_status',
+        },
+      });
+    } else if (input.targetStatus === 'failed' || input.targetStatus === 'cancelled') {
+      const withdrawalPendingBalance = await getLedgerAccountBalance(
+        client,
+        'user',
+        input.userId,
+        'withdrawal_pending'
+      );
+
+      if (amountGbp > withdrawalPendingBalance + 1e-6) {
+        throw createApiError(
+          'PAYOUT_PENDING_INSUFFICIENT',
+          'Insufficient withdrawal pending balance to reverse payout',
+          {
+            withdrawalPendingGbp: withdrawalPendingBalance,
+          }
+        );
+      }
+
+      const withdrawalPendingAccountId = await ensureLedgerAccount(
+        client,
+        'user',
+        input.userId,
+        'withdrawal_pending'
+      );
+      const sellerPayableAccountId = await ensureLedgerAccount(
+        client,
+        'user',
+        input.userId,
+        'seller_payable'
+      );
+
+      await appendLedgerEntry(client, {
+        accountId: withdrawalPendingAccountId,
+        counterpartyAccountId: sellerPayableAccountId,
+        direction: 'debit',
+        amountGbp,
+        sourceType: 'payout',
+        sourceId: input.requestId,
+        lineType: 'payout_reversed',
+        metadata: {
+          fromStatus: payoutRequest.status,
+          toStatus: input.targetStatus,
+          source: input.source ?? 'manual_status',
+        },
+      });
+
+      await appendLedgerEntry(client, {
+        accountId: sellerPayableAccountId,
+        counterpartyAccountId: withdrawalPendingAccountId,
+        direction: 'credit',
+        amountGbp,
+        sourceType: 'payout',
+        sourceId: input.requestId,
+        lineType: 'payout_reversed',
+        metadata: {
+          fromStatus: payoutRequest.status,
+          toStatus: input.targetStatus,
+          source: input.source ?? 'manual_status',
+        },
+      });
+    }
+  }
+
+  const mergedMetadata = {
+    ...(payoutRequest.metadata ?? {}),
+    ...(input.metadata ?? {}),
+    statusTransition: {
+      from: payoutRequest.status,
+      to: input.targetStatus,
+      source: input.source ?? 'manual_status',
+      at: new Date().toISOString(),
+    },
+  };
+
+  const providerPayoutRef =
+    input.targetStatus === 'paid'
+      ? input.providerPayoutRef ?? payoutRequest.provider_payout_ref ?? createRuntimeId('mock_payout')
+      : payoutRequest.provider_payout_ref;
+
+  const failureReason =
+    input.targetStatus === 'failed'
+      ? input.failureReason ?? 'Payout failed'
+      : input.targetStatus === 'cancelled'
+        ? input.failureReason ?? 'Payout cancelled'
+        : null;
+
+  const updated = await client.query<PayoutRequestRow>(
+    `
+      UPDATE payout_requests
+      SET
+        status = $3,
+        provider_payout_ref = $4,
+        failure_reason = $5,
+        metadata = $6::jsonb,
+        updated_at = NOW()
+      WHERE id = $1
+        AND user_id = $2
+      RETURNING
+        id,
+        user_id,
+        payout_account_id,
+        amount_gbp,
+        amount_currency,
+        status,
+        provider_payout_ref,
+        failure_reason,
+        metadata,
+        created_at,
+        updated_at
+    `,
+    [
+      input.requestId,
+      input.userId,
+      input.targetStatus,
+      providerPayoutRef,
+      failureReason,
+      toJsonString(mergedMetadata),
+    ]
+  );
+
+  return {
+    payoutRequest: toPayoutRequestPayload(updated.rows[0]),
+    idempotent: false,
+    fromStatus: payoutRequest.status,
+  };
 }
 
 async function rewrapDomainRows(
@@ -700,11 +1557,29 @@ app.get('/wallets/:userId/snapshot', async (request, reply) => {
     updatedAt?: string;
   }>(row.ciphertext, `wallet-snapshot:${userId}`);
 
+  let payoutSummary = {
+    currentPendingWithdrawalGbp: 0,
+    cumulativeWithdrawnGbp: 0,
+  };
+
+  if (await ledgerTablesAvailable(db)) {
+    const [currentPendingWithdrawalGbp, cumulativeWithdrawnGbp] = await Promise.all([
+      getLedgerAccountBalance(db, 'user', userId, 'withdrawal_pending'),
+      getUserCumulativeWithdrawnGbp(db, userId),
+    ]);
+
+    payoutSummary = {
+      currentPendingWithdrawalGbp,
+      cumulativeWithdrawnGbp,
+    };
+  }
+
   return {
     ok: true,
     keyVersion: row.key_version,
     createdAt: row.created_at,
     snapshot,
+    payoutSummary,
   };
 });
 
@@ -1189,6 +2064,1326 @@ app.delete('/users/:userId/payment-methods/:paymentMethodId', async (request, re
   return { ok: true };
 });
 
+app.get('/payments/gateways', async () => {
+  const tableCheck = await db.query<{ exists: boolean }>(
+    `SELECT to_regclass('public.payment_gateways') IS NOT NULL AS exists`
+  );
+
+  if (!tableCheck.rows[0]?.exists) {
+    return {
+      ok: true,
+      items: [
+        {
+          id: 'mock_fiat_gbp',
+          displayName: 'Mock Fiat Gateway',
+          type: 'fiat',
+          isActive: true,
+        },
+      ],
+    };
+  }
+
+  const result = await db.query<{
+    id: string;
+    display_name: string;
+    gateway_type: 'fiat' | 'stablecoin';
+    is_active: boolean;
+  }>(
+    `
+      SELECT id, display_name, gateway_type, is_active
+      FROM payment_gateways
+      WHERE is_active = TRUE
+      ORDER BY id ASC
+    `
+  );
+
+  return {
+    ok: true,
+    items: result.rows.map((row) => ({
+      id: row.id,
+      displayName: row.display_name,
+      type: row.gateway_type,
+      isActive: row.is_active,
+    })),
+  };
+});
+
+app.get('/payments/platform/summary', async () => {
+  if (!(await ledgerTablesAvailable(db))) {
+    return {
+      ok: true,
+      balances: {
+        platformRevenueGbp: 0,
+        escrowLiabilityGbp: 0,
+      },
+    };
+  }
+
+  const [platformRevenueGbp, escrowLiabilityGbp] = await Promise.all([
+    getLedgerAccountBalance(db, 'platform', 'platform', 'platform_revenue'),
+    getLedgerAccountBalance(db, 'platform', 'platform', 'escrow_liability'),
+  ]);
+
+  return {
+    ok: true,
+    balances: {
+      platformRevenueGbp,
+      escrowLiabilityGbp,
+    },
+  };
+});
+
+app.get('/users/:userId/ledger/balances', async (request) => {
+  const paramsSchema = z.object({ userId: z.string().min(2) });
+  const { userId } = paramsSchema.parse(request.params);
+
+  if (!(await ledgerTablesAvailable(db))) {
+    return {
+      ok: true,
+      userId,
+      balances: {
+        sellerPayableGbp: 0,
+        buyerSpendGbp: 0,
+        withdrawalPendingGbp: 0,
+        withdrawableBalanceGbp: 0,
+        cumulativeWithdrawnGbp: 0,
+      },
+    };
+  }
+
+  const [
+    sellerPayableGbp,
+    buyerSpendGbp,
+    withdrawalPendingGbp,
+    withdrawableBalanceGbp,
+    cumulativeWithdrawnGbp,
+  ] =
+    await Promise.all([
+    getLedgerAccountBalance(db, 'user', userId, 'seller_payable'),
+    getLedgerAccountBalance(db, 'user', userId, 'buyer_spend'),
+    getLedgerAccountBalance(db, 'user', userId, 'withdrawal_pending'),
+    getLedgerAccountBalance(db, 'user', userId, 'withdrawable_balance'),
+    getUserCumulativeWithdrawnGbp(db, userId),
+  ]);
+
+  return {
+    ok: true,
+    userId,
+    balances: {
+      sellerPayableGbp,
+      buyerSpendGbp,
+      withdrawalPendingGbp,
+      withdrawableBalanceGbp,
+      cumulativeWithdrawnGbp,
+    },
+  };
+});
+
+app.get('/users/:userId/payout-accounts', async (request, reply) => {
+  const paramsSchema = z.object({ userId: z.string().min(2) });
+  const { userId } = paramsSchema.parse(request.params);
+
+  if (!(await paymentTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: 'Payment settlement tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const result = await db.query<{
+    id: number;
+    user_id: string;
+    gateway_id: string;
+    provider_account_ref: string;
+    country_code: string | null;
+    currency: string;
+    status: 'pending' | 'active' | 'disabled';
+    metadata: Record<string, unknown>;
+    created_at: string;
+    updated_at: string;
+  }>(
+    `
+      SELECT
+        id,
+        user_id,
+        gateway_id,
+        provider_account_ref,
+        country_code,
+        currency,
+        status,
+        metadata,
+        created_at,
+        updated_at
+      FROM payout_accounts
+      WHERE user_id = $1
+      ORDER BY updated_at DESC
+    `,
+    [userId]
+  );
+
+  return {
+    ok: true,
+    items: result.rows.map((row) => ({
+      id: row.id,
+      userId: row.user_id,
+      gatewayId: row.gateway_id,
+      providerAccountRef: row.provider_account_ref,
+      countryCode: row.country_code,
+      currency: row.currency,
+      status: row.status,
+      metadata: row.metadata,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    })),
+  };
+});
+
+app.post('/users/:userId/payout-accounts', async (request, reply) => {
+  const paramsSchema = z.object({ userId: z.string().min(2) });
+  const bodySchema = z.object({
+    gatewayId: z.string().min(2).max(80).default('mock_fiat_gbp'),
+    providerAccountRef: z.string().min(3).max(140).optional(),
+    countryCode: z.string().min(2).max(3).optional(),
+    currency: z.string().length(3).default('GBP'),
+    status: z.enum(['pending', 'active', 'disabled']).default('active'),
+    metadata: z.record(z.unknown()).optional(),
+  });
+
+  const { userId } = paramsSchema.parse(request.params);
+  const payload = bodySchema.parse(request.body);
+
+  if (!(await paymentTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: 'Payment settlement tables are unavailable. Run migrations first.',
+    };
+  }
+
+  await ensureUserExists(userId);
+
+  const gateway = await db.query<{ id: string }>(
+    'SELECT id FROM payment_gateways WHERE id = $1 AND is_active = TRUE LIMIT 1',
+    [payload.gatewayId]
+  );
+
+  if (!gateway.rowCount) {
+    reply.code(400);
+    return {
+      ok: false,
+      error: 'Gateway is not available for payouts',
+    };
+  }
+
+  const providerAccountRef = payload.providerAccountRef ?? createRuntimeId(`mock_payout_account_${userId}`);
+
+  const result = await db.query<{
+    id: number;
+    user_id: string;
+    gateway_id: string;
+    provider_account_ref: string;
+    country_code: string | null;
+    currency: string;
+    status: 'pending' | 'active' | 'disabled';
+    metadata: Record<string, unknown>;
+    created_at: string;
+    updated_at: string;
+  }>(
+    `
+      INSERT INTO payout_accounts (
+        user_id,
+        gateway_id,
+        provider_account_ref,
+        country_code,
+        currency,
+        status,
+        metadata
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+      RETURNING
+        id,
+        user_id,
+        gateway_id,
+        provider_account_ref,
+        country_code,
+        currency,
+        status,
+        metadata,
+        created_at,
+        updated_at
+    `,
+    [
+      userId,
+      payload.gatewayId,
+      providerAccountRef,
+      payload.countryCode?.toUpperCase() ?? null,
+      payload.currency.toUpperCase(),
+      payload.status,
+      toJsonString(payload.metadata ?? {}),
+    ]
+  );
+
+  reply.code(201);
+  return {
+    ok: true,
+    item: {
+      id: result.rows[0].id,
+      userId: result.rows[0].user_id,
+      gatewayId: result.rows[0].gateway_id,
+      providerAccountRef: result.rows[0].provider_account_ref,
+      countryCode: result.rows[0].country_code,
+      currency: result.rows[0].currency,
+      status: result.rows[0].status,
+      metadata: result.rows[0].metadata,
+      createdAt: result.rows[0].created_at,
+      updatedAt: result.rows[0].updated_at,
+    },
+  };
+});
+
+app.get('/users/:userId/payout-requests', async (request, reply) => {
+  const paramsSchema = z.object({ userId: z.string().min(2) });
+  const querySchema = z.object({
+    limit: z.coerce.number().int().min(1).max(200).default(60),
+  });
+
+  const { userId } = paramsSchema.parse(request.params);
+  const { limit } = querySchema.parse(request.query);
+
+  if (!(await paymentTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: 'Payment settlement tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const result = await db.query<PayoutRequestRow>(
+    `
+      SELECT
+        id,
+        user_id,
+        payout_account_id,
+        amount_gbp,
+        amount_currency,
+        status,
+        provider_payout_ref,
+        failure_reason,
+        metadata,
+        created_at,
+        updated_at
+      FROM payout_requests
+      WHERE user_id = $1
+      ORDER BY created_at DESC
+      LIMIT $2
+    `,
+    [userId, limit]
+  );
+
+  return {
+    ok: true,
+    items: result.rows.map((row) => toPayoutRequestPayload(row)),
+  };
+});
+
+app.get('/users/:userId/payout-requests/:requestId', async (request, reply) => {
+  const paramsSchema = z.object({
+    userId: z.string().min(2),
+    requestId: z.string().min(4).max(140),
+  });
+
+  const { userId, requestId } = paramsSchema.parse(request.params);
+
+  if (!(await paymentTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: 'Payment settlement tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const result = await db.query<PayoutRequestRow>(
+    `
+      SELECT
+        id,
+        user_id,
+        payout_account_id,
+        amount_gbp,
+        amount_currency,
+        status,
+        provider_payout_ref,
+        failure_reason,
+        metadata,
+        created_at,
+        updated_at
+      FROM payout_requests
+      WHERE id = $1
+        AND user_id = $2
+      LIMIT 1
+    `,
+    [requestId, userId]
+  );
+
+  const payoutRequest = result.rows[0];
+  if (!payoutRequest) {
+    reply.code(404);
+    return {
+      ok: false,
+      error: 'Payout request not found',
+    };
+  }
+
+  return {
+    ok: true,
+    payoutRequest: toPayoutRequestPayload(payoutRequest),
+  };
+});
+
+app.post('/users/:userId/payout-requests', async (request, reply) => {
+  const paramsSchema = z.object({ userId: z.string().min(2) });
+  const bodySchema = z.object({
+    payoutAccountId: z.coerce.number().int().positive(),
+    amountGbp: z.number().positive(),
+    metadata: z.record(z.unknown()).optional(),
+  });
+
+  const { userId } = paramsSchema.parse(request.params);
+  const payload = bodySchema.parse(request.body);
+
+  if (!(await paymentTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: 'Payment settlement tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const requestId = createRuntimeId('po');
+  const client = await db.connect();
+
+  try {
+    await client.query('BEGIN');
+    await ensureUserExists(userId);
+
+    const payoutAccount = await client.query<{
+      id: number;
+      user_id: string;
+      gateway_id: string;
+      status: 'pending' | 'active' | 'disabled';
+    }>(
+      `
+        SELECT id, user_id, gateway_id, status
+        FROM payout_accounts
+        WHERE id = $1 AND user_id = $2
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [payload.payoutAccountId, userId]
+    );
+
+    const payoutAccountRow = payoutAccount.rows[0];
+    if (!payoutAccountRow) {
+      await client.query('ROLLBACK');
+      reply.code(400);
+      return {
+        ok: false,
+        error: 'Payout account not found for this user',
+      };
+    }
+
+    if (payoutAccountRow.status !== 'active') {
+      await client.query('ROLLBACK');
+      reply.code(409);
+      return {
+        ok: false,
+        error: 'Payout account is not active',
+      };
+    }
+
+    const amountGbp = roundTo(payload.amountGbp, 2);
+
+    let sellerPayableBalanceBefore = 0;
+    if (await ledgerTablesAvailable(client)) {
+      sellerPayableBalanceBefore = await getLedgerAccountBalance(client, 'user', userId, 'seller_payable');
+      if (amountGbp > sellerPayableBalanceBefore + 1e-6) {
+        await client.query('ROLLBACK');
+        reply.code(409);
+        return {
+          ok: false,
+          error: 'Insufficient seller payable balance for this payout request',
+          balance: {
+            sellerPayableGbp: sellerPayableBalanceBefore,
+          },
+        };
+      }
+    }
+
+    const result = await client.query<PayoutRequestRow>(
+      `
+        INSERT INTO payout_requests (
+          id,
+          user_id,
+          payout_account_id,
+          amount_gbp,
+          amount_currency,
+          status,
+          metadata
+        )
+        VALUES ($1, $2, $3, $4, 'GBP', 'requested', $5::jsonb)
+        RETURNING
+          id,
+          user_id,
+          payout_account_id,
+          amount_gbp,
+          amount_currency,
+          status,
+          provider_payout_ref,
+          failure_reason,
+          metadata,
+          created_at,
+          updated_at
+      `,
+      [requestId, userId, payload.payoutAccountId, amountGbp, toJsonString(payload.metadata ?? {})]
+    );
+
+    if (await ledgerTablesAvailable(client)) {
+      const sellerPayableAccountId = await ensureLedgerAccount(client, 'user', userId, 'seller_payable');
+      const withdrawalPendingAccountId = await ensureLedgerAccount(client, 'user', userId, 'withdrawal_pending');
+
+      await appendLedgerEntry(client, {
+        accountId: sellerPayableAccountId,
+        counterpartyAccountId: withdrawalPendingAccountId,
+        direction: 'debit',
+        amountGbp,
+        sourceType: 'payout',
+        sourceId: requestId,
+        lineType: 'payout_requested',
+        metadata: {
+          payoutAccountId: payload.payoutAccountId,
+        },
+      });
+
+      await appendLedgerEntry(client, {
+        accountId: withdrawalPendingAccountId,
+        counterpartyAccountId: sellerPayableAccountId,
+        direction: 'credit',
+        amountGbp,
+        sourceType: 'payout',
+        sourceId: requestId,
+        lineType: 'payout_requested',
+        metadata: {
+          payoutAccountId: payload.payoutAccountId,
+        },
+      });
+    }
+
+    await client.query('COMMIT');
+
+    reply.code(201);
+    return {
+      ok: true,
+      payoutRequest: toPayoutRequestPayload(result.rows[0]),
+      balance: {
+        sellerPayableBeforeRequestGbp: sellerPayableBalanceBefore,
+        sellerPayableAfterRequestGbp: roundTo(Math.max(0, sellerPayableBalanceBefore - amountGbp), 2),
+      },
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    request.log.error({ err: error, userId, requestId }, 'Unable to create payout request');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to create payout request',
+    };
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/users/:userId/payout-requests/:requestId/status', async (request, reply) => {
+  const paramsSchema = z.object({
+    userId: z.string().min(2),
+    requestId: z.string().min(4).max(140),
+  });
+  const bodySchema = z.object({
+    status: z.enum(['processing', 'paid', 'failed', 'cancelled']),
+    providerPayoutRef: z.string().min(4).max(140).optional(),
+    failureReason: z.string().max(240).optional(),
+    metadata: z.record(z.unknown()).optional(),
+  });
+
+  const { userId, requestId } = paramsSchema.parse(request.params);
+  const payload = bodySchema.parse(request.body);
+
+  if (!(await paymentTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: 'Payment settlement tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    const settled = await settlePayoutRequest(client, {
+      userId,
+      requestId,
+      targetStatus: payload.status,
+      providerPayoutRef: payload.providerPayoutRef,
+      failureReason: payload.failureReason,
+      metadata: payload.metadata,
+      source: 'manual_status',
+    });
+
+    await client.query('COMMIT');
+
+    return {
+      ok: true,
+      idempotent: settled.idempotent,
+      payoutRequest: settled.payoutRequest,
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+
+    const apiError = getApiError(error);
+    if (apiError?.code === 'PAYOUT_REQUEST_NOT_FOUND') {
+      reply.code(404);
+      return {
+        ok: false,
+        error: apiError.message,
+      };
+    }
+
+    if (apiError?.code === 'PAYOUT_INVALID_TRANSITION') {
+      reply.code(409);
+      return {
+        ok: false,
+        error: apiError.message,
+      };
+    }
+
+    if (apiError?.code === 'PAYOUT_PENDING_INSUFFICIENT') {
+      reply.code(409);
+      return {
+        ok: false,
+        error: apiError.message,
+        balance: apiError.details,
+      };
+    }
+
+    request.log.error({ err: error, userId, requestId }, 'Unable to update payout request status');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to update payout request status',
+    };
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/payments/intents', async (request, reply) => {
+  const bodySchema = z.object({
+    userId: z.string().min(2),
+    gatewayId: z.string().min(2).max(80).optional(),
+    instrumentId: z.coerce.number().int().positive().optional(),
+    orderId: z.string().min(4).max(64).optional(),
+    syndicateOrderId: z.coerce.number().int().positive().optional(),
+    channel: z.enum(['wallet_topup', 'wallet_withdrawal']).optional(),
+    amountGbp: z.number().positive().optional(),
+    amountCurrency: z.string().length(3).default('GBP'),
+    idempotencyKey: z.string().min(6).max(140).optional(),
+    metadata: z.record(z.unknown()).optional(),
+  });
+
+  const payload = bodySchema.parse(request.body);
+
+  if (!(await paymentTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: 'Payment settlement tables are unavailable. Run migrations first.',
+    };
+  }
+
+  if (payload.orderId && payload.syndicateOrderId) {
+    reply.code(400);
+    return {
+      ok: false,
+      error: 'Provide either orderId or syndicateOrderId, not both',
+    };
+  }
+
+  if (!payload.orderId && !payload.syndicateOrderId && !payload.channel) {
+    reply.code(400);
+    return {
+      ok: false,
+      error: 'A payment intent source is required (orderId, syndicateOrderId, or channel)',
+    };
+  }
+
+  if (payload.idempotencyKey) {
+    const existing = await db.query<PaymentIntentRow>(
+      `
+        SELECT
+          id,
+          user_id,
+          gateway_id,
+          channel,
+          order_id,
+          syndicate_order_id,
+          instrument_id,
+          amount_gbp,
+          amount_currency,
+          status,
+          provider_intent_ref,
+          client_secret,
+          failure_code,
+          failure_message,
+          created_at,
+          updated_at
+        FROM payment_intents
+        WHERE idempotency_key = $1
+        LIMIT 1
+      `,
+      [payload.idempotencyKey]
+    );
+
+    if (existing.rowCount) {
+      return {
+        ok: true,
+        idempotent: true,
+        intent: toPaymentIntentPayload(existing.rows[0]),
+      };
+    }
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    await ensureUserExists(payload.userId);
+
+    let channel: PaymentIntentChannel;
+    let amountGbp: number;
+    let gatewayId = payload.gatewayId ?? 'mock_fiat_gbp';
+    let orderId: string | null = null;
+    let syndicateOrderId: number | null = null;
+
+    if (payload.orderId) {
+      const order = await client.query<{
+        id: string;
+        buyer_id: string;
+        total_gbp: number | string;
+        status: string;
+      }>(
+        'SELECT id, buyer_id, total_gbp, status FROM orders WHERE id = $1 LIMIT 1 FOR UPDATE',
+        [payload.orderId]
+      );
+
+      const orderRow = order.rows[0];
+      if (!orderRow) {
+        await client.query('ROLLBACK');
+        reply.code(404);
+        return {
+          ok: false,
+          error: 'Order not found',
+        };
+      }
+
+      if (orderRow.buyer_id !== payload.userId) {
+        await client.query('ROLLBACK');
+        reply.code(400);
+        return {
+          ok: false,
+          error: 'Order does not belong to this user',
+        };
+      }
+
+      if (orderRow.status !== 'created') {
+        await client.query('ROLLBACK');
+        reply.code(409);
+        return {
+          ok: false,
+          error: `Order cannot create a payment intent from status '${orderRow.status}'`,
+        };
+      }
+
+      channel = 'commerce';
+      amountGbp = Number(orderRow.total_gbp);
+      orderId = orderRow.id;
+      gatewayId = payload.gatewayId ?? 'mock_fiat_gbp';
+    } else if (payload.syndicateOrderId) {
+      const syndicateOrder = await client.query<{
+        id: number;
+        user_id: string;
+        total_gbp: number | string;
+      }>(
+        'SELECT id, user_id, total_gbp FROM syndicate_orders WHERE id = $1 LIMIT 1',
+        [payload.syndicateOrderId]
+      );
+
+      const syndicateOrderRow = syndicateOrder.rows[0];
+      if (!syndicateOrderRow) {
+        await client.query('ROLLBACK');
+        reply.code(404);
+        return {
+          ok: false,
+          error: 'Syndicate order not found',
+        };
+      }
+
+      if (syndicateOrderRow.user_id !== payload.userId) {
+        await client.query('ROLLBACK');
+        reply.code(400);
+        return {
+          ok: false,
+          error: 'Syndicate order does not belong to this user',
+        };
+      }
+
+      channel = 'syndicate';
+      amountGbp = Number(syndicateOrderRow.total_gbp);
+      syndicateOrderId = syndicateOrderRow.id;
+      gatewayId = payload.gatewayId ?? 'mock_tvusd';
+    } else {
+      channel = payload.channel as PaymentIntentChannel;
+      if (!payload.amountGbp || !Number.isFinite(payload.amountGbp) || payload.amountGbp <= 0) {
+        await client.query('ROLLBACK');
+        reply.code(400);
+        return {
+          ok: false,
+          error: 'amountGbp is required for wallet payment intents',
+        };
+      }
+
+      amountGbp = roundTo(payload.amountGbp, 2);
+      gatewayId = payload.gatewayId ?? 'mock_fiat_gbp';
+    }
+
+    const gateway = await client.query<{ id: string }>(
+      'SELECT id FROM payment_gateways WHERE id = $1 AND is_active = TRUE LIMIT 1',
+      [gatewayId]
+    );
+
+    if (!gateway.rowCount) {
+      await client.query('ROLLBACK');
+      reply.code(400);
+      return {
+        ok: false,
+        error: 'Gateway is not available for this intent',
+      };
+    }
+
+    if (payload.instrumentId) {
+      const instrument = await client.query<{ id: number }>(
+        `
+          SELECT id
+          FROM payment_instruments
+          WHERE id = $1 AND user_id = $2
+          LIMIT 1
+        `,
+        [payload.instrumentId, payload.userId]
+      );
+
+      if (!instrument.rowCount) {
+        await client.query('ROLLBACK');
+        reply.code(400);
+        return {
+          ok: false,
+          error: 'Instrument does not belong to this user',
+        };
+      }
+    }
+
+    const intentId = createRuntimeId('pi');
+    const providerIntentRef = createRuntimeId(`mock_intent_${gatewayId}`);
+    const clientSecret = createRuntimeId('secret');
+
+    const inserted = await client.query<PaymentIntentRow>(
+      `
+        INSERT INTO payment_intents (
+          id,
+          user_id,
+          gateway_id,
+          channel,
+          order_id,
+          syndicate_order_id,
+          instrument_id,
+          amount_gbp,
+          amount_currency,
+          status,
+          provider_intent_ref,
+          client_secret,
+          idempotency_key,
+          metadata
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'requires_confirmation', $10, $11, $12, $13::jsonb)
+        RETURNING
+          id,
+          user_id,
+          gateway_id,
+          channel,
+          order_id,
+          syndicate_order_id,
+          instrument_id,
+          amount_gbp,
+          amount_currency,
+          status,
+          provider_intent_ref,
+          client_secret,
+          failure_code,
+          failure_message,
+          created_at,
+          updated_at
+      `,
+      [
+        intentId,
+        payload.userId,
+        gatewayId,
+        channel,
+        orderId,
+        syndicateOrderId,
+        payload.instrumentId ?? null,
+        amountGbp,
+        payload.amountCurrency.toUpperCase(),
+        providerIntentRef,
+        clientSecret,
+        payload.idempotencyKey ?? null,
+        toJsonString(payload.metadata ?? {}),
+      ]
+    );
+
+    await client.query('COMMIT');
+    reply.code(201);
+    return {
+      ok: true,
+      idempotent: false,
+      intent: toPaymentIntentPayload(inserted.rows[0]),
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    request.log.error({ err: error }, 'Failed to create payment intent');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to create payment intent',
+    };
+  } finally {
+    client.release();
+  }
+});
+
+app.get('/payments/intents/:intentId', async (request, reply) => {
+  const paramsSchema = z.object({ intentId: z.string().min(4).max(120) });
+  const { intentId } = paramsSchema.parse(request.params);
+
+  if (!(await paymentTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: 'Payment settlement tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const result = await db.query<PaymentIntentRow>(
+    `
+      SELECT
+        id,
+        user_id,
+        gateway_id,
+        channel,
+        order_id,
+        syndicate_order_id,
+        instrument_id,
+        amount_gbp,
+        amount_currency,
+        status,
+        provider_intent_ref,
+        client_secret,
+        failure_code,
+        failure_message,
+        created_at,
+        updated_at
+      FROM payment_intents
+      WHERE id = $1
+      LIMIT 1
+    `,
+    [intentId]
+  );
+
+  const row = result.rows[0];
+  if (!row) {
+    reply.code(404);
+    return {
+      ok: false,
+      error: 'Payment intent not found',
+    };
+  }
+
+  return {
+    ok: true,
+    intent: toPaymentIntentPayload(row),
+  };
+});
+
+app.post('/payments/intents/:intentId/confirm', async (request, reply) => {
+  const paramsSchema = z.object({ intentId: z.string().min(4).max(120) });
+  const bodySchema = z.object({
+    simulateStatus: z.enum(['succeeded', 'failed', 'cancelled']).default('succeeded'),
+    providerFeeGbp: z.number().min(0).optional(),
+    providerAttemptRef: z.string().min(4).max(140).optional(),
+    failureCode: z.string().max(80).optional(),
+    failureMessage: z.string().max(240).optional(),
+    payload: z.record(z.unknown()).optional(),
+  });
+
+  const { intentId } = paramsSchema.parse(request.params);
+  const payload = bodySchema.parse(request.body);
+
+  if (!(await paymentTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: 'Payment settlement tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    const settled = await settlePaymentIntent(client, {
+      intentId,
+      finalStatus: payload.simulateStatus,
+      providerFeeGbp: payload.providerFeeGbp,
+      providerAttemptRef: payload.providerAttemptRef,
+      failureCode: payload.failureCode,
+      failureMessage: payload.failureMessage,
+      rawPayload: {
+        source: 'manual_confirm',
+        ...(payload.payload ?? {}),
+      },
+    });
+
+    await client.query('COMMIT');
+    return {
+      ok: true,
+      alreadyFinal: settled.alreadyFinal,
+      intent: settled.intent,
+      orderSettlement: settled.orderSettlement,
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+
+    if ((error as Error).message === 'PAYMENT_INTENT_NOT_FOUND') {
+      reply.code(404);
+      return {
+        ok: false,
+        error: 'Payment intent not found',
+      };
+    }
+
+    request.log.error({ err: error, intentId }, 'Failed to confirm payment intent');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to confirm payment intent',
+    };
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/payments/webhooks/mock', async (request, reply) => {
+  const bodySchema = z.object({
+    gatewayId: z.string().min(2).max(80).default('mock_fiat_gbp'),
+    providerEventId: z.string().min(4).max(140),
+    eventType: z.string().min(3).max(120),
+    intentId: z.string().min(4).max(120),
+    status: z.enum(['succeeded', 'failed', 'cancelled']),
+    providerFeeGbp: z.number().min(0).optional(),
+    failureCode: z.string().max(80).optional(),
+    failureMessage: z.string().max(240).optional(),
+    payload: z.record(z.unknown()).optional(),
+  });
+
+  const payload = bodySchema.parse(request.body);
+
+  if (!(await paymentTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: 'Payment settlement tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    const gateway = await client.query<{ id: string }>(
+      'SELECT id FROM payment_gateways WHERE id = $1 LIMIT 1',
+      [payload.gatewayId]
+    );
+
+    if (!gateway.rowCount) {
+      await client.query('ROLLBACK');
+      reply.code(400);
+      return {
+        ok: false,
+        error: 'Webhook gateway is unknown',
+      };
+    }
+
+    const intentExists = await client.query<{ id: string }>(
+      'SELECT id FROM payment_intents WHERE id = $1 LIMIT 1',
+      [payload.intentId]
+    );
+
+    if (!intentExists.rowCount) {
+      await client.query('ROLLBACK');
+      reply.code(404);
+      return {
+        ok: false,
+        error: 'Payment intent not found for webhook event',
+      };
+    }
+
+    const webhookInsert = await client.query<{ id: number }>(
+      `
+        INSERT INTO payment_webhook_events (
+          gateway_id,
+          provider_event_id,
+          event_type,
+          intent_id,
+          payload
+        )
+        VALUES ($1, $2, $3, $4, $5::jsonb)
+        ON CONFLICT (gateway_id, provider_event_id)
+        DO NOTHING
+        RETURNING id
+      `,
+      [
+        payload.gatewayId,
+        payload.providerEventId,
+        payload.eventType,
+        payload.intentId,
+        toJsonString(payload.payload ?? {}),
+      ]
+    );
+
+    if (!webhookInsert.rowCount) {
+      await client.query('COMMIT');
+      return {
+        ok: true,
+        duplicate: true,
+      };
+    }
+
+    const settled = await settlePaymentIntent(client, {
+      intentId: payload.intentId,
+      finalStatus: payload.status,
+      providerFeeGbp: payload.providerFeeGbp,
+      providerAttemptRef: payload.providerEventId,
+      failureCode: payload.failureCode,
+      failureMessage: payload.failureMessage,
+      rawPayload: {
+        source: 'mock_webhook',
+        eventType: payload.eventType,
+        ...(payload.payload ?? {}),
+      },
+    });
+
+    await client.query(
+      'UPDATE payment_webhook_events SET processed_at = NOW() WHERE id = $1',
+      [webhookInsert.rows[0].id]
+    );
+
+    await client.query('COMMIT');
+    return {
+      ok: true,
+      duplicate: false,
+      intent: settled.intent,
+      orderSettlement: settled.orderSettlement,
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+
+    if ((error as Error).message === 'PAYMENT_INTENT_NOT_FOUND') {
+      reply.code(404);
+      return {
+        ok: false,
+        error: 'Payment intent not found for webhook event',
+      };
+    }
+
+    request.log.error({ err: error, payload }, 'Failed to process mock payment webhook');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to process webhook event',
+    };
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/payouts/webhooks/mock', async (request, reply) => {
+  const bodySchema = z.object({
+    gatewayId: z.string().min(2).max(80).default('mock_fiat_gbp'),
+    providerEventId: z.string().min(4).max(140),
+    eventType: z.string().min(3).max(120),
+    payoutRequestId: z.string().min(4).max(140),
+    status: z.enum(['processing', 'paid', 'failed', 'cancelled']),
+    providerPayoutRef: z.string().min(4).max(140).optional(),
+    failureReason: z.string().max(240).optional(),
+    payload: z.record(z.unknown()).optional(),
+  });
+
+  const payload = bodySchema.parse(request.body);
+
+  if (!(await paymentTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: 'Payment settlement tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    const gateway = await client.query<{ id: string }>(
+      'SELECT id FROM payment_gateways WHERE id = $1 LIMIT 1',
+      [payload.gatewayId]
+    );
+
+    if (!gateway.rowCount) {
+      await client.query('ROLLBACK');
+      reply.code(400);
+      return {
+        ok: false,
+        error: 'Webhook gateway is unknown',
+      };
+    }
+
+    const payoutRequest = await client.query<{ id: string; user_id: string }>(
+      'SELECT id, user_id FROM payout_requests WHERE id = $1 LIMIT 1',
+      [payload.payoutRequestId]
+    );
+
+    if (!payoutRequest.rowCount) {
+      await client.query('ROLLBACK');
+      reply.code(404);
+      return {
+        ok: false,
+        error: 'Payout request not found for webhook event',
+      };
+    }
+
+    const webhookInsert = await client.query<{ id: number }>(
+      `
+        INSERT INTO payment_webhook_events (
+          gateway_id,
+          provider_event_id,
+          event_type,
+          intent_id,
+          payload
+        )
+        VALUES ($1, $2, $3, NULL, $4::jsonb)
+        ON CONFLICT (gateway_id, provider_event_id)
+        DO NOTHING
+        RETURNING id
+      `,
+      [
+        payload.gatewayId,
+        payload.providerEventId,
+        payload.eventType,
+        toJsonString({
+          kind: 'payout_webhook',
+          payoutRequestId: payload.payoutRequestId,
+          status: payload.status,
+          providerPayoutRef: payload.providerPayoutRef,
+          ...(payload.payload ?? {}),
+        }),
+      ]
+    );
+
+    if (!webhookInsert.rowCount) {
+      await client.query('COMMIT');
+      return {
+        ok: true,
+        duplicate: true,
+      };
+    }
+
+    const settled = await settlePayoutRequest(client, {
+      userId: payoutRequest.rows[0].user_id,
+      requestId: payload.payoutRequestId,
+      targetStatus: payload.status,
+      providerPayoutRef: payload.providerPayoutRef,
+      failureReason: payload.failureReason,
+      metadata: payload.payload,
+      source: 'mock_webhook',
+    });
+
+    await client.query(
+      'UPDATE payment_webhook_events SET processed_at = NOW() WHERE id = $1',
+      [webhookInsert.rows[0].id]
+    );
+
+    await client.query('COMMIT');
+    return {
+      ok: true,
+      duplicate: false,
+      idempotent: settled.idempotent,
+      payoutRequest: settled.payoutRequest,
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+
+    const apiError = getApiError(error);
+    if (apiError?.code === 'PAYOUT_REQUEST_NOT_FOUND') {
+      reply.code(404);
+      return {
+        ok: false,
+        error: apiError.message,
+      };
+    }
+
+    if (apiError?.code === 'PAYOUT_INVALID_TRANSITION') {
+      reply.code(409);
+      return {
+        ok: false,
+        error: apiError.message,
+      };
+    }
+
+    if (apiError?.code === 'PAYOUT_PENDING_INSUFFICIENT') {
+      reply.code(409);
+      return {
+        ok: false,
+        error: apiError.message,
+        balance: apiError.details,
+      };
+    }
+
+    request.log.error({ err: error, payload }, 'Failed to process mock payout webhook');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to process payout webhook event',
+    };
+  } finally {
+    client.release();
+  }
+});
+
 app.post('/orders', async (request, reply) => {
   const bodySchema = z.object({
     orderId: z.string().min(4).max(64).optional(),
@@ -1332,40 +3527,164 @@ app.post('/orders/:orderId/pay', async (request, reply) => {
   const paramsSchema = z.object({ orderId: z.string().min(4).max(64) });
   const { orderId } = paramsSchema.parse(request.params);
 
-  const paid = await db.query<{
-    id: string;
-    status: string;
-    updated_at: string;
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    const paid = await client.query<{
+      id: string;
+      status: string;
+      updated_at: string;
+      buyer_id: string;
+      seller_id: string;
+      subtotal_gbp: number | string;
+      buyer_protection_fee_gbp: number | string;
+      total_gbp: number | string;
+    }>(
+      `
+        UPDATE orders
+        SET status = 'paid', updated_at = NOW()
+        WHERE id = $1 AND status = 'created'
+        RETURNING
+          id,
+          status,
+          updated_at,
+          buyer_id,
+          seller_id,
+          subtotal_gbp,
+          buyer_protection_fee_gbp,
+          total_gbp
+      `,
+      [orderId]
+    );
+
+    if (!paid.rowCount) {
+      const existing = await client.query<{ id: string; status: string }>(
+        'SELECT id, status FROM orders WHERE id = $1 LIMIT 1',
+        [orderId]
+      );
+
+      await client.query('ROLLBACK');
+
+      if (!existing.rowCount) {
+        reply.code(404);
+        return { ok: false, error: 'Order not found' };
+      }
+
+      reply.code(409);
+      return { ok: false, error: `Order cannot be paid from status '${existing.rows[0].status}'` };
+    }
+
+    const paidRow = paid.rows[0];
+
+    if (await ledgerTablesAvailable(client)) {
+      await postCommerceOrderLedgerEntries(client, {
+        orderId: paidRow.id,
+        buyerId: paidRow.buyer_id,
+        sellerId: paidRow.seller_id,
+        subtotalGbp: Number(paidRow.subtotal_gbp),
+        buyerProtectionFeeGbp: Number(paidRow.buyer_protection_fee_gbp),
+        totalGbp: Number(paidRow.total_gbp),
+      });
+    }
+
+    await client.query('COMMIT');
+
+    return {
+      ok: true,
+      id: paidRow.id,
+      status: paidRow.status,
+      updatedAt: paidRow.updated_at,
+      settlement: {
+        buyerChargedGbp: Number(paidRow.total_gbp),
+        sellerPayableCreditedGbp: Number(paidRow.subtotal_gbp),
+        platformCommissionCreditedGbp: Number(paidRow.buyer_protection_fee_gbp),
+      },
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    request.log.error({ err: error, orderId }, 'Order payment settlement failed');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to settle payment for order',
+    };
+  } finally {
+    client.release();
+  }
+});
+
+app.get('/orders/:orderId/ledger', async (request) => {
+  const paramsSchema = z.object({ orderId: z.string().min(4).max(64) });
+  const { orderId } = paramsSchema.parse(request.params);
+
+  if (!(await ledgerTablesAvailable(db))) {
+    return {
+      ok: true,
+      items: [],
+    };
+  }
+
+  const result = await db.query<{
+    id: number;
+    direction: 'debit' | 'credit';
+    amount_gbp: number | string;
+    source_type: string;
+    line_type: string;
+    created_at: string;
+    account_code: string;
+    owner_type: 'platform' | 'user';
+    owner_id: string;
+    counterparty_account_code: string;
+    counterparty_owner_type: 'platform' | 'user';
+    counterparty_owner_id: string;
   }>(
     `
-      UPDATE orders
-      SET status = 'paid', updated_at = NOW()
-      WHERE id = $1 AND status = 'created'
-      RETURNING id, status, updated_at
+      SELECT
+        le.id,
+        le.direction,
+        le.amount_gbp,
+        le.source_type,
+        le.line_type,
+        le.created_at,
+        account_entry.account_code,
+        account_entry.owner_type,
+        account_entry.owner_id,
+        counterparty.account_code AS counterparty_account_code,
+        counterparty.owner_type AS counterparty_owner_type,
+        counterparty.owner_id AS counterparty_owner_id
+      FROM ledger_entries le
+      INNER JOIN ledger_accounts account_entry
+        ON account_entry.id = le.account_id
+      INNER JOIN ledger_accounts counterparty
+        ON counterparty.id = le.counterparty_account_id
+      WHERE le.source_type = 'order_payment'
+        AND le.source_id = $1
+      ORDER BY le.created_at ASC, le.id ASC
     `,
     [orderId]
   );
 
-  if (!paid.rowCount) {
-    const existing = await db.query<{ id: string; status: string }>(
-      'SELECT id, status FROM orders WHERE id = $1 LIMIT 1',
-      [orderId]
-    );
-
-    if (!existing.rowCount) {
-      reply.code(404);
-      return { ok: false, error: 'Order not found' };
-    }
-
-    reply.code(409);
-    return { ok: false, error: `Order cannot be paid from status '${existing.rows[0].status}'` };
-  }
-
   return {
     ok: true,
-    id: paid.rows[0].id,
-    status: paid.rows[0].status,
-    updatedAt: paid.rows[0].updated_at,
+    items: result.rows.map((row) => ({
+      id: row.id,
+      direction: row.direction,
+      amountGbp: Number(row.amount_gbp),
+      sourceType: row.source_type,
+      lineType: row.line_type,
+      createdAt: row.created_at,
+      account: {
+        ownerType: row.owner_type,
+        ownerId: row.owner_id,
+        code: row.account_code,
+      },
+      counterparty: {
+        ownerType: row.counterparty_owner_type,
+        ownerId: row.counterparty_owner_id,
+        code: row.counterparty_account_code,
+      },
+    })),
   };
 });
 
@@ -2050,7 +4369,7 @@ app.post('/syndicate/assets', async (request, reply) => {
     issuerId: z.string().min(2),
     title: z.string().min(3).max(180).optional(),
     imageUrl: z.string().url().optional(),
-    totalUnits: z.number().int().min(1),
+    totalUnits: z.number().int().min(1).max(20),
     unitPriceGbp: z.number().positive(),
     unitPriceStable: z.number().positive(),
     settlementMode: z.enum(['GBP', 'TVUSD', 'HYBRID']),

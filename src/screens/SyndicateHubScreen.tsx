@@ -17,7 +17,7 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import Reanimated, { FadeInDown } from 'react-native-reanimated';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { RootStackParamList } from '../navigation/types';
-import { formatCompact, getSyndicateMarket, SyndicateAsset } from '../data/tradeHub';
+import { getSyndicateMarket, SyndicateAsset } from '../data/tradeHub';
 import { useStore } from '../store/useStore';
 import { resolveAssetMarketState } from '../data/mockSyndicateData';
 import { EmptyState } from '../components/EmptyState';
@@ -25,7 +25,7 @@ import { useFormattedPrice } from '../hooks/useFormattedPrice';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 
-type HubSort = 'volume' | 'movers' | 'latest';
+type HubSort = 'value' | 'movers' | 'latest';
 
 export default function SyndicateHubScreen() {
   const navigation = useNavigation<NavT>();
@@ -34,7 +34,7 @@ export default function SyndicateHubScreen() {
   const { formatFromFiat } = useFormattedPrice();
 
   const [query, setQuery] = React.useState('');
-  const [sortBy, setSortBy] = React.useState<HubSort>('volume');
+  const [sortBy, setSortBy] = React.useState<HubSort>('value');
 
   const baseAssets = React.useMemo(() => getSyndicateMarket(customSyndicates), [customSyndicates]);
 
@@ -60,25 +60,26 @@ export default function SyndicateHubScreen() {
     } else if (sortBy === 'latest') {
       sorted.sort((a, b) => Number(b.id.localeCompare(a.id)));
     } else {
-      sorted.sort((a, b) => b.volume24hGBP - a.volume24hGBP);
+      sorted.sort((a, b) => b.totalUnits * b.unitPriceGBP - a.totalUnits * a.unitPriceGBP);
     }
 
     return sorted;
   }, [marketAssets, query, sortBy]);
 
-  const totalVolume = React.useMemo(
-    () => marketAssets.reduce((sum, asset) => sum + asset.volume24hGBP, 0),
+  const totalOpenValue = React.useMemo(
+    () => marketAssets.reduce((sum, asset) => sum + asset.availableUnits * asset.unitPriceGBP, 0),
     [marketAssets]
   );
 
-  const totalMarketCap = React.useMemo(
+  const totalMarketValue = React.useMemo(
     () => marketAssets.reduce((sum, asset) => sum + asset.totalUnits * asset.unitPriceGBP, 0),
     [marketAssets]
   );
 
   const renderAsset = ({ item, index }: { item: SyndicateAsset; index: number }) => {
     const isPositive = item.marketMovePct24h >= 0;
-    const marketCap = item.totalUnits * item.unitPriceGBP;
+    const marketValue = item.totalUnits * item.unitPriceGBP;
+    const openValue = item.availableUnits * item.unitPriceGBP;
 
     return (
       <Reanimated.View entering={FadeInDown.duration(420).delay(Math.min(index, 8) * 45)}>
@@ -112,12 +113,12 @@ export default function SyndicateHubScreen() {
               <Text style={styles.assetStatValue}>{formatFromFiat(item.unitPriceGBP, 'GBP')}</Text>
             </View>
             <View>
-              <Text style={styles.assetStatLabel}>Market Cap</Text>
-              <Text style={styles.assetStatValue}>{formatFromFiat(marketCap, 'GBP', { displayMode: 'fiat' })}</Text>
+              <Text style={styles.assetStatLabel}>Market Value</Text>
+              <Text style={styles.assetStatValue}>{formatFromFiat(marketValue, 'GBP', { displayMode: 'fiat' })}</Text>
             </View>
             <View>
-              <Text style={styles.assetStatLabel}>24h Volume</Text>
-              <Text style={styles.assetStatValue}>{formatCompact(Math.round(item.volume24hGBP))}</Text>
+              <Text style={styles.assetStatLabel}>Open Value</Text>
+              <Text style={styles.assetStatValue}>{formatFromFiat(openValue, 'GBP', { displayMode: 'fiat' })}</Text>
             </View>
           </View>
 
@@ -174,12 +175,12 @@ export default function SyndicateHubScreen() {
                 <Text style={styles.metricLabel}>Assets</Text>
               </View>
               <View style={styles.metricCard}>
-                <Text style={styles.metricValue}>{formatCompact(Math.round(totalVolume))}</Text>
-                <Text style={styles.metricLabel}>24h Volume</Text>
+                <Text style={styles.metricValue}>{formatFromFiat(totalOpenValue, 'GBP', { displayMode: 'fiat' })}</Text>
+                <Text style={styles.metricLabel}>Open Value</Text>
               </View>
               <View style={styles.metricCard}>
-                <Text style={styles.metricValue}>{formatFromFiat(totalMarketCap, 'GBP', { displayMode: 'fiat' })}</Text>
-                <Text style={styles.metricLabel}>Market Cap</Text>
+                <Text style={styles.metricValue}>{formatFromFiat(totalMarketValue, 'GBP', { displayMode: 'fiat' })}</Text>
+                <Text style={styles.metricLabel}>Market Value</Text>
               </View>
             </View>
 
@@ -199,7 +200,7 @@ export default function SyndicateHubScreen() {
             </View>
 
             <View style={styles.sortRow}>
-              {(['volume', 'movers', 'latest'] as HubSort[]).map((sortKey) => {
+              {(['value', 'movers', 'latest'] as HubSort[]).map((sortKey) => {
                 const active = sortBy === sortKey;
                 return (
                   <AnimatedPressable

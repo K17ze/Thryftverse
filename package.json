@@ -13,7 +13,7 @@
     "docker:check": "node backend/scripts/docker-smoke-check.mjs",
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck",
-    "doctor": "expo doctor",
+    "doctor": "npx expo-doctor",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:smoke": "vitest run src/__tests__/smoke-flows.test.ts"
@@ -29,6 +29,7 @@
     "expo-asset": "~12.0.12",
     "expo-font": "~14.0.0",
     "expo-haptics": "~15.0.0",
+    "expo-image": "~3.0.11",
     "expo-image-picker": "~17.0.0",
     "expo-linear-gradient": "~15.0.0",
     "expo-splash-screen": "~31.0.13",

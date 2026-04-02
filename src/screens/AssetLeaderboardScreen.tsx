@@ -37,7 +37,10 @@ export default function AssetLeaderboardScreen() {
   );
 
   const topMovers = React.useMemo(() => [...marketAssets].sort((a, b) => b.marketMovePct24h - a.marketMovePct24h).slice(0, 5), [marketAssets]);
-  const topVolume = React.useMemo(() => [...marketAssets].sort((a, b) => b.volume24hGBP - a.volume24hGBP).slice(0, 5), [marketAssets]);
+  const topMarketValue = React.useMemo(
+    () => [...marketAssets].sort((a, b) => b.totalUnits * b.unitPriceGBP - a.totalUnits * a.unitPriceGBP).slice(0, 5),
+    [marketAssets]
+  );
   const topHolders = React.useMemo(() => [...marketAssets].sort((a, b) => b.holders - a.holders).slice(0, 5), [marketAssets]);
 
   const renderList = (title: string, icon: keyof typeof Ionicons.glyphMap, data: SyndicateAsset[], metric: (asset: SyndicateAsset) => string) => (
@@ -84,7 +87,7 @@ export default function AssetLeaderboardScreen() {
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {renderList('Top Movers', 'trending-up-outline', topMovers, (asset) => `${asset.marketMovePct24h >= 0 ? '+' : ''}${asset.marketMovePct24h.toFixed(1)}%`)}
-        {renderList('Top Volume', 'pulse-outline', topVolume, (asset) => formatFromFiat(asset.volume24hGBP, 'GBP', { displayMode: 'fiat' }))}
+        {renderList('Top Market Value', 'pulse-outline', topMarketValue, (asset) => formatFromFiat(asset.totalUnits * asset.unitPriceGBP, 'GBP', { displayMode: 'fiat' }))}
         {renderList('Most Held', 'people-outline', topHolders, (asset) => `${asset.holders} holders`)}
       </ScrollView>
     </SafeAreaView>

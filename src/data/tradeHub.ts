@@ -242,7 +242,9 @@ export function getAuctionMarket(
 }
 
 export function getSyndicateMarket(runtimeAssets: SyndicateAsset[] = []) {
-  return [...runtimeAssets, ...MOCK_SYNDICATE_ASSETS].sort((a, b) => b.volume24hGBP - a.volume24hGBP);
+  return [...runtimeAssets, ...MOCK_SYNDICATE_ASSETS].sort(
+    (a, b) => b.totalUnits * b.unitPriceGBP - a.totalUnits * a.unitPriceGBP
+  );
 }
 
 export function getUserLabel(userId: string) {

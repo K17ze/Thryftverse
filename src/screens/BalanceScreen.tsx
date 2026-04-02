@@ -218,7 +218,7 @@ export default function BalanceScreen({ navigation }: Props) {
                 <View>
                   <Text style={styles.txTitle}>{tx.title}</Text>
                   <Text style={styles.txDate}>
-                    {tx.date} • <Text style={{ color: tx.status === 'pending' ? Colors.accent : Colors.textSecondary }}>{tx.status}</Text>
+                      {tx.date} • <Text style={tx.status === 'pending' ? styles.txStatusPending : styles.txStatusCompleted}>{tx.status}</Text>
                   </Text>
                 </View>
               </View>
@@ -235,10 +235,10 @@ export default function BalanceScreen({ navigation }: Props) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 10, paddingBottom: 20, gap: 12 },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 10, paddingBottom: 16, gap: 12 },
   backBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#111', alignItems: 'center', justifyContent: 'center' },
-  hugeTitle: { fontSize: 34, fontFamily: 'Inter_700Bold', color: Colors.textPrimary, letterSpacing: -0.5 },
-  content: { paddingHorizontal: 20, paddingBottom: 40 },
+  hugeTitle: { fontSize: 30, fontFamily: 'Inter_700Bold', color: Colors.textPrimary, letterSpacing: -0.3 },
+  content: { paddingHorizontal: 20, paddingBottom: 34 },
 
   pegInfoCard: {
     marginBottom: 16,
@@ -255,30 +255,30 @@ const styles = StyleSheet.create({
   pegInfoText: {
     flex: 1,
     color: '#e8dcc8',
-    fontSize: 12,
-    lineHeight: 17,
+    fontSize: 13,
+    lineHeight: 19,
     fontFamily: 'Inter_600SemiBold',
   },
 
-  heroGroup: { marginBottom: 24, gap: 16 },
-  balanceHero: { backgroundColor: '#111', borderRadius: 32, paddingVertical: 40, alignItems: 'center' },
-  balanceLabel: { fontSize: 13, fontFamily: 'Inter_500Medium', color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 26 },
-  balanceAmount: { fontSize: 44, fontFamily: 'Inter_700Bold', color: Colors.textPrimary, letterSpacing: -1 },
-  balanceIze: { fontSize: 13, fontFamily: 'Inter_500Medium', color: Colors.textSecondary, marginTop: 6, marginBottom: 6 },
-  balanceActions: { flexDirection: 'row', gap: 24, marginTop: 10 },
+  heroGroup: { marginBottom: 22, gap: 14 },
+  balanceHero: { backgroundColor: '#111', borderRadius: 28, borderWidth: 1, borderColor: '#262626', paddingVertical: 34, alignItems: 'center' },
+  balanceLabel: { fontSize: 12, fontFamily: 'Inter_600SemiBold', color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 18 },
+  balanceAmount: { fontSize: 40, fontFamily: 'Inter_700Bold', color: Colors.textPrimary, letterSpacing: -0.8 },
+  balanceIze: { fontSize: 14, fontFamily: 'Inter_500Medium', color: Colors.textSecondary, marginTop: 6, marginBottom: 10 },
+  balanceActions: { flexDirection: 'row', gap: 18, marginTop: 8 },
   actionBtn: { alignItems: 'center', gap: 8 },
   actionCircle: { width: 54, height: 54, borderRadius: 27, backgroundColor: '#222', alignItems: 'center', justifyContent: 'center' },
-  actionText: { fontSize: 12, fontFamily: 'Inter_500Medium', color: Colors.textPrimary },
+  actionText: { fontSize: 13, fontFamily: 'Inter_500Medium', color: Colors.textPrimary },
 
-  pendingCard: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#111', borderRadius: 24, padding: 20 },
-  pendingTitle: { fontSize: 15, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary },
-  pendingAmount: { fontSize: 20, fontFamily: 'Inter_700Bold', color: Colors.textPrimary },
+  pendingCard: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#111', borderRadius: 20, borderWidth: 1, borderColor: '#262626', padding: 18 },
+  pendingTitle: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: Colors.textSecondary },
+  pendingAmount: { fontSize: 24, fontFamily: 'Inter_700Bold', color: Colors.textPrimary },
   pendingAmountCol: { alignItems: 'flex-end' },
-  pendingIze: { fontSize: 11, fontFamily: 'Inter_500Medium', color: Colors.textSecondary, marginTop: 2 },
+  pendingIze: { fontSize: 12, fontFamily: 'Inter_500Medium', color: Colors.textSecondary, marginTop: 3 },
 
-  loadCard: { backgroundColor: '#111', borderRadius: 20, padding: 18, marginBottom: 24 },
+  loadCard: { backgroundColor: '#111', borderRadius: 20, borderWidth: 1, borderColor: '#262626', padding: 18, marginBottom: 22 },
   loadTitle: { color: Colors.textPrimary, fontSize: 18, fontFamily: 'Inter_700Bold' },
-  loadHint: { marginTop: 4, color: Colors.textSecondary, fontSize: 12, fontFamily: 'Inter_500Medium', marginBottom: 12, lineHeight: 17 },
+  loadHint: { marginTop: 4, color: Colors.textSecondary, fontSize: 13, fontFamily: 'Inter_500Medium', marginBottom: 12, lineHeight: 18 },
   loadInputLabel: { color: Colors.textMuted, fontSize: 11, fontFamily: 'Inter_700Bold', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 6 },
   loadInput: {
     borderRadius: 12,
@@ -293,11 +293,11 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   loadSummaryRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 5, gap: 10 },
-  loadSummaryLabel: { color: Colors.textMuted, fontSize: 12, fontFamily: 'Inter_500Medium' },
-  loadSummaryValue: { color: Colors.textPrimary, fontSize: 12, fontFamily: 'Inter_700Bold', textAlign: 'right', maxWidth: '62%' },
+  loadSummaryLabel: { color: Colors.textMuted, fontSize: 13, fontFamily: 'Inter_500Medium' },
+  loadSummaryValue: { color: Colors.textPrimary, fontSize: 13, fontFamily: 'Inter_700Bold', textAlign: 'right', maxWidth: '70%' },
   loadSummaryRowTotal: { marginTop: 4, borderTopWidth: 1, borderTopColor: '#252525', paddingTop: 9 },
-  loadSummaryTotalLabel: { color: Colors.textPrimary, fontSize: 13, fontFamily: 'Inter_700Bold' },
-  loadSummaryTotalValue: { color: Colors.textPrimary, fontSize: 12, fontFamily: 'Inter_700Bold', textAlign: 'right', maxWidth: '62%' },
+  loadSummaryTotalLabel: { color: Colors.textPrimary, fontSize: 14, fontFamily: 'Inter_700Bold' },
+  loadSummaryTotalValue: { color: Colors.textPrimary, fontSize: 13, fontFamily: 'Inter_700Bold', textAlign: 'right', maxWidth: '70%' },
   loadBtn: {
     marginTop: 12,
     borderRadius: 999,
@@ -308,24 +308,26 @@ const styles = StyleSheet.create({
   },
   loadBtnText: { color: Colors.background, fontSize: 13, fontFamily: 'Inter_700Bold' },
 
-  historyCard: { backgroundColor: '#111', borderRadius: 24, padding: 20, marginBottom: 24 },
+  historyCard: { backgroundColor: '#111', borderRadius: 20, borderWidth: 1, borderColor: '#262626', padding: 18, marginBottom: 22 },
   historyRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 12, marginBottom: 12 },
   historyTitle: { fontSize: 16, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary, marginBottom: 4 },
   historyDate: { fontSize: 13, fontFamily: 'Inter_400Regular', color: Colors.textSecondary },
   historyLinkRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
 
-  sectionTitle: { fontSize: 13, fontFamily: 'Inter_600SemiBold', color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 1.2, marginLeft: 8, marginBottom: 12 },
+  sectionTitle: { fontSize: 13, fontFamily: 'Inter_600SemiBold', color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 1.2, marginLeft: 6, marginBottom: 12 },
   filterRow: { flexDirection: 'row', gap: 8, marginBottom: 10, paddingHorizontal: 6 },
   filterChip: { borderRadius: 999, borderWidth: 1, borderColor: '#2f2f2f', backgroundColor: '#151515', paddingHorizontal: 10, paddingVertical: 6 },
   filterChipActive: { borderColor: '#e8dcc8', backgroundColor: '#2f291f' },
-  filterChipText: { color: Colors.textSecondary, fontSize: 10, fontFamily: 'Inter_700Bold', letterSpacing: 0.4 },
+  filterChipText: { color: Colors.textSecondary, fontSize: 11, fontFamily: 'Inter_700Bold', letterSpacing: 0.4 },
   filterChipTextActive: { color: '#e8dcc8' },
 
-  cardGroup: { backgroundColor: '#111', borderRadius: 24, paddingVertical: 12, paddingHorizontal: 16 },
+  cardGroup: { backgroundColor: '#111', borderRadius: 20, borderWidth: 1, borderColor: '#262626', paddingVertical: 12, paddingHorizontal: 16 },
   transactionRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 14 },
   txLeft: { flexDirection: 'row', alignItems: 'center', flex: 1, paddingRight: 16 },
-  iconCircle: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center', marginRight: 14 },
-  txTitle: { fontSize: 15, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary, marginBottom: 4 },
-  txDate: { fontSize: 12, color: Colors.textSecondary, fontFamily: 'Inter_400Regular', textTransform: 'capitalize' },
-  txAmount: { fontSize: 16, fontFamily: 'Inter_700Bold', color: Colors.textPrimary },
+  iconCircle: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#1b1b1b', alignItems: 'center', justifyContent: 'center', marginRight: 14 },
+  txTitle: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary, marginBottom: 4, lineHeight: 18 },
+  txDate: { fontSize: 12, color: Colors.textSecondary, fontFamily: 'Inter_400Regular', textTransform: 'capitalize', lineHeight: 16 },
+  txStatusPending: { color: '#e8dcc8' },
+  txStatusCompleted: { color: Colors.textSecondary },
+  txAmount: { fontSize: 15, fontFamily: 'Inter_700Bold', color: Colors.textPrimary },
 });

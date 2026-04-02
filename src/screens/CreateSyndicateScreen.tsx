@@ -81,6 +81,22 @@ export default function CreateSyndicateScreen() {
   const [stablePriceInput, setStablePriceInput] = React.useState('1.28');
   const [settlementMode, setSettlementMode] = React.useState<'GBP' | 'TVUSD' | 'HYBRID'>('HYBRID');
 
+  const handleTotalUnitsChange = React.useCallback((value: string) => {
+    const sanitized = sanitizeIntegerInput(value);
+    if (!sanitized) {
+      setTotalUnitsInput('');
+      return;
+    }
+
+    const parsed = Math.floor(Number(sanitized));
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      setTotalUnitsInput('1');
+      return;
+    }
+
+    setTotalUnitsInput(String(Math.min(20, parsed)));
+  }, []);
+
   const fromDisplayToGbp = React.useCallback(
     (amountDisplay: number) => {
       if (currencyCode === 'GBP') {
@@ -114,8 +130,8 @@ export default function CreateSyndicateScreen() {
     }
 
     const totalUnits = Number(totalUnitsInput);
-    if (!Number.isFinite(totalUnits) || totalUnits < 10 || !Number.isInteger(totalUnits)) {
-      show('Units must be an integer of at least 10', 'error');
+    if (!Number.isFinite(totalUnits) || totalUnits < 1 || totalUnits > 20 || !Number.isInteger(totalUnits)) {
+      show('Units must be an integer between 1 and 20', 'error');
       return;
     }
 
@@ -339,12 +355,13 @@ export default function CreateSyndicateScreen() {
           <TextInput
             style={styles.input}
             value={totalUnitsInput}
-            onChangeText={(value) => setTotalUnitsInput(sanitizeIntegerInput(value))}
+            onChangeText={handleTotalUnitsChange}
             keyboardType="number-pad"
-            placeholder="1000"
+            placeholder="20"
             placeholderTextColor={Colors.textMuted}
             selectionColor={Colors.accent}
           />
+          <Text style={styles.inputHint}>Maximum 20 units per asset</Text>
 
           <Text style={styles.inputLabel}>Unit Price ({currencyCode})</Text>
           <TextInput
@@ -586,6 +603,13 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: 'Inter_500Medium',
     marginBottom: 6,
+  },
+  inputHint: {
+    marginTop: -4,
+    marginBottom: 10,
+    color: Colors.textMuted,
+    fontSize: 11,
+    fontFamily: 'Inter_500Medium',
   },
   input: {
     height: 42,

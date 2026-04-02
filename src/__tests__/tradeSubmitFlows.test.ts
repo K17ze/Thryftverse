@@ -80,7 +80,7 @@ describe('trade submit flow decisions', () => {
     expect(decision).toEqual({
       ok: true,
       kind: 'queue',
-      message: 'Limit order queued (prototype)',
+      message: 'Offer sent to owners. Raise your offer for instant fill.',
     });
   });
 

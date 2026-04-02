@@ -23,6 +23,7 @@ const PANEL_BG = IS_LIGHT ? '#ffffff' : Colors.surface;
 
 export default function LoginScreen() {
   const navigation = useNavigation<any>();
+  const canGoBack = navigation.canGoBack();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
@@ -76,16 +77,21 @@ export default function LoginScreen() {
       <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
       
       <View style={styles.header}>
-        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
-        </AnimatedPressable>
+        {canGoBack ? (
+          <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
+            <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
+          </AnimatedPressable>
+        ) : (
+          <View style={styles.backBtnSpacer} />
+        )}
       </View>
 
       <KeyboardAvoidingView 
         style={styles.content} 
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <Text style={styles.title}>Welcome{'\n'}back.</Text>
+        <Text style={styles.title}>Welcome back</Text>
+        <Text style={styles.subtitle}>Log in to continue buying, selling, and trading.</Text>
         
         <View style={styles.form}>
           <View style={styles.inputGroup}>
@@ -138,6 +144,13 @@ export default function LoginScreen() {
               <Text style={styles.primaryText}>Log In</Text>
             </AnimatedPressable>
           </Reanimated.View>
+
+          <View style={styles.switchRow}>
+            <Text style={styles.switchText}>New to Thryftverse?</Text>
+            <AnimatedPressable onPress={() => navigation.navigate('SignUp')} activeOpacity={0.8}>
+              <Text style={styles.switchLink}>Create account</Text>
+            </AnimatedPressable>
+          </View>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -146,19 +159,24 @@ export default function LoginScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  header: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: 20 },
+  header: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: 8 },
   backBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: PANEL_BG, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: Colors.border },
+  backBtnSpacer: { width: 44, height: 44 },
   
-  content: { flex: 1, paddingHorizontal: 24, justifyContent: 'center' },
-  title: { fontSize: 44, fontFamily: Typography.family.bold, color: Colors.textPrimary, lineHeight: 48, letterSpacing: -0.9, marginBottom: 40 },
+  content: { flex: 1, paddingHorizontal: 24, paddingTop: 10 },
+  title: { fontSize: 34, fontFamily: Typography.family.bold, color: Colors.textPrimary, lineHeight: 38, letterSpacing: -0.7 },
+  subtitle: { marginTop: 8, fontSize: 14, lineHeight: 20, color: Colors.textSecondary, fontFamily: Typography.family.regular, marginBottom: 24 },
   
-  form: { marginBottom: 40 },
-  inputGroup: { marginBottom: 24 },
-  label: { fontSize: 14, fontFamily: Typography.family.semibold, color: Colors.textSecondary, marginBottom: 12 },
+  form: { marginBottom: 24 },
+  inputGroup: { marginBottom: 16 },
+  label: { fontSize: 13, fontFamily: Typography.family.semibold, color: Colors.textSecondary, marginBottom: 8 },
   input: { 
-    height: 56, 
-    borderBottomWidth: 1, 
-    borderBottomColor: Colors.border, 
+    height: 52,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: 12,
+    backgroundColor: PANEL_BG,
+    paddingHorizontal: 14,
     color: Colors.textPrimary, 
     fontSize: 16, 
     fontFamily: Typography.family.regular 
@@ -167,8 +185,26 @@ const styles = StyleSheet.create({
   forgotBtn: { alignSelf: 'flex-start', marginTop: 8 },
   forgotText: { color: Colors.textSecondary, fontSize: 14, fontFamily: Typography.family.medium, textDecorationLine: 'underline' },
   
-  footer: { paddingBottom: 40, position: 'relative' },
+  footer: { paddingBottom: 24, position: 'relative' },
   errorText: { color: Colors.danger, fontSize: 13, fontFamily: Typography.family.medium, textAlign: 'center', marginBottom: 12 },
   primaryBtn: { backgroundColor: Colors.textPrimary, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center' },
   primaryText: { color: Colors.background, fontSize: 16, fontFamily: Typography.family.semibold },
+  switchRow: {
+    marginTop: 14,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 6,
+  },
+  switchText: {
+    color: Colors.textSecondary,
+    fontSize: 13,
+    fontFamily: Typography.family.regular,
+  },
+  switchLink: {
+    color: Colors.textPrimary,
+    fontSize: 13,
+    fontFamily: Typography.family.semibold,
+    textDecorationLine: 'underline',
+  },
 });

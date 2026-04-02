@@ -6,10 +6,10 @@ import {
   Text,
   StyleSheet,
   StatusBar,
-  Image,
   Pressable,
   Dimensions
 } from 'react-native';
+import { CachedImage } from '../components/CachedImage';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -130,7 +130,7 @@ export default function PosterViewerScreen() {
     <View style={styles.container}>
       <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor="#000" />
 
-      <Image source={{ uri: activePoster.image }} style={styles.posterImage} resizeMode="cover" />
+      <CachedImage uri={activePoster.image} style={styles.posterImage} contentFit="cover" priority="high" containerStyle={StyleSheet.absoluteFillObject} />
       <View style={styles.backdropOverlay} />
 
       <SafeAreaView style={styles.overlay} edges={['top', 'bottom']}>
@@ -147,9 +147,11 @@ export default function PosterViewerScreen() {
 
         <View style={styles.topMetaRow}>
           <View style={styles.authorRow}>
-            <Image
-              source={{ uri: activePoster.uploader?.avatar ?? 'https://picsum.photos/seed/poster-avatar/120/120' }}
+            <CachedImage
+              uri={activePoster.uploader?.avatar ?? 'https://picsum.photos/seed/poster-avatar/120/120'}
               style={styles.authorAvatar}
+              containerStyle={{ width: 30, height: 30, borderRadius: 15 }}
+              contentFit="cover"
             />
             <Text style={styles.authorName}>@{activePoster.uploader?.username ?? 'seller'}</Text>
             <Text style={styles.postedTime}>• {postedTimeLabel}</Text>

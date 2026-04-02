@@ -35,7 +35,7 @@ export default function SplashScreen() {
       opacity.value = withTiming(0, { duration: 250 }, () => {
         runOnJS(navigation.reset)({
           index: 0,
-          routes: [{ name: 'AuthLanding' as any }],
+          routes: [{ name: 'Login' as any }],
         });
       });
     }, 2200);

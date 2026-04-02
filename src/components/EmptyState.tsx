@@ -1,10 +1,22 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import Reanimated, { FadeIn } from 'react-native-reanimated';
+import Reanimated, {
+  FadeInDown,
+  useSharedValue,
+  useAnimatedStyle,
+  withRepeat,
+  withSequence,
+  withTiming,
+  withSpring,
+  Easing,
+} from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors } from '../constants/colors';
+import { ActiveTheme, Colors } from '../constants/colors';
 import { Typography } from '../constants/typography';
 import { AnimatedPressable } from './AnimatedPressable';
+
+const IS_LIGHT = ActiveTheme === 'light';
+const RING_BG = IS_LIGHT ? '#f0ebe3' : '#151515';
 
 interface Props {
   icon: keyof typeof Ionicons.glyphMap;
@@ -16,19 +28,65 @@ interface Props {
 }
 
 export function EmptyState({ icon, title, subtitle, ctaLabel, onCtaPress, iconColor = '#e8dcc8' }: Props) {
+  // Floating animation on the icon ring
+  const translateY = useSharedValue(0);
+  const iconScale = useSharedValue(0.8);
+
+  useEffect(() => {
+    // Gentle float up/down
+    translateY.value = withRepeat(
+      withSequence(
+        withTiming(-8, { duration: 1600, easing: Easing.inOut(Easing.ease) }),
+        withTiming(0, { duration: 1600, easing: Easing.inOut(Easing.ease) })
+      ),
+      -1,
+      true
+    );
+
+    // Spring entrance on mount
+    iconScale.value = withSpring(1, { damping: 12, stiffness: 150 });
+  }, [translateY, iconScale]);
+
+  const floatStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateY: translateY.value },
+      { scale: iconScale.value },
+    ],
+  }));
+
   return (
-    <Reanimated.View entering={FadeIn.duration(600)} style={styles.container}>
-      <View style={[styles.iconRing, { borderColor: iconColor + '30' }]}>
-        <Ionicons name={icon} size={40} color={iconColor} />
-      </View>
-      <Text style={styles.title}>{title}</Text>
-      {subtitle && <Text style={styles.subtitle}>{subtitle}</Text>}
-      {ctaLabel && onCtaPress && (
-        <AnimatedPressable style={styles.cta} onPress={onCtaPress} activeOpacity={0.8}>
-          <Text style={styles.ctaText}>{ctaLabel}</Text>
-        </AnimatedPressable>
+    <View style={styles.container}>
+      <Reanimated.View
+        entering={FadeInDown.delay(100).duration(500).springify()}
+        style={[styles.iconRing, { borderColor: iconColor + '25' }, floatStyle]}
+      >
+        <Ionicons name={icon} size={38} color={iconColor} />
+      </Reanimated.View>
+
+      <Reanimated.Text
+        entering={FadeInDown.delay(200).duration(400)}
+        style={styles.title}
+      >
+        {title}
+      </Reanimated.Text>
+
+      {subtitle && (
+        <Reanimated.Text
+          entering={FadeInDown.delay(300).duration(400)}
+          style={styles.subtitle}
+        >
+          {subtitle}
+        </Reanimated.Text>
       )}
-    </Reanimated.View>
+
+      {ctaLabel && onCtaPress && (
+        <Reanimated.View entering={FadeInDown.delay(400).duration(400)}>
+          <AnimatedPressable style={styles.cta} onPress={onCtaPress} activeOpacity={0.8}>
+            <Text style={styles.ctaText}>{ctaLabel}</Text>
+          </AnimatedPressable>
+        </Reanimated.View>
+      )}
+    </View>
   );
 }
 
@@ -39,44 +97,54 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 40,
     paddingVertical: 60,
-    gap: 12,
+    gap: 10,
   },
   iconRing: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
+    width: 100,
+    height: 100,
+    borderRadius: 50,
     borderWidth: 1.5,
-    backgroundColor: '#111',
+    backgroundColor: RING_BG,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 8,
+    marginBottom: 10,
+    shadowColor: '#e8dcc8',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
   },
   title: {
     fontSize: 22,
-    fontFamily: Typography.family.semibold,
-    letterSpacing: -0.2,
+    fontFamily: Typography.family.bold,
+    letterSpacing: -0.3,
     color: Colors.textPrimary,
     textAlign: 'center',
   },
   subtitle: {
     fontSize: 14,
     fontFamily: Typography.family.regular,
-    letterSpacing: 0.1,
+    letterSpacing: 0.08,
     color: Colors.textMuted,
     textAlign: 'center',
     lineHeight: 21,
+    maxWidth: 260,
   },
   cta: {
-    marginTop: 12,
-    backgroundColor: '#e8dcc8',
-    paddingHorizontal: 32,
-    paddingVertical: 14,
+    marginTop: 16,
+    backgroundColor: Colors.accent,
+    paddingHorizontal: 34,
+    paddingVertical: 15,
     borderRadius: 30,
+    shadowColor: Colors.accent,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    elevation: 4,
   },
   ctaText: {
     fontSize: 14,
-    fontFamily: Typography.family.semibold,
+    fontFamily: Typography.family.bold,
     letterSpacing: 0.2,
-    color: '#0a0a0a',
+    color: Colors.textInverse,
   },
 });

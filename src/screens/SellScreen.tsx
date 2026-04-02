@@ -54,7 +54,7 @@ export default function SellScreen() {
   const [price, setPrice] = useState('');
   const [photos, setPhotos] = useState<string[]>([]);
   const [syndicateEnabled, setSyndicateEnabled] = useState(false);
-  const [shareCountInput, setShareCountInput] = useState('100');
+  const [shareCountInput, setShareCountInput] = useState('20');
   const [sharePriceInput, setSharePriceInput] = useState('');
   const [offeringWindowHours, setOfferingWindowHours] = useState(24);
   const [authPhotos, setAuthPhotos] = useState<string[]>([]);
@@ -79,13 +79,29 @@ export default function SellScreen() {
     transform: [{ translateX: shakeOffset.value }]
   }));
 
+  const handleShareCountChange = (value: string) => {
+    const sanitized = sanitizeIntegerInput(value);
+    if (!sanitized) {
+      setShareCountInput('');
+      return;
+    }
+
+    const parsed = Math.floor(Number(sanitized));
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      setShareCountInput('1');
+      return;
+    }
+
+    setShareCountInput(String(Math.min(20, parsed)));
+  };
+
   React.useEffect(() => {
     if (!syndicateEnabled || sharePriceInput) {
       return;
     }
 
     const listingPrice = Number(sanitizeDecimalInput(price));
-    const shareCount = Math.max(1, Math.floor(Number(shareCountInput)));
+    const shareCount = Math.min(20, Math.max(1, Math.floor(Number(shareCountInput))));
     if (Number.isFinite(listingPrice) && listingPrice > 0 && Number.isFinite(shareCount) && shareCount > 0) {
       setSharePriceInput((listingPrice / shareCount).toFixed(2));
     }
@@ -430,11 +446,12 @@ export default function SellScreen() {
                 <TextInput
                   style={styles.syndicateInput}
                   value={shareCountInput}
-                  onChangeText={(value) => setShareCountInput(sanitizeIntegerInput(value))}
+                  onChangeText={handleShareCountChange}
                   keyboardType="number-pad"
-                  placeholder="100"
+                  placeholder="20"
                   placeholderTextColor={Colors.textMuted}
                 />
+                <Text style={styles.syndicateInputHint}>Maximum 20 units per syndicate</Text>
 
                 <Text style={styles.inputLabel}>Initial share price ({currencyCode})</Text>
                 <TextInput
@@ -545,6 +562,13 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: PANEL_BORDER,
     paddingBottom: 24,
+  },
+  syndicateInputHint: {
+    marginTop: -4,
+    marginBottom: 8,
+    color: Colors.textMuted,
+    fontSize: 11,
+    fontFamily: 'Inter_500Medium',
   },
   headerTop: {
     flexDirection: 'row',

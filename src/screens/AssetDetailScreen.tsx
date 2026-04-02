@@ -15,7 +15,8 @@ import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { RootStackParamList } from '../navigation/types';
-import { formatCompact, getSyndicateMarket } from '../data/tradeHub';
+import { getSyndicateMarket, getUserLabel } from '../data/tradeHub';
+import { MOCK_USERS } from '../data/mockData';
 import { useStore } from '../store/useStore';
 import { resolveAssetMarketState, getOrderBookSnapshot, getPriceSeries, ChartRange } from '../data/mockSyndicateData';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
@@ -42,6 +43,7 @@ export default function AssetDetailScreen() {
   const insets = useSafeAreaInsets();
   const customSyndicates = useStore((state) => state.customSyndicates);
   const syndicateRuntime = useStore((state) => state.syndicateRuntime);
+  const currentUser = useStore((state) => state.currentUser);
   const { formatFromFiat } = useFormattedPrice();
 
   const [range, setRange] = React.useState<ChartRange>('1D');
@@ -116,7 +118,51 @@ export default function AssetDetailScreen() {
 
   const bids = orderBook.filter((entry) => entry.side === 'bid').sort((a, b) => b.price - a.price);
   const asks = orderBook.filter((entry) => entry.side === 'ask').sort((a, b) => a.price - b.price);
-  const marketCap = asset.totalUnits * asset.unitPriceGBP;
+  const marketValue = asset.totalUnits * asset.unitPriceGBP;
+  const circulatingValue = Math.max(0, asset.totalUnits - asset.availableUnits) * asset.unitPriceGBP;
+
+  const ownerAccounts: Array<{ id: string; handle: string; role: string; units: number }> = [];
+  ownerAccounts.push({
+    id: `issuer_${asset.issuerId}`,
+    handle: getUserLabel(asset.issuerId),
+    role: 'Issuer treasury',
+    units: Math.max(0, asset.availableUnits),
+  });
+
+  if (asset.yourUnits > 0) {
+    ownerAccounts.push({
+      id: 'you',
+      handle: currentUser ? `@${currentUser.username}` : '@you',
+      role: 'Your position',
+      units: asset.yourUnits,
+    });
+  }
+
+  const allocatedUnits = ownerAccounts.reduce((sum, account) => sum + account.units, 0);
+  let remainingUnits = Math.max(0, asset.totalUnits - allocatedUnits);
+  const syntheticOwners = Math.max(0, Math.min(3, asset.holders - (asset.yourUnits > 0 ? 1 : 0)));
+  const fallbackHandles = MOCK_USERS
+    .filter((user) => user.id !== asset.issuerId && user.id !== currentUser?.id)
+    .map((user) => `@${user.username}`);
+
+  for (let index = 0; index < syntheticOwners; index += 1) {
+    const slotsLeft = syntheticOwners - index;
+    const units = slotsLeft === 1
+      ? remainingUnits
+      : Math.max(1, Math.floor(remainingUnits / slotsLeft));
+
+    if (units <= 0) {
+      break;
+    }
+
+    remainingUnits = Math.max(0, remainingUnits - units);
+    ownerAccounts.push({
+      id: `owner_${index + 1}`,
+      handle: fallbackHandles[index] ?? `@holder${index + 1}`,
+      role: 'Owner account',
+      units,
+    });
+  }
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -186,12 +232,12 @@ export default function AssetDetailScreen() {
 
         <View style={styles.statsGrid}>
           <View style={styles.statCard}>
-            <Text style={styles.statLabel}>Market Cap</Text>
-            <Text style={styles.statValue}>{formatFromFiat(marketCap, 'GBP', { displayMode: 'fiat' })}</Text>
+            <Text style={styles.statLabel}>Market Value</Text>
+            <Text style={styles.statValue}>{formatFromFiat(marketValue, 'GBP', { displayMode: 'fiat' })}</Text>
           </View>
           <View style={styles.statCard}>
-            <Text style={styles.statLabel}>24h Volume</Text>
-            <Text style={styles.statValue}>{formatCompact(Math.round(asset.volume24hGBP))}</Text>
+            <Text style={styles.statLabel}>Circulating Value</Text>
+            <Text style={styles.statValue}>{formatFromFiat(circulatingValue, 'GBP', { displayMode: 'fiat' })}</Text>
           </View>
           <View style={styles.statCard}>
             <Text style={styles.statLabel}>Holders</Text>
@@ -223,6 +269,22 @@ export default function AssetDetailScreen() {
               </View>
             );
           })}
+        </View>
+
+        <View style={styles.ownersCard}>
+          <Text style={styles.ownersTitle}>Owner Accounts</Text>
+          {ownerAccounts
+            .filter((account) => account.units > 0)
+            .slice(0, 5)
+            .map((account) => (
+              <View key={account.id} style={styles.ownerRow}>
+                <View>
+                  <Text style={styles.ownerHandle}>{account.handle}</Text>
+                  <Text style={styles.ownerRole}>{account.role}</Text>
+                </View>
+                <Text style={styles.ownerUnits}>{account.units} units</Text>
+              </View>
+            ))}
         </View>
 
         <View style={{ height: 120 }} />
@@ -463,6 +525,45 @@ const styles = StyleSheet.create({
   },
   orderAsk: {
     color: Colors.danger,
+  },
+  ownersCard: {
+    marginTop: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+  },
+  ownersTitle: {
+    color: Colors.textPrimary,
+    fontSize: 15,
+    fontFamily: 'Inter_700Bold',
+    marginBottom: 8,
+  },
+  ownerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 7,
+    borderTopWidth: 1,
+    borderTopColor: PANEL_BORDER,
+  },
+  ownerHandle: {
+    color: Colors.textPrimary,
+    fontSize: 12,
+    fontFamily: 'Inter_700Bold',
+  },
+  ownerRole: {
+    marginTop: 2,
+    color: Colors.textMuted,
+    fontSize: 10,
+    fontFamily: 'Inter_500Medium',
+  },
+  ownerUnits: {
+    color: BRAND,
+    fontSize: 12,
+    fontFamily: 'Inter_700Bold',
   },
   footer: {
     position: 'absolute',

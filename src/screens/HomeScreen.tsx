@@ -1,6 +1,4 @@
-import React, { useState } from 'react';
-import {
-  AnimatedPressable } from '../components/AnimatedPressable';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,18 +6,29 @@ import {
   StatusBar,
   ScrollView,
   FlatList,
-  Image,
   Dimensions,
-  RefreshControl
+  RefreshControl,
 } from 'react-native';
-import Reanimated, { useSharedValue, useAnimatedScrollHandler, FadeInDown } from 'react-native-reanimated';
+import Reanimated, {
+  useSharedValue,
+  useAnimatedScrollHandler,
+  useAnimatedRef,
+  useAnimatedStyle,
+  withSpring,
+  withTiming,
+  withSequence,
+  runOnJS,
+  FadeInDown,
+} from 'react-native-reanimated';
+import { GestureDetector, Gesture } from 'react-native-gesture-handler';
+import * as haptic from 'expo-haptics';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { Typography } from '../constants/typography';
 import { MOCK_USERS } from '../data/mockData';
 import { getFreshPosters } from '../data/posters';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useScrollToTop } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
 import { useStore } from '../store/useStore';
@@ -28,6 +37,8 @@ import { useTabScroll } from '../context/TabScrollContext';
 import { AnimatedBadge } from '../components/AnimatedBadge';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useBackendData } from '../context/BackendDataContext';
+import { AnimatedPressable } from '../components/AnimatedPressable';
+import { CachedImage } from '../components/CachedImage';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -35,8 +46,9 @@ const TEAL = '#e8dcc8';
 const IS_LIGHT = ActiveTheme === 'light';
 const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111';
 const HEADER_BG = IS_LIGHT ? 'rgba(247,245,241,0.96)' : 'rgba(10, 10, 10, 0.95)';
+const BRAND = IS_LIGHT ? '#2f251b' : TEAL;
 
-// ── Feed Mock Data ──────────────────────────────────────────
+// ── Feed Look data ──
 interface FeedLook {
   id: string;
   creator: { id: string; name: string; avatar: string; isVerified?: boolean };
@@ -108,6 +120,9 @@ export default function HomeScreen() {
   const scrollY = useSharedValue(0);
   const lastScrollY = useSharedValue(0);
   const { tabBarVisible } = useTabScroll();
+  const scrollRef = useAnimatedRef<FlatList>();
+
+  useScrollToTop(scrollRef);
 
   const scrollHandler = useAnimatedScrollHandler({
     onScroll: (e) => {
@@ -132,6 +147,7 @@ export default function HomeScreen() {
     [refreshing, customPosters]
   );
 
+  // ── Fresh Posters (Thryftverse editorial square cards) ──
   const renderPosters = () => (
     <View style={styles.postersContainer}>
       <View style={styles.postersHeaderRow}>
@@ -146,10 +162,11 @@ export default function HomeScreen() {
           onPress={() => navigation.navigate('CreatePoster')}
         >
           <View style={styles.posterCreateTile}>
-            <Ionicons name="add" size={26} color={Colors.background} />
+            <View style={styles.posterCreateIcon}>
+              <Ionicons name="add" size={24} color={Colors.background} />
+            </View>
+            <Text style={styles.posterCreateLabel}>Create{'\n'}Poster</Text>
           </View>
-          <Text style={styles.posterUserName}>Create Poster</Text>
-          <Text style={styles.posterMeta}>Set expiry before posting</Text>
         </AnimatedPressable>
 
         {freshPosters.map((poster) => (
@@ -160,15 +177,20 @@ export default function HomeScreen() {
             onPress={() => navigation.navigate('PosterViewer', { posterId: poster.id })}
           >
             <View style={[styles.posterTile, hasSeenPoster(poster.id) ? styles.posterTileSeen : styles.posterTileUnseen]}>
-              <Image source={{ uri: poster.image }} style={styles.posterImage} />
+              <CachedImage uri={poster.image} style={styles.posterImage} contentFit="cover" />
 
               <View style={styles.posterTopRow}>
                 <View style={styles.posterOwnerPill}>
-                  <Image source={{ uri: poster.uploader?.avatar ?? 'https://picsum.photos/seed/posterUser/60/60' }} style={styles.posterOwnerAvatar} />
+                  <CachedImage
+                    uri={poster.uploader?.avatar ?? 'https://picsum.photos/seed/posterUser/60/60'}
+                    style={styles.posterOwnerAvatar}
+                    containerStyle={styles.posterOwnerAvatarWrap}
+                    contentFit="cover"
+                  />
                   <Text style={styles.posterOwnerName} numberOfLines={1}>@{poster.uploader?.username ?? 'seller'}</Text>
                 </View>
                 <View style={styles.posterExpiryPill}>
-                  <Ionicons name="time-outline" size={12} color="#fff" />
+                  <Ionicons name="time-outline" size={11} color="#fff" />
                   <Text style={styles.posterExpiryText}>{poster.remainingHours}h</Text>
                 </View>
               </View>
@@ -205,45 +227,179 @@ export default function HomeScreen() {
   const fallbackListingId = listings[0]?.id;
 
   const EXPLORE_DATA = React.useMemo(() => {
-    return [
+    const gridItems = [
       ...FEED_LOOKS.map(l => ({
-        type: 'look',
+        type: 'look' as const,
         id: `l_${l.id}`,
         cover: l.coverImage,
         likes: l.likes,
         routeId: l.items.find((lookItem) => listingById.has(lookItem.id))?.id ?? fallbackListingId,
+        imageCount: l.items.length,
       })),
-      ...listings.map(i => ({ type: 'listing', id: `i_${i.id}`, cover: i.images[0], likes: Math.floor(Math.random() * 50) + 1, price: i.price, routeId: i.id }))
+      ...listings.map(i => ({
+        type: 'listing' as const,
+        id: `i_${i.id}`,
+        cover: i.images[0],
+        likes: i.likes,
+        price: i.price,
+        routeId: i.id,
+        imageCount: i.images.length,
+      }))
     ].sort(() => Math.random() - 0.5);
+
+    // Intersperse editorial cards every 9 items
+    const result: any[] = [];
+    let lookIdx = 0;
+    gridItems.forEach((item, i) => {
+      result.push(item);
+      if ((i + 1) % 9 === 0 && lookIdx < FEED_LOOKS.length) {
+        result.push({
+          type: 'editorial' as const,
+          id: `ed_${FEED_LOOKS[lookIdx].id}`,
+          look: FEED_LOOKS[lookIdx],
+        });
+        lookIdx++;
+      }
+    });
+
+    return result;
   }, [fallbackListingId, listingById, listings]);
 
-  const renderExploreItem = ({ item, index }: { item: any, index: number }) => (
-    <Reanimated.View
-      entering={FadeInDown.delay(Math.min(index, 12) * 50).duration(400)}
-      style={styles.exploreItemBox}
-    >
+  // ── Full-width editorial look card (Thryftverse original — shoppable outfit card) ──
+  const renderEditorialCard = (look: FeedLook) => (
+    <Reanimated.View entering={FadeInDown.duration(400)} style={styles.editorialCard}>
       <AnimatedPressable
-        style={{ flex: 1 }}
-        activeOpacity={0.9}
-        onPress={() => item.routeId ? navigation.navigate('ItemDetail', { itemId: item.routeId }) : null}
+        activeOpacity={0.95}
+        onPress={() => navigation.navigate('ItemDetail', { itemId: look.items[0]?.id ?? fallbackListingId })}
       >
-        <Image source={{ uri: item.cover }} style={styles.exploreImage} resizeMode="cover" />
-        <View style={styles.exploreOverlay}>
-          {item.type === 'listing' ? (
-            <View style={styles.exploreTag}>
+        <CachedImage uri={look.coverImage} style={styles.editorialImage} containerStyle={styles.editorialImageWrap} contentFit="cover" />
+
+        {/* Shoppable tags on image */}
+        <View style={styles.editorialTagsOverlay}>
+          {look.items.slice(0, 2).map((tag) => (
+            <View key={tag.id} style={styles.editorialTag}>
               <Ionicons name="pricetag" size={10} color="#fff" />
-              <Text style={styles.exploreTagText}>{formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}</Text>
+              <Text style={styles.editorialTagText}>{tag.label}</Text>
             </View>
-          ) : (
-            <View style={styles.exploreTag}>
-              <Ionicons name="eye" size={12} color="#fff" />
-              <Text style={styles.exploreTagText}>{item.likes}k</Text>
-            </View>
-          )}
+          ))}
         </View>
       </AnimatedPressable>
+
+      <View style={styles.editorialMeta}>
+        <View style={styles.editorialCreatorRow}>
+          <CachedImage
+            uri={look.creator.avatar}
+            style={styles.editorialCreatorAvatar}
+            containerStyle={styles.editorialCreatorAvatarWrap}
+            contentFit="cover"
+          />
+          <View style={{ flex: 1 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Text style={styles.editorialCreatorName}>@{look.creator.name}</Text>
+              {look.creator.isVerified && <Ionicons name="checkmark-circle" size={13} color={BRAND} />}
+            </View>
+            <Text style={styles.editorialDescription} numberOfLines={1}>{look.description}</Text>
+          </View>
+        </View>
+
+        <View style={styles.editorialEngagement}>
+          <View style={styles.editorialStat}>
+            <Ionicons name="heart" size={13} color={Colors.textMuted} />
+            <Text style={styles.editorialStatText}>{look.likes}</Text>
+          </View>
+          <View style={styles.editorialStat}>
+            <Ionicons name="chatbubble-outline" size={12} color={Colors.textMuted} />
+            <Text style={styles.editorialStatText}>{look.comments}</Text>
+          </View>
+          <Text style={styles.editorialTimeAgo}>{look.timeAgo}</Text>
+        </View>
+      </View>
     </Reanimated.View>
   );
+
+  const ExploreGridItem = ({ item, index }: { item: any, index: number }) => {
+    const bigHeartOpacity = useSharedValue(0);
+    const bigHeartScale = useSharedValue(0.5);
+    const [localLikes, setLocalLikes] = useState(item.likes);
+
+    const onDoubleTap = () => {
+      haptic.impactAsync(haptic.ImpactFeedbackStyle.Heavy);
+      setLocalLikes((prev: number) => prev + 1);
+      
+      bigHeartOpacity.value = 1;
+      bigHeartScale.value = withSequence(
+        withSpring(1.4, { damping: 12 }),
+        withTiming(1.4, { duration: 400 }),
+        withTiming(0, { duration: 150 })
+      );
+    };
+
+    const taps = Gesture.Tap()
+      .numberOfTaps(2)
+      .onEnd(() => {
+        runOnJS(onDoubleTap)();
+      });
+
+    const singleTap = Gesture.Tap()
+      .onEnd(() => {
+        if (item.routeId) {
+          runOnJS(navigation.navigate as any)('ItemDetail', { itemId: item.routeId });
+        }
+      });
+
+    const combinedGesture = Gesture.Exclusive(taps, singleTap);
+
+    const bigHeartStyle = useAnimatedStyle(() => ({
+      opacity: bigHeartOpacity.value,
+      transform: [{ scale: bigHeartScale.value }],
+    }));
+
+    return (
+      <Reanimated.View
+        entering={FadeInDown.delay(Math.min(index, 12) * 40).duration(350)}
+        style={styles.exploreItemBox}
+      >
+        <GestureDetector gesture={combinedGesture}>
+          <AnimatedPressable style={{ flex: 1 }} activeOpacity={0.9}>
+            <CachedImage uri={item.cover} style={styles.exploreImage} contentFit="cover" />
+
+            <View style={styles.exploreOverlay}>
+              {item.type === 'listing' ? (
+                <View style={styles.exploreTag}>
+                  <Ionicons name="pricetag" size={10} color="#fff" />
+                  <Text style={styles.exploreTagText}>{formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}</Text>
+                </View>
+              ) : (
+                <View style={styles.exploreTag}>
+                  <Ionicons name="heart" size={12} color="#fff" />
+                  <Text style={styles.exploreTagText}>{localLikes}</Text>
+                </View>
+              )}
+            </View>
+
+            {/* Multi-image indicator */}
+            {item.imageCount > 1 && (
+              <View style={styles.multiImageDot}>
+                <Ionicons name="copy-outline" size={11} color="#fff" />
+              </View>
+            )}
+
+            {/* Big animated heart overlay */}
+            <Reanimated.View style={[StyleSheet.absoluteFill, { alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 5 }, bigHeartStyle]}>
+              <Ionicons name="heart" size={50} color="#fff" style={{ shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 10 }} />
+            </Reanimated.View>
+          </AnimatedPressable>
+        </GestureDetector>
+      </Reanimated.View>
+    );
+  };
+
+  const renderExploreItem = ({ item, index }: { item: any, index: number }) => {
+    if (item.type === 'editorial') {
+      return renderEditorialCard(item.look);
+    }
+    return <ExploreGridItem item={item} index={index} />;
+  };
 
   const AnimatedFlatList = Reanimated.createAnimatedComponent(FlatList);
 
@@ -268,13 +424,14 @@ export default function HomeScreen() {
       <RefreshIndicator scrollY={scrollY} isRefreshing={refreshing} topInset={80} />
 
       <AnimatedFlatList
+        ref={scrollRef}
         key="explore-grid-3"
         data={EXPLORE_DATA}
         keyExtractor={(item: any) => item.id}
         numColumns={3}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 120 }}
-        columnWrapperStyle={{ gap: 2 }}
+        columnWrapperStyle={EXPLORE_DATA.length > 0 ? { gap: 2 } : undefined}
         ListHeaderComponent={renderPosters}
         renderItem={renderExploreItem}
         onScroll={scrollHandler}
@@ -302,19 +459,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingVertical: 12,
+    paddingVertical: 10,
     backgroundColor: HEADER_BG,
     zIndex: 10,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
   brandTitle: {
-    fontSize: 23,
+    fontSize: 24,
     fontFamily: Typography.family.bold,
     color: Colors.textPrimary,
-    letterSpacing: -0.5,
+    letterSpacing: -0.6,
   },
-  headerRight: { flexDirection: 'row', gap: 12 },
+  headerRight: { flexDirection: 'row', gap: 8 },
   headerBtn: {
     width: 40,
     height: 40,
@@ -324,24 +481,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     position: 'relative',
   },
-  notiBadge: {
-    position: 'absolute',
-    top: 6,
-    right: 8,
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: Colors.danger,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  notiBadgeText: {
-    color: '#fff',
-    fontSize: 9,
-    fontFamily: 'Inter_700Bold',
-  },
 
-  // Posters
+  // Posters (Thryftverse original — editorial square cards)
   postersContainer: {
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
@@ -373,11 +514,11 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   posterCard: {
-    width: 116,
+    width: 120,
   },
   posterTile: {
-    width: 116,
-    height: 146,
+    width: 120,
+    height: 150,
     borderRadius: 14,
     overflow: 'hidden',
     backgroundColor: Colors.surface,
@@ -393,13 +534,29 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
   },
   posterCreateTile: {
-    width: 116,
-    height: 146,
+    width: 120,
+    height: 150,
     borderRadius: 14,
     marginBottom: 6,
     backgroundColor: Colors.textPrimary,
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 8,
+  },
+  posterCreateIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  posterCreateLabel: {
+    color: Colors.background,
+    fontSize: 11,
+    fontFamily: Typography.family.semibold,
+    textAlign: 'center',
+    lineHeight: 15,
   },
   posterImage: {
     width: '100%',
@@ -414,26 +571,31 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    gap: 6,
+    gap: 4,
   },
   posterOwnerPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.65)',
-    paddingHorizontal: 6,
-    paddingVertical: 4,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    paddingHorizontal: 5,
+    paddingVertical: 3,
     borderRadius: 12,
     flex: 1,
     gap: 4,
   },
-  posterOwnerAvatar: {
+  posterOwnerAvatarWrap: {
     width: 16,
     height: 16,
     borderRadius: 8,
   },
+  posterOwnerAvatar: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 8,
+  },
   posterOwnerName: {
     color: '#fff',
-    fontSize: 10,
+    fontSize: 9,
     fontFamily: Typography.family.medium,
     flex: 1,
   },
@@ -441,15 +603,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 3,
-    backgroundColor: 'rgba(0,0,0,0.65)',
+    backgroundColor: 'rgba(0,0,0,0.6)',
     borderRadius: 12,
     paddingHorizontal: 6,
-    paddingVertical: 4,
+    paddingVertical: 3,
   },
   posterExpiryText: {
     color: '#fff',
     fontSize: 10,
-    fontFamily: 'Inter_700Bold',
+    fontFamily: Typography.family.bold,
   },
   posterBottomOverlay: {
     position: 'absolute',
@@ -457,7 +619,7 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     paddingHorizontal: 8,
-    paddingVertical: 8,
+    paddingVertical: 7,
     backgroundColor: 'rgba(0,0,0,0.45)',
   },
   posterCaption: {
@@ -467,15 +629,15 @@ const styles = StyleSheet.create({
     fontFamily: Typography.family.medium,
   },
   sharedBadge: {
-    marginTop: 5,
+    marginTop: 4,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
   },
   sharedBadgeText: {
     color: TEAL,
-    fontSize: 10,
-    fontFamily: 'Inter_600SemiBold',
+    fontSize: 9,
+    fontFamily: Typography.family.semibold,
     flex: 1,
   },
   posterUserName: {
@@ -490,18 +652,12 @@ const styles = StyleSheet.create({
   },
   posterFreshMeta: {
     fontSize: 10,
-    fontFamily: 'Inter_700Bold',
+    fontFamily: Typography.family.bold,
     color: TEAL,
   },
   posterSeenMeta: {
     fontSize: 10,
-    fontFamily: 'Inter_500Medium',
-    color: Colors.textMuted,
-  },
-  posterMeta: {
-    marginTop: 2,
-    fontSize: 10,
-    fontFamily: Typography.family.regular,
+    fontFamily: Typography.family.medium,
     color: Colors.textMuted,
   },
 
@@ -536,5 +692,107 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontFamily: Typography.family.semibold,
     letterSpacing: 0.14,
+  },
+  multiImageDot: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  // Editorial cards (Thryftverse original — shoppable outfit look)
+  editorialCard: {
+    width: SCREEN_WIDTH,
+    backgroundColor: Colors.background,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: Colors.border,
+    marginBottom: 2,
+  },
+  editorialImageWrap: {
+    width: SCREEN_WIDTH,
+    height: SCREEN_WIDTH * 0.75,
+  },
+  editorialImage: {
+    width: '100%',
+    height: '100%',
+  },
+  editorialTagsOverlay: {
+    position: 'absolute',
+    bottom: 10,
+    left: 10,
+    flexDirection: 'row',
+    gap: 6,
+  },
+  editorialTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+  },
+  editorialTagText: {
+    color: '#fff',
+    fontSize: 10,
+    fontFamily: Typography.family.semibold,
+  },
+  editorialMeta: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  editorialCreatorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 8,
+  },
+  editorialCreatorAvatarWrap: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+  },
+  editorialCreatorAvatar: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 15,
+  },
+  editorialCreatorName: {
+    fontSize: 12,
+    fontFamily: Typography.family.bold,
+    color: Colors.textPrimary,
+  },
+  editorialDescription: {
+    fontSize: 12,
+    fontFamily: Typography.family.regular,
+    color: Colors.textSecondary,
+    marginTop: 1,
+  },
+  editorialEngagement: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  editorialStat: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  editorialStatText: {
+    fontSize: 11,
+    fontFamily: Typography.family.medium,
+    color: Colors.textMuted,
+  },
+  editorialTimeAgo: {
+    fontSize: 11,
+    fontFamily: Typography.family.regular,
+    color: Colors.textMuted,
+    marginLeft: 'auto',
   },
 });

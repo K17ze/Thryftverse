@@ -6,11 +6,11 @@ import {
   Text,
   FlatList,
   StyleSheet,
-  Image,
   StatusBar,
   Alert,
   RefreshControl
 } from 'react-native';
+import { CachedImage } from '../components/CachedImage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -21,6 +21,7 @@ import { RootStackParamList } from '../navigation/types';
 import { Swipeable } from 'react-native-gesture-handler';
 import Reanimated, { FadeInDown, useSharedValue, useAnimatedScrollHandler } from 'react-native-reanimated';
 import { EmptyState } from '../components/EmptyState';
+import { useStore } from '../store/useStore';
 import { useToast } from '../context/ToastContext';
 import { RefreshIndicator } from '../components/RefreshIndicator';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
@@ -40,7 +41,10 @@ export default function InboxScreen() {
   const { show } = useToast();
   const { formatFromFiat } = useFormattedPrice();
   const { listings, refreshListings } = useBackendData();
-  const [conversations, setConversations] = useState(MOCK_CONVERSATIONS);
+  const conversations = useStore((state) => state.conversations);
+  const deleteConversation = useStore((state) => state.deleteConversation);
+  const archiveConversation = useStore((state) => state.archiveConversation);
+  const markConversationRead = useStore((state) => state.markConversationRead);
   const [refreshing, setRefreshing] = useState(false);
 
   const scrollY = useSharedValue(0);
@@ -59,14 +63,14 @@ export default function InboxScreen() {
   const AnimatedFlatList = Reanimated.createAnimatedComponent(FlatList);
 
   const handleDelete = useCallback((id: string) => {
-    setConversations(prev => prev.filter(c => c.id !== id));
+    deleteConversation(id);
     show('Conversation deleted', 'error');
-  }, []);
+  }, [deleteConversation, show]);
 
   const handleArchive = useCallback((id: string) => {
-    setConversations(prev => prev.filter(c => c.id !== id));
+    archiveConversation(id);
     show('Conversation archived', 'info');
-  }, []);
+  }, [archiveConversation, show]);
 
   const renderRightActions = (id: string) => (
     <AnimatedPressable
@@ -103,11 +107,14 @@ export default function InboxScreen() {
         >
           <AnimatedPressable
             style={styles.messageCard}
-            onPress={() => navigation.navigate('Chat', { conversationId: item.id })}
+            onPress={() => {
+              markConversationRead(item.id);
+              navigation.navigate('Chat', { conversationId: item.id });
+            }}
             activeOpacity={0.85}
           >
             <View style={styles.avatarWrap}>
-              <Image source={{ uri: seller?.avatar }} style={styles.avatar} />
+              <CachedImage uri={seller?.avatar ?? ''} style={styles.avatar} containerStyle={{ width: 48, height: 48, borderRadius: 24 }} contentFit="cover" />
               <View style={styles.onlineDot} />
             </View>
 
@@ -120,7 +127,7 @@ export default function InboxScreen() {
 
               {listing && (
                 <View style={styles.itemPreview}>
-                  <Image source={{ uri: listing.images[0] }} style={styles.itemThumb} />
+                  <CachedImage uri={listing.images[0]} style={styles.itemThumb} containerStyle={{ width: 42, height: 42, borderRadius: 8 }} contentFit="cover" />
                   <Text style={styles.itemName} numberOfLines={1}>{listing.title}</Text>
                   <Text style={styles.itemPrice}>{formatFromFiat(listing.price, 'GBP', { displayMode: 'fiat' })}</Text>
                 </View>
@@ -139,7 +146,6 @@ export default function InboxScreen() {
       <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
       <View style={styles.header}>
-        <Text style={styles.headerLabel}>COMMUNICATION</Text>
         <Text style={styles.hugeTitle}>Inbox</Text>
       </View>
 

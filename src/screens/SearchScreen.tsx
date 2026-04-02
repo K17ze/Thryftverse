@@ -9,10 +9,10 @@ import {
   StatusBar,
   TextInput,
   ScrollView,
-  Image,
   Dimensions,
   RefreshControl
 } from 'react-native';
+import { CachedImage } from '../components/CachedImage';
 import Reanimated, { useSharedValue, useAnimatedScrollHandler, FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -97,7 +97,7 @@ function LookCard({ look, onPress }: { look: SavedLook; onPress: () => void }) {
     <AnimatedPressable style={lookStyles.card} onPress={onPress} activeOpacity={0.92}>
       {/* Cover Image */}
       <View style={lookStyles.imageWrap}>
-        <Image source={{ uri: look.coverImage }} style={lookStyles.image} resizeMode="cover" />
+        <CachedImage uri={look.coverImage} style={lookStyles.image} containerStyle={{ width: '100%', height: 200, borderRadius: 14 }} contentFit="cover" />
         
         {/* Floating item tags */}
         {look.items.map((item, i) => (
@@ -119,7 +119,7 @@ function LookCard({ look, onPress }: { look: SavedLook; onPress: () => void }) {
 
       {/* Bottom info row */}
       <View style={lookStyles.infoRow}>
-        <Image source={{ uri: look.creator.avatar }} style={lookStyles.creatorAvatar} />
+        <CachedImage uri={look.creator.avatar} style={lookStyles.creatorAvatar} containerStyle={{ width: 24, height: 24, borderRadius: 12 }} contentFit="cover" />
         <View style={lookStyles.infoText}>
           <Text style={lookStyles.lookTitle}>{look.title}</Text>
           <Text style={lookStyles.creatorName}>by @{look.creator.name}</Text>
@@ -200,8 +200,7 @@ export default function SearchScreen() {
       {/* ── Header ── */}
       <View style={styles.headerRow}>
         <View>
-          <Text style={styles.headerLabel}>YOUR COLLECTION</Text>
-          <Text style={styles.hugeTitle}>My Closet</Text>
+          <Text style={styles.hugeTitle}>Saved</Text>
         </View>
         <View style={styles.headerRight}>
           <Text style={styles.itemCount}>{wishlistItems.length + SAVED_LOOKS.length} items</Text>

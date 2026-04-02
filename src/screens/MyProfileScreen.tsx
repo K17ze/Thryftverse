@@ -1,15 +1,23 @@
 import React from 'react';
 import {
-  AnimatedPressable } from '../components/AnimatedPressable';
-import {
   View,
   Text,
   StyleSheet,
   ScrollView,
-  Image,
-  StatusBar
+  StatusBar,
+  Dimensions,
+  Share,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import * as ImagePicker from 'expo-image-picker';
+import Reanimated, {
+  useSharedValue,
+  useAnimatedScrollHandler,
+  useAnimatedStyle,
+  interpolate,
+  Extrapolation,
+  FadeInDown,
+} from 'react-native-reanimated';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { Typography } from '../constants/typography';
@@ -22,8 +30,14 @@ import { useBackendData } from '../context/BackendDataContext';
 import { useStore } from '../store/useStore';
 import { getSyndicateMarket } from '../data/tradeHub';
 import { resolveAssetMarketState } from '../data/mockSyndicateData';
+import { AnimatedPressable } from '../components/AnimatedPressable';
+import { AnimatedCounter } from '../components/AnimatedCounter';
+import { CachedImage } from '../components/CachedImage';
 
 type NavT = StackNavigationProp<RootStackParamList>;
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const COVER_HEIGHT = 170;
+const AVATAR_SIZE = 82;
 const TEAL = '#e8dcc8';
 const IS_LIGHT = ActiveTheme === 'light';
 const BRAND = IS_LIGHT ? '#2f251b' : TEAL;
@@ -31,6 +45,8 @@ const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111';
 const PANEL_SOFT = IS_LIGHT ? '#f4efe7' : '#171717';
 const PANEL_ICON = IS_LIGHT ? '#ece5d9' : '#1a1a1a';
 const PANEL_BORDER = IS_LIGHT ? '#d8d1c6' : '#2a2a2a';
+
+const COVER_IMAGE = 'https://images.unsplash.com/photo-1558618666-fcd25c85f82e?w=800&q=80';
 
 interface QuickAccessItem {
   icon: string;
@@ -46,6 +62,35 @@ export default function MyProfileScreen() {
   const { listings } = useBackendData();
   const customSyndicates = useStore((state) => state.customSyndicates);
   const syndicateRuntime = useStore((state) => state.syndicateRuntime);
+  
+  const userAvatar = useStore((state) => state.userAvatar);
+  const userCover = useStore((state) => state.userCover);
+  const updateUserAvatar = useStore((state) => state.updateUserAvatar);
+  const updateUserCover = useStore((state) => state.updateUserCover);
+
+  const pickCover = async () => {
+    let result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [16, 9],
+      quality: 0.8,
+    });
+    if (!result.canceled) {
+      updateUserCover(result.assets[0].uri);
+    }
+  };
+
+  const pickAvatar = async () => {
+    let result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+    if (!result.canceled) {
+      updateUserAvatar(result.assets[0].uri);
+    }
+  };
 
   const myListings = React.useMemo(() => listings.slice(0, 6), [listings]);
 
@@ -53,16 +98,11 @@ export default function MyProfileScreen() {
     const marketAssets = getSyndicateMarket(customSyndicates).map((asset) =>
       resolveAssetMarketState(asset, syndicateRuntime[asset.id])
     );
-
     return marketAssets.filter((asset) => asset.yourUnits > 0);
   }, [customSyndicates, syndicateRuntime]);
 
   const holdingsValue = React.useMemo(
-    () =>
-      syndicateHoldings.reduce(
-        (sum, asset) => sum + asset.yourUnits * asset.unitPriceGBP,
-        0
-      ),
+    () => syndicateHoldings.reduce((sum, asset) => sum + asset.yourUnits * asset.unitPriceGBP, 0),
     [syndicateHoldings]
   );
 
@@ -74,6 +114,26 @@ export default function MyProfileScreen() {
       }, 0),
     [syndicateHoldings]
   );
+
+  // ── Parallax scroll for cover ──
+  const scrollY = useSharedValue(0);
+  const scrollHandler = useAnimatedScrollHandler({
+    onScroll: (e) => {
+      scrollY.value = e.contentOffset.y;
+    },
+  });
+
+  const coverStyle = useAnimatedStyle(() => {
+    const translateY = interpolate(scrollY.value, [-100, 0, COVER_HEIGHT], [-50, 0, COVER_HEIGHT * 0.4], Extrapolation.CLAMP);
+    const scale = interpolate(scrollY.value, [-100, 0], [1.25, 1], Extrapolation.CLAMP);
+    return { transform: [{ translateY }, { scale }] };
+  });
+
+  const handleShare = async () => {
+    try {
+      await Share.share({ message: `Check out @${MY_USER.username} on Thryftverse!` });
+    } catch { /* ignore */ }
+  };
 
   const quickAccess = React.useMemo<QuickAccessItem[]>(
     () => [
@@ -100,27 +160,54 @@ export default function MyProfileScreen() {
     [formatFromFiat, syndicateHoldings.length]
   );
 
+  const AnimatedScrollView = Reanimated.createAnimatedComponent(ScrollView);
+
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <View style={styles.container}>
       <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+      {/* Cover photo with parallax */}
+      <Reanimated.View style={[styles.coverWrap, coverStyle]}>
+        <AnimatedPressable onPress={pickCover} style={{ flex: 1 }} activeOpacity={0.9}>
+          <CachedImage uri={userCover || COVER_IMAGE} style={styles.coverImage} contentFit="cover" priority="high" />
+          <View style={styles.coverGradient} />
+          <View style={styles.editCoverOverlay}>
+            <Ionicons name="camera" size={20} color="#fff" />
+          </View>
+        </AnimatedPressable>
+      </Reanimated.View>
 
+      <AnimatedScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={[styles.scrollContent, { paddingTop: COVER_HEIGHT - 42 }]}
+        onScroll={scrollHandler}
+        scrollEventThrottle={16}
+      >
         {/* ── Profile Hero ── */}
         <View style={styles.heroSection}>
           <View style={styles.heroTop}>
-            <View style={styles.avatarWrap}>
-              <Image source={{ uri: MY_USER.avatar }} style={styles.heroAvatar} />
+            <AnimatedPressable style={styles.avatarWrap} onPress={pickAvatar} activeOpacity={0.85}>
+              <CachedImage
+                uri={userAvatar || MY_USER.avatar}
+                style={styles.heroAvatar}
+                containerStyle={styles.heroAvatarContainer}
+                contentFit="cover"
+              />
               <View style={styles.verifiedBadge}>
-                <Ionicons name="checkmark-circle" size={20} color={BRAND} />
+                <Ionicons name="checkmark-circle" size={22} color={BRAND} />
               </View>
-            </View>
-            <AnimatedPressable 
-              style={styles.settingsBtn} 
-              onPress={() => navigation.navigate('Settings')}
-            >
-              <Ionicons name="ellipsis-horizontal" size={22} color={Colors.textPrimary} />
+              <View style={styles.editAvatarOverlay}>
+                <Ionicons name="camera" size={16} color="#fff" />
+              </View>
             </AnimatedPressable>
+            <View style={styles.heroActionRow}>
+              <AnimatedPressable style={styles.shareProfileBtn} onPress={handleShare} activeOpacity={0.8}>
+                <Ionicons name="share-outline" size={16} color={Colors.textPrimary} />
+              </AnimatedPressable>
+              <AnimatedPressable style={styles.settingsBtn} onPress={() => navigation.navigate('Settings')} activeOpacity={0.8}>
+                <Ionicons name="ellipsis-horizontal" size={20} color={Colors.textPrimary} />
+              </AnimatedPressable>
+            </View>
           </View>
 
           <Text style={styles.heroName}>{MY_USER.username}</Text>
@@ -128,7 +215,7 @@ export default function MyProfileScreen() {
             <Ionicons name="location-outline" size={12} color={Colors.textMuted} /> {MY_USER.location}
           </Text>
 
-          <AnimatedPressable 
+          <AnimatedPressable
             activeOpacity={0.8}
             style={styles.editProfileBtn}
             onPress={() => navigation.navigate('EditProfile')}
@@ -136,24 +223,24 @@ export default function MyProfileScreen() {
             <Text style={styles.editProfileText}>Edit Profile</Text>
           </AnimatedPressable>
 
-          {/* Stats row */}
-          <View style={styles.statsRow}>
-            <AnimatedPressable 
+          {/* Animated Stats row */}
+          <Reanimated.View entering={FadeInDown.delay(200).duration(400)} style={styles.statsRow}>
+            <AnimatedPressable
               style={styles.statItem}
               onPress={() => navigation.navigate('UserProfile', { userId: MY_USER.id, isMe: true })}
               activeOpacity={0.8}
             >
-              <Text style={styles.statNumber}>{MY_USER.listingCount}</Text>
+              <AnimatedCounter value={MY_USER.listingCount} style={styles.statNumber} duration={900} />
               <Text style={styles.statLabel}>LISTED</Text>
             </AnimatedPressable>
             <View style={styles.statDivider} />
             <View style={styles.statItem}>
-              <Text style={styles.statNumber}>{MY_USER.followers}</Text>
+              <AnimatedCounter value={MY_USER.followers} style={styles.statNumber} duration={900} />
               <Text style={styles.statLabel}>FOLLOWERS</Text>
             </View>
             <View style={styles.statDivider} />
             <View style={styles.statItem}>
-              <Text style={styles.statNumber}>{MY_USER.following}</Text>
+              <AnimatedCounter value={MY_USER.following} style={styles.statNumber} duration={900} />
               <Text style={styles.statLabel}>FOLLOWING</Text>
             </View>
             <View style={styles.statDivider} />
@@ -161,7 +248,7 @@ export default function MyProfileScreen() {
               <Text style={styles.statNumber}>{MY_USER.rating}★</Text>
               <Text style={styles.statLabel}>RATING</Text>
             </View>
-          </View>
+          </Reanimated.View>
         </View>
 
         {/* ── Quick Access Grid ── */}
@@ -184,6 +271,7 @@ export default function MyProfileScreen() {
           </View>
         </View>
 
+        {/* ── Syndicate Portfolio Summary ── */}
         <View style={styles.portfolioSummaryCard}>
           <View style={styles.portfolioSummaryTop}>
             <Text style={styles.portfolioSummaryLabel}>MY SYNDICATE HOLDINGS</Text>
@@ -226,14 +314,14 @@ export default function MyProfileScreen() {
           )}
         </View>
 
-        {/* ── My Wardrobe Preview ── */}
+        {/* ── My Wardrobe Preview (horizontal scroll — original Thryftverse layout) ── */}
         <View style={styles.wardrobeSection}>
           <View style={styles.wardrobeHeader}>
             <View>
               <Text style={styles.wardrobeSectionLabel}>YOUR LISTINGS</Text>
               <Text style={styles.wardrobeTitle}>My Wardrobe</Text>
             </View>
-            <AnimatedPressable 
+            <AnimatedPressable
               style={styles.viewAllBtn}
               onPress={() => navigation.navigate('UserProfile', { userId: MY_USER.id, isMe: true })}
             >
@@ -242,8 +330,8 @@ export default function MyProfileScreen() {
             </AnimatedPressable>
           </View>
 
-          <ScrollView 
-            horizontal 
+          <ScrollView
+            horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.wardrobeScroll}
           >
@@ -254,7 +342,7 @@ export default function MyProfileScreen() {
                 activeOpacity={0.9}
                 onPress={() => navigation.navigate('ItemDetail', { itemId: item.id })}
               >
-                <Image source={{ uri: item.images[0] }} style={styles.wardrobeImage} />
+                <CachedImage uri={item.images[0]} style={styles.wardrobeImage} containerStyle={styles.wardrobeImageWrap} contentFit="cover" />
                 <View style={styles.wardrobeInfo}>
                   <Text style={styles.wardrobePrice}>{formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}</Text>
                   <Text style={styles.wardrobeBrand} numberOfLines={1}>@{item.brand.toLowerCase()}</Text>
@@ -288,8 +376,8 @@ export default function MyProfileScreen() {
           </View>
         </View>
 
-      </ScrollView>
-    </SafeAreaView>
+      </AnimatedScrollView>
+    </View>
   );
 }
 
@@ -297,41 +385,99 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   scrollContent: { paddingBottom: 120 },
 
-  // Hero
+  // Cover (new — parallax banner)
+  coverWrap: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: COVER_HEIGHT,
+    zIndex: 0,
+  },
+  coverImage: { width: '100%', height: '100%' },
+  coverGradient: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: IS_LIGHT ? 'rgba(236,234,230,0.25)' : 'rgba(9,9,9,0.4)',
+  },
+  editCoverOverlay: {
+    position: 'absolute',
+    right: 16,
+    bottom: 24,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    padding: 8,
+    borderRadius: 20,
+  },
+
+  // Hero — enhanced from original
   heroSection: {
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingTop: 16,
+    paddingTop: 0,
     paddingBottom: 28,
+    backgroundColor: Colors.background,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
   },
   heroTop: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'flex-end',
     justifyContent: 'space-between',
     width: '100%',
-    marginBottom: 16,
+    marginTop: -(AVATAR_SIZE / 2),
+    marginBottom: 14,
   },
   avatarWrap: { position: 'relative' },
+  heroAvatarContainer: {
+    width: AVATAR_SIZE,
+    height: AVATAR_SIZE,
+    borderRadius: AVATAR_SIZE / 2,
+    borderWidth: 3,
+    borderColor: Colors.background,
+  },
   heroAvatar: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    borderWidth: 2,
-    borderColor: Colors.border,
+    width: '100%',
+    height: '100%',
+    borderRadius: AVATAR_SIZE / 2,
   },
   verifiedBadge: {
     position: 'absolute',
-    bottom: -2,
+    bottom: 0,
     right: -2,
     backgroundColor: Colors.background,
     borderRadius: 12,
-    padding: 2,
+    padding: 1,
+  },
+  editAvatarOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    borderRadius: AVATAR_SIZE / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 3,
+    borderColor: 'transparent',
+  },
+  heroActionRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 8,
+  },
+  shareProfileBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: PANEL_BG,
+    borderWidth: 1,
+    borderColor: PANEL_BORDER,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   settingsBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     backgroundColor: PANEL_BG,
+    borderWidth: 1,
+    borderColor: PANEL_BORDER,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -367,7 +513,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.18,
   },
 
-  // Stats
+  // Stats — now with animated counters
   statsRow: {
     flexDirection: 'row',
     alignItems: 'stretch',
@@ -380,6 +526,8 @@ const styles = StyleSheet.create({
     marginTop: 24,
     width: '100%',
     gap: 8,
+    borderWidth: 1,
+    borderColor: PANEL_BORDER,
   },
   statItem: {
     width: '48%',
@@ -404,13 +552,15 @@ const styles = StyleSheet.create({
     display: 'none',
   },
 
-  // Quick Access
+  // Quick Access (original layout preserved)
   quickAccessCard: {
     marginHorizontal: 20,
     backgroundColor: PANEL_BG,
     borderRadius: 24,
     padding: 20,
     marginBottom: 24,
+    borderWidth: 1,
+    borderColor: PANEL_BORDER,
   },
   quickGrid: {
     flexDirection: 'row',
@@ -449,7 +599,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.08,
   },
 
-  // Portfolio Summary
+  // Portfolio Summary (original layout preserved)
   portfolioSummaryCard: {
     marginHorizontal: 20,
     backgroundColor: PANEL_BG,
@@ -504,12 +654,8 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: Typography.family.semibold,
   },
-  portfolioPnlUp: {
-    color: BRAND,
-  },
-  portfolioPnlDown: {
-    color: '#ff9d9d',
-  },
+  portfolioPnlUp: { color: BRAND },
+  portfolioPnlDown: { color: '#ff9d9d' },
   portfolioSummaryCta: {
     marginTop: 14,
     borderRadius: 999,
@@ -528,7 +674,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.16,
   },
 
-  // Wardrobe
+  // Wardrobe (original horizontal scroll layout preserved)
   wardrobeSection: {
     marginBottom: 24,
   },
@@ -572,11 +718,15 @@ const styles = StyleSheet.create({
     width: 140,
     position: 'relative',
   },
-  wardrobeImage: {
+  wardrobeImageWrap: {
     width: 140,
     height: 180,
     borderRadius: 16,
-    backgroundColor: Colors.surface,
+  },
+  wardrobeImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 16,
   },
   wardrobeInfo: {
     paddingTop: 8,
@@ -612,13 +762,15 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
   },
 
-  // Badges
+  // Badges (original preserved)
   badgesCard: {
     marginHorizontal: 20,
     backgroundColor: PANEL_BG,
     borderRadius: 24,
     padding: 20,
     marginBottom: 16,
+    borderWidth: 1,
+    borderColor: PANEL_BORDER,
   },
   badgesSectionLabel: {
     fontSize: 11,
@@ -653,7 +805,7 @@ const styles = StyleSheet.create({
   badgeLabel: {
     fontSize: 11,
     color: Colors.textMuted,
-    fontFamily: 'Inter_500Medium',
+    fontFamily: Typography.family.medium,
     textAlign: 'center',
     maxWidth: 64,
   },

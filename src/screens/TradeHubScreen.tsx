@@ -1,21 +1,28 @@
-import React from 'react';
-import {
-  AnimatedPressable } from '../components/AnimatedPressable';
-import { View,
-  Text,
-  StyleSheet,
-  StatusBar
-} from 'react-native';
+import React, { useEffect } from 'react';
+import { AnimatedPressable } from '../components/AnimatedPressable';
+import { View, Text, StyleSheet, StatusBar, LayoutChangeEvent } from 'react-native';
+import Reanimated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  withRepeat,
+  withSequence,
+  withTiming,
+  Easing,
+  FadeInDown,
+} from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { ActiveTheme, Colors } from '../constants/colors';
+import { Typography } from '../constants/typography';
 import AuctionsScreen from './AuctionsScreen';
 import SyndicateScreen from './SyndicateScreen';
 import { useStore } from '../store/useStore';
 import { RootStackParamList } from '../navigation/types';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
+import { AnimatedCounter } from '../components/AnimatedCounter';
 
 type TradeHubTab = 'AUCTIONS' | 'SYNDICATE';
 type NavT = StackNavigationProp<RootStackParamList>;
@@ -32,26 +39,66 @@ export default function TradeHubScreen() {
   const [activeTab, setActiveTab] = React.useState<TradeHubTab>('AUCTIONS');
   const marketLedger = useStore((state) => state.marketLedger);
 
+  // ── Animated tab slider ──
+  const tabLayouts = React.useRef<{ [key: string]: { x: number; width: number } }>({});
+  const indicatorX = useSharedValue(4);
+  const indicatorWidth = useSharedValue(0);
+
+  const handleTabLayout = (tab: TradeHubTab, e: LayoutChangeEvent) => {
+    const { x, width } = e.nativeEvent.layout;
+    tabLayouts.current[tab] = { x, width };
+    if (tab === activeTab) {
+      indicatorX.value = withSpring(x, { damping: 18, stiffness: 220 });
+      indicatorWidth.value = withSpring(width, { damping: 18, stiffness: 220 });
+    }
+  };
+
+  React.useEffect(() => {
+    const layout = tabLayouts.current[activeTab];
+    if (layout) {
+      indicatorX.value = withSpring(layout.x, { damping: 18, stiffness: 220 });
+      indicatorWidth.value = withSpring(layout.width, { damping: 18, stiffness: 220 });
+    }
+  }, [activeTab, indicatorX, indicatorWidth]);
+
+  const indicatorStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: indicatorX.value }],
+    width: indicatorWidth.value,
+  }));
+
+  // ── Pulse dot for live ──
+  const pulseOpacity = useSharedValue(1);
+  useEffect(() => {
+    pulseOpacity.value = withRepeat(
+      withSequence(
+        withTiming(0.3, { duration: 750, easing: Easing.inOut(Easing.ease) }),
+        withTiming(1, { duration: 750, easing: Easing.inOut(Easing.ease) })
+      ),
+      -1,
+      true
+    );
+  }, [pulseOpacity]);
+
+  const pulseDotStyle = useAnimatedStyle(() => ({
+    opacity: pulseOpacity.value,
+  }));
+
   const latestActivity = marketLedger[0];
 
   const latestActivityText = React.useMemo(() => {
     if (!latestActivity) {
       return 'No activity yet. Place a bid or buy units to start the tape.';
     }
-
     if (latestActivity.channel === 'auction' && latestActivity.action === 'bid') {
       return `Bid ${formatFromFiat(latestActivity.amountGBP, 'GBP', { displayMode: 'fiat' })} on ${latestActivity.referenceId}`;
     }
-
     if (latestActivity.channel === 'auction' && latestActivity.action === 'win') {
       return `Auction settled ${formatFromFiat(latestActivity.amountGBP, 'GBP', { displayMode: 'fiat' })} on ${latestActivity.referenceId}`;
     }
-
     if (latestActivity.channel === 'syndicate' && latestActivity.action === 'sell-units') {
       const units = latestActivity.units ?? 0;
       return `Sold ${units} unit${units === 1 ? '' : 's'} on ${latestActivity.referenceId}`;
     }
-
     const units = latestActivity.units ?? 0;
     return `Bought ${units} unit${units === 1 ? '' : 's'} on ${latestActivity.referenceId}`;
   }, [formatFromFiat, latestActivity]);
@@ -62,22 +109,24 @@ export default function TradeHubScreen() {
 
       <View style={styles.headerWrap}>
         <View>
-          <Text style={styles.headerLabel}>MARKET LAYERS</Text>
           <View style={styles.titleRow}>
+            <Reanimated.View style={[styles.liveDot, pulseDotStyle]} />
             <Text style={styles.headerTitle}>Trade Hub</Text>
             <Ionicons name="sparkles-outline" size={18} color={BRAND} />
           </View>
-          <Text style={styles.headerSubtitle}>Timed auctions and 1ze fractional syndicates in one desk</Text>
         </View>
       </View>
 
+      {/* Animated tab switcher with sliding pill */}
       <View style={styles.tabSwitcher}>
+        <Reanimated.View style={[styles.tabIndicator, indicatorStyle]} />
         {(['AUCTIONS', 'SYNDICATE'] as const).map((tab) => (
           <AnimatedPressable
             key={tab}
-            style={[styles.tabBtn, activeTab === tab && styles.tabBtnActive]}
+            style={styles.tabBtn}
             onPress={() => setActiveTab(tab)}
             activeOpacity={0.9}
+            onLayout={(e: LayoutChangeEvent) => handleTabLayout(tab, e)}
           >
             <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
               {tab === 'AUCTIONS' ? 'Auctions' : 'Syndicate'}
@@ -105,9 +154,12 @@ export default function TradeHubScreen() {
         onPress={() => navigation.navigate('MarketLedger')}
       >
         <View style={styles.activityTopRow}>
-          <Text style={styles.activityLabel}>MARKET TAPE</Text>
+          <View style={styles.activityLabelRow}>
+            <Reanimated.View style={[styles.tapeDot, pulseDotStyle]} />
+            <Text style={styles.activityLabel}>MARKET TAPE</Text>
+          </View>
           <View style={styles.activityRightWrap}>
-            <Text style={styles.activityCount}>{marketLedger.length} events</Text>
+            <AnimatedCounter value={marketLedger.length} style={styles.activityCount} duration={600} suffix=" events" />
             <Ionicons name="chevron-forward" size={14} color={Colors.textMuted} />
           </View>
         </View>
@@ -134,12 +186,23 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     justifyContent: 'space-between',
   },
+  headerLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 4,
+  },
+  liveDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: '#55cc88',
+  },
   headerLabel: {
     color: BRAND,
     fontSize: 11,
-    fontFamily: 'Inter_600SemiBold',
+    fontFamily: Typography.family.bold,
     letterSpacing: 1.3,
-    marginBottom: 4,
   },
   titleRow: {
     flexDirection: 'row',
@@ -149,15 +212,17 @@ const styles = StyleSheet.create({
   headerTitle: {
     color: Colors.textPrimary,
     fontSize: 31,
-    fontFamily: 'Inter_700Bold',
+    fontFamily: Typography.family.bold,
     letterSpacing: -0.4,
   },
   headerSubtitle: {
     marginTop: 4,
     color: Colors.textSecondary,
     fontSize: 13,
-    fontFamily: 'Inter_500Medium',
+    fontFamily: Typography.family.medium,
   },
+
+  // Animated tab switcher
   tabSwitcher: {
     marginHorizontal: 16,
     marginBottom: 12,
@@ -168,7 +233,37 @@ const styles = StyleSheet.create({
     padding: 4,
     flexDirection: 'row',
     gap: 6,
+    position: 'relative',
   },
+  tabIndicator: {
+    position: 'absolute',
+    top: 4,
+    height: '100%',
+    borderRadius: 22,
+    backgroundColor: Colors.accent,
+    zIndex: 0,
+  },
+  tabBtn: {
+    flex: 1,
+    borderRadius: 22,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    zIndex: 1,
+  },
+  tabText: {
+    color: Colors.textSecondary,
+    fontSize: 12,
+    fontFamily: Typography.family.bold,
+    letterSpacing: 0.5,
+  },
+  tabTextActive: {
+    color: Colors.textInverse,
+  },
+
+  // Mode card
   modeCard: {
     marginHorizontal: 16,
     marginBottom: 12,
@@ -187,8 +282,10 @@ const styles = StyleSheet.create({
     color: BRAND,
     fontSize: 12,
     lineHeight: 17,
-    fontFamily: 'Inter_600SemiBold',
+    fontFamily: Typography.family.semibold,
   },
+
+  // Activity / market tape card
   activityCard: {
     marginHorizontal: 16,
     marginBottom: 12,
@@ -204,6 +301,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+  activityLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  tapeDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#e8dcc8',
+  },
   activityRightWrap: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -212,42 +320,22 @@ const styles = StyleSheet.create({
   activityLabel: {
     color: BRAND,
     fontSize: 11,
-    fontFamily: 'Inter_700Bold',
+    fontFamily: Typography.family.bold,
     letterSpacing: 0.6,
   },
   activityCount: {
     color: Colors.textMuted,
     fontSize: 10,
-    fontFamily: 'Inter_500Medium',
+    fontFamily: Typography.family.medium,
   },
   activityText: {
     marginTop: 6,
     color: Colors.textSecondary,
     fontSize: 12,
-    fontFamily: 'Inter_500Medium',
+    fontFamily: Typography.family.medium,
     lineHeight: 18,
   },
-  tabBtn: {
-    flex: 1,
-    borderRadius: 22,
-    paddingVertical: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-  },
-  tabBtnActive: {
-    backgroundColor: Colors.accent,
-  },
-  tabText: {
-    color: Colors.textSecondary,
-    fontSize: 12,
-    fontFamily: 'Inter_700Bold',
-    letterSpacing: 0.5,
-  },
-  tabTextActive: {
-    color: Colors.textInverse,
-  },
+
   contentWrap: {
     flex: 1,
   },

@@ -48,6 +48,7 @@ export interface Listing {
   priceWithProtection: number;
   images: string[];
   likes: number;
+  views?: number;
   isBumped?: boolean;
   isSold?: boolean;
   sellerId: string;

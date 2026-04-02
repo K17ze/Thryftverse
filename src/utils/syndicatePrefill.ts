@@ -21,10 +21,10 @@ export function buildCreateSyndicatePrefillFromSell(
   input: BuildSyndicatePrefillInput
 ): BuildSyndicatePrefillResult {
   const totalUnits = Number(sanitizeIntegerInput(input.shareCountInput));
-  if (!Number.isFinite(totalUnits) || totalUnits < 10) {
+  if (!Number.isFinite(totalUnits) || totalUnits < 1 || totalUnits > 20) {
     return {
       ok: false,
-      error: 'Syndicate share count must be at least 10.',
+      error: 'Syndicate share count must be between 1 and 20.',
     };
   }
 
@@ -60,7 +60,11 @@ export function getCreateSyndicateInitialState(
   defaultListingId: string
 ) {
   const selectedListingId = prefill?.listingId ?? defaultListingId;
-  const totalUnitsInput = String(prefill?.totalUnits ?? 1000);
+  const requestedUnits = Number(prefill?.totalUnits);
+  const normalizedUnits = Number.isFinite(requestedUnits)
+    ? Math.min(20, Math.max(1, Math.floor(requestedUnits)))
+    : 20;
+  const totalUnitsInput = String(normalizedUnits);
   const unitPriceInput = Number.isFinite(prefill?.unitPriceDisplay)
     ? Number(prefill?.unitPriceDisplay).toFixed(2)
     : '1.00';

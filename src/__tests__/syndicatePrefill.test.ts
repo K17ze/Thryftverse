@@ -8,7 +8,7 @@ describe('sell to syndicate prefill mapping', () => {
   it('builds route params for CreateSyndicate from sell draft values', () => {
     const result = buildCreateSyndicatePrefillFromSell({
       listingId: 'listing-01',
-      shareCountInput: '120',
+      shareCountInput: '20',
       sharePriceInput: '2.35',
       offeringWindowHours: 48,
       authPhotos: ['photo-a'],
@@ -17,7 +17,7 @@ describe('sell to syndicate prefill mapping', () => {
     expect(result.ok).toBe(true);
     expect(result.params).toEqual({
       listingId: 'listing-01',
-      totalUnits: 120,
+      totalUnits: 20,
       unitPriceDisplay: 2.35,
       offeringWindowHours: 48,
       authPhotos: ['photo-a'],
@@ -26,14 +26,14 @@ describe('sell to syndicate prefill mapping', () => {
 
   it('rejects invalid syndicate drafts before navigation', () => {
     const invalidShares = buildCreateSyndicatePrefillFromSell({
-      shareCountInput: '9',
+      shareCountInput: '21',
       sharePriceInput: '1.2',
       offeringWindowHours: 24,
       authPhotos: ['proof'],
     });
 
     const invalidPhotos = buildCreateSyndicatePrefillFromSell({
-      shareCountInput: '100',
+      shareCountInput: '20',
       sharePriceInput: '1.2',
       offeringWindowHours: 24,
       authPhotos: [],
@@ -59,7 +59,7 @@ describe('sell to syndicate prefill mapping', () => {
 
     expect(initial).toEqual({
       selectedListingId: 'listing-prefill',
-      totalUnitsInput: '250',
+      totalUnitsInput: '20',
       unitPriceInput: '1.87',
     });
   });

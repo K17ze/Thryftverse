@@ -192,7 +192,7 @@ export default function MarketLedgerScreen() {
     return entries.filter((entry) => entry.channel === channel);
   }, [entries, filter]);
 
-  const totalVolume = React.useMemo(
+  const totalMarketValue = React.useMemo(
     () => filteredEntries.reduce((sum, entry) => sum + entry.amountGBP, 0),
     [filteredEntries]
   );
@@ -275,8 +275,8 @@ export default function MarketLedgerScreen() {
       </View>
 
       <View style={styles.metricsCard}>
-        <Text style={styles.metricsTitle}>Tracked Volume</Text>
-        <Text style={styles.metricsValue}>{formatMoney(totalVolume)}</Text>
+        <Text style={styles.metricsTitle}>Tracked Market Value</Text>
+        <Text style={styles.metricsValue}>{formatMoney(totalMarketValue)}</Text>
         <Text style={styles.metricsSyncText}>
           {isSyncingLedger
             ? 'Syncing backend ledger...'

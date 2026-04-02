@@ -6,18 +6,17 @@ import {
   Text,
   StyleSheet,
   FlatList,
-  Image,
   RefreshControl,
   Modal,
   TextInput
 } from 'react-native';
+import { CachedImage } from '../components/CachedImage';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { RootStackParamList } from '../navigation/types';
 import {
-  formatCompact,
   formatMoney,
   getSyndicateMarket,
   getUserLabel,
@@ -185,8 +184,8 @@ export default function SyndicateScreen() {
     return marketAssets;
   }, [activeView, marketAssets]);
 
-  const totalVolume = React.useMemo(
-    () => marketAssets.reduce((sum, asset) => sum + asset.volume24hGBP, 0),
+  const totalMarketValue = React.useMemo(
+    () => marketAssets.reduce((sum, asset) => sum + asset.totalUnits * asset.unitPriceGBP, 0),
     [marketAssets]
   );
 
@@ -308,8 +307,8 @@ export default function SyndicateScreen() {
           <Text style={styles.metricLabel}>Pools</Text>
         </View>
         <View style={styles.metricCard}>
-          <Text style={styles.metricValue}>£{formatCompact(Math.round(totalVolume))}</Text>
-          <Text style={styles.metricLabel}>24h Volume</Text>
+          <Text style={styles.metricValue}>{formatFromFiat(totalMarketValue, 'GBP', { displayMode: 'fiat' })}</Text>
+          <Text style={styles.metricLabel}>Market Value</Text>
         </View>
         <View style={styles.metricCard}>
           <Text style={styles.metricValue}>{formatMoney(holdingsValue)}</Text>
@@ -430,7 +429,7 @@ export default function SyndicateScreen() {
         activeOpacity={0.94}
         onPress={() => navigation.navigate('AssetDetail', { assetId: item.id })}
       >
-        <Image source={{ uri: item.image }} style={styles.assetImage} />
+        <CachedImage uri={item.image} style={styles.assetImage} containerStyle={{ width: 54, height: 54, borderRadius: 14 }} contentFit="cover" />
 
         <View style={styles.assetBody}>
           <View style={styles.assetTopRow}>

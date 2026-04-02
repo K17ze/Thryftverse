@@ -14,7 +14,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
-import { Alert, Image } from 'react-native';
+import { Alert } from 'react-native';
+import { CachedImage } from '../components/CachedImage';
+import { useStore } from '../store/useStore';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { Listing } from '../data/mockData';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
@@ -58,6 +60,8 @@ function StarRating({ rating, size = 14 }: { rating: number; size?: number }) {
 }
 
 export default function UserProfileScreen({ navigation, route }: Props) {
+  const userAvatar = useStore(state => state.userAvatar);
+  const userCover = useStore(state => state.userCover);
   const [activeTab, setActiveTab] = useState<Tab>('Listings');
   const [following, setFollowing] = useState(false);
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>('All');
@@ -87,11 +91,7 @@ export default function UserProfileScreen({ navigation, route }: Props) {
       }}
     >
       <View style={styles.gridImageWrap}>
-        <Image 
-          source={{ uri: item.images[0] }} 
-          style={styles.gridImage} 
-          resizeMode="cover"
-        />
+        <CachedImage uri={item.images[0]} style={styles.gridImage} contentFit="cover" />
         <View style={styles.likeBtnPill}>
           <Ionicons name="heart-outline" size={14} color="#fff" />
         </View>
@@ -154,8 +154,12 @@ export default function UserProfileScreen({ navigation, route }: Props) {
           ListHeaderComponent={
             <View style={styles.profileHeader}>
               <View style={styles.heroRow}>
-                <View style={styles.avatarLarge}>
-                  <Ionicons name="person" size={32} color={MUTED} />
+                <View style={[styles.avatarLarge, { overflow: 'hidden' }]}>
+                  {route.params.isMe && userAvatar ? (
+                    <CachedImage uri={userAvatar} style={{ width: '100%', height: '100%' }} contentFit="cover" />
+                  ) : (
+                    <Ionicons name="person" size={32} color={MUTED} />
+                  )}
                 </View>
                 <View style={styles.heroInfo}>
                   <Text style={styles.heroUsername}>mariefullery</Text>
@@ -247,8 +251,12 @@ export default function UserProfileScreen({ navigation, route }: Props) {
 
       {activeTab === 'About' && (
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.aboutContent}>
-          <View style={styles.aboutBannerImage}>
-            <Ionicons name="image-outline" size={48} color={MUTED} />
+          <View style={[styles.aboutBannerImage, { overflow: 'hidden' }]}>
+            {route.params.isMe && userCover ? (
+              <CachedImage uri={userCover} style={{ width: '100%', height: '100%' }} contentFit="cover" />
+            ) : (
+              <Ionicons name="image-outline" size={48} color={MUTED} />
+            )}
           </View>
           
           <Text style={styles.aboutBigName}>mariefullery</Text>

@@ -6,11 +6,11 @@ import {
   Text,
   StyleSheet,
   FlatList,
-  Image,
   RefreshControl,
   Modal,
   TextInput
 } from 'react-native';
+import { CachedImage } from '../components/CachedImage';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -328,7 +328,7 @@ export default function AuctionsScreen() {
               activeOpacity={0.9}
               onPress={() => navigation.navigate('PosterViewer', { posterId: item.id })}
             >
-              <Image source={{ uri: item.image }} style={styles.posterImage} />
+              <CachedImage uri={item.image} style={styles.posterImage} containerStyle={{ width: 56, height: 56, borderRadius: 10 }} contentFit="cover" />
               <View style={styles.posterOverlay}>
                 <Text style={styles.posterSeller} numberOfLines={1}>
                   @{item.uploader?.username ?? 'seller'}
@@ -366,7 +366,7 @@ export default function AuctionsScreen() {
               activeOpacity={0.9}
               onPress={() => navigation.navigate('ItemDetail', { itemId: item.listingId })}
             >
-              <Image source={{ uri: item.image }} style={styles.upcomingImage} />
+              <CachedImage uri={item.image} style={styles.upcomingImage} containerStyle={{ width: '100%', height: 120, borderRadius: 14 }} contentFit="cover" />
               <View style={styles.upcomingMeta}>
                 <Text style={styles.upcomingTitle} numberOfLines={1}>{item.title}</Text>
                 <Text style={styles.upcomingTimer}>Starts in {formatCountdown(item.msToStart)}</Text>
@@ -435,7 +435,7 @@ export default function AuctionsScreen() {
       activeOpacity={0.95}
       onPress={() => navigation.navigate('ItemDetail', { itemId: item.listingId })}
     >
-      <Image source={{ uri: item.image }} style={styles.liveImage} />
+      <CachedImage uri={item.image} style={styles.liveImage} containerStyle={{ width: '100%', height: 160, borderTopLeftRadius: 18, borderTopRightRadius: 18 }} contentFit="cover" />
 
       <View style={styles.liveBody}>
         <View style={styles.liveTopRow}>

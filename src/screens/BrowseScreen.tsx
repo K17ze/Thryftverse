@@ -7,15 +7,15 @@ import { View,
   FlatList,
   StatusBar,
   Dimensions,
-  Image,
   ScrollView,
   RefreshControl
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Reanimated, { useSharedValue, useAnimatedScrollHandler, FadeInDown } from 'react-native-reanimated';
+import { CachedImage } from '../components/CachedImage';
+import Reanimated, { useSharedValue, useAnimatedScrollHandler, useAnimatedRef, FadeInDown } from 'react-native-reanimated';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { Ionicons } from '@expo/vector-icons';
-import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
+import { RouteProp, useNavigation, useRoute, useScrollToTop } from '@react-navigation/native';
 import { RefreshIndicator } from '../components/RefreshIndicator';
 import { EmptyState } from '../components/EmptyState';
 import { RootStackParamList } from '../navigation/types';
@@ -73,6 +73,9 @@ export default function BrowseScreen() {
 
   const [refreshing, setRefreshing] = useState(false);
   const scrollY = useSharedValue(0);
+  const scrollRef = React.useRef<any>(null);
+
+  useScrollToTop(scrollRef);
 
   useEffect(() => {
     if (categoryId === 'search' && searchQuery && browseFilters.query !== searchQuery) {
@@ -246,6 +249,7 @@ export default function BrowseScreen() {
         <RefreshIndicator scrollY={scrollY} isRefreshing={refreshing} topInset={40} />
         
         <AnimatedFlatList
+          ref={scrollRef}
           data={dataToRender}
           keyExtractor={(item: any) => item.id}
           numColumns={2}
@@ -274,7 +278,7 @@ export default function BrowseScreen() {
                 onPress={() => navigation.navigate('ItemDetail', { itemId: item.id })}
               >
             <View style={styles.imageWrap}>
-              <Image source={{ uri: item.images[0] }} style={styles.gridImage} resizeMode="cover" />
+              <CachedImage uri={item.images[0]} style={styles.gridImage} containerStyle={{ width: '100%', height: 180, borderRadius: 12 }} contentFit="cover" />
               <AnimatedPressable
                 style={styles.likeBtn}
                 activeOpacity={0.8}

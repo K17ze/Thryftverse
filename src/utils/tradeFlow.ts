@@ -130,7 +130,7 @@ export function evaluateTradeSubmit(input: TradeSubmitInput): TradeSubmitDecisio
       return {
         ok: false,
         kind: 'error',
-        message: 'Enter a valid limit price',
+        message: 'Enter a valid offer price',
       };
     }
 
@@ -141,7 +141,9 @@ export function evaluateTradeSubmit(input: TradeSubmitInput): TradeSubmitDecisio
       return {
         ok: true,
         kind: 'queue',
-        message: 'Limit order queued (prototype)',
+        message: input.side === 'buy'
+          ? 'Offer sent to owners. Raise your offer for instant fill.'
+          : 'Ask sent to owners. Lower your ask for instant fill.',
       };
     }
   }

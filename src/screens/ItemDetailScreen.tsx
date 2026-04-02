@@ -5,13 +5,13 @@ import {
   View,
   Text,
   StyleSheet,
-  Image,
   ScrollView,
   StatusBar,
   Dimensions,
   FlatList,
   Share
 } from 'react-native';
+import { CachedImage } from '../components/CachedImage';
 import Reanimated, {
   useAnimatedScrollHandler,
   useSharedValue,
@@ -189,7 +189,7 @@ export default function ItemDetailScreen() {
 
           {/* ── Seller Card ── */}
           <AnimatedPressable style={styles.sellerCard} onPress={() => navigation.navigate('UserProfile', { userId: seller.id })} activeOpacity={0.8}>
-            <Image source={{ uri: seller.avatar }} style={styles.sellerAvatar} />
+            <CachedImage uri={seller.avatar} style={styles.sellerAvatar} containerStyle={{ width: 46, height: 46, borderRadius: 23 }} contentFit="cover" />
             <View style={styles.sellerInfo}>
               <Text style={styles.sellerName}>{seller.username}</Text>
               <Text style={styles.sellerStats}>{seller.rating} ★ • {seller.reviewCount} Reviews</Text>
@@ -211,7 +211,7 @@ export default function ItemDetailScreen() {
                     style={styles.sellerItemCard}
                     onPress={() => navigation.push('ItemDetail', { itemId: sItem.id })}
                   >
-                    <Image source={{ uri: sItem.images[0] }} style={styles.sellerItemImg} />
+                    <CachedImage uri={sItem.images[0]} style={styles.sellerItemImg} containerStyle={{ width: 100, height: 130, borderRadius: 12 }} contentFit="cover" />
                     <Text style={styles.sellerItemPrice}>{formatFromFiat(sItem.price, 'GBP', { displayMode: 'fiat' })}</Text>
                   </AnimatedPressable>
                 ))}
