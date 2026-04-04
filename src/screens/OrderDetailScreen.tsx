@@ -32,6 +32,10 @@ type TrackingStep = {
   active?: boolean;
 };
 
+const IS_LIGHT = ActiveTheme === 'light';
+const STATUS_PANEL_BG = IS_LIGHT ? '#e6efe8' : '#0d2020';
+const STATUS_PANEL_BORDER = IS_LIGHT ? '#c5d7ca' : '#1a3a3a';
+
 type OrderStatus = 'created' | 'paid' | 'shipped' | 'delivered' | 'cancelled';
 
 function normalizeOrderStatus(status?: string): OrderStatus {
@@ -225,7 +229,7 @@ export default function OrderDetailScreen() {
           <Ionicons name="arrow-back" size={22} color={Colors.textPrimary} />
         </AnimatedPressable>
         <Text style={styles.headerTitle}>Order Details</Text>
-        <AnimatedPressable style={styles.moreBtn}>
+        <AnimatedPressable style={styles.moreBtn} onPress={() => navigation.navigate('HelpSupport')}>
           <Ionicons name="ellipsis-horizontal" size={22} color={Colors.textPrimary} />
         </AnimatedPressable>
       </View>
@@ -300,7 +304,7 @@ export default function OrderDetailScreen() {
           <View style={styles.sellerInfo}>
             <Text style={styles.sellerName}>{seller.username}</Text>
             <View style={styles.sellerMeta}>
-              <Ionicons name="star" size={13} color="#F5A623" />
+              <Ionicons name="star" size={13} color={Colors.star} />
               <Text style={styles.sellerRating}>{seller.rating} ({seller.reviewCount} reviews)</Text>
             </View>
           </View>
@@ -376,11 +380,11 @@ const styles = StyleSheet.create({
   },
   backBtn: {
     width: 40, height: 40, borderRadius: 20,
-    backgroundColor: '#111', alignItems: 'center', justifyContent: 'center',
+    backgroundColor: Colors.card, alignItems: 'center', justifyContent: 'center',
   },
   moreBtn: {
     width: 40, height: 40, borderRadius: 20,
-    backgroundColor: '#111', alignItems: 'center', justifyContent: 'center',
+    backgroundColor: Colors.card, alignItems: 'center', justifyContent: 'center',
   },
   headerTitle: {
     fontSize: 18, fontFamily: 'Inter_700Bold', color: Colors.textPrimary,
@@ -390,7 +394,7 @@ const styles = StyleSheet.create({
 
   itemCard: {
     flexDirection: 'row',
-    backgroundColor: '#111',
+    backgroundColor: Colors.card,
     borderRadius: 20,
     padding: 14,
     alignItems: 'center',
@@ -405,14 +409,14 @@ const styles = StyleSheet.create({
 
   statusBanner: {
     flexDirection: 'row',
-    backgroundColor: '#0d2020',
+    backgroundColor: STATUS_PANEL_BG,
     borderRadius: 16,
     padding: 16,
     gap: 12,
     alignItems: 'flex-start',
     marginBottom: 28,
     borderWidth: 1,
-    borderColor: '#1a3a3a',
+    borderColor: STATUS_PANEL_BORDER,
   },
   statusLabel: { fontSize: 15, fontFamily: 'Inter_700Bold', color: Colors.accent, marginBottom: 4 },
   statusSub: { fontSize: 13, fontFamily: 'Inter_400Regular', color: Colors.textSecondary, lineHeight: 20 },
@@ -434,7 +438,7 @@ const styles = StyleSheet.create({
   },
 
   // Timeline
-  timelineCard: { backgroundColor: '#111', borderRadius: 20, padding: 20, marginBottom: 28 },
+  timelineCard: { backgroundColor: Colors.card, borderRadius: 20, padding: 20, marginBottom: 28 },
   timelineRow: { flexDirection: 'row', gap: 16 },
   timelineLeft: { alignItems: 'center', width: 20 },
   dot: {
@@ -450,21 +454,21 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 0 },
     elevation: 4,
   },
-  dotInactive: { backgroundColor: '#333' },
+  dotInactive: { backgroundColor: Colors.border },
   line: { width: 2, flex: 1, backgroundColor: Colors.accent, marginVertical: 4, minHeight: 24 },
-  lineInactive: { backgroundColor: '#222' },
+  lineInactive: { backgroundColor: Colors.borderLight },
   timelineContent: { flex: 1, paddingBottom: 20 },
   timelineTop: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
   stepLabel: { fontSize: 15, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary },
   stepLabelInactive: { color: Colors.textMuted },
   stepDate: { fontSize: 12, fontFamily: 'Inter_400Regular', color: Colors.textMuted },
   stepSub: { fontSize: 13, fontFamily: 'Inter_400Regular', color: Colors.textSecondary, lineHeight: 18 },
-  stepSubInactive: { color: '#333' },
+  stepSubInactive: { color: Colors.textMuted },
 
   // Seller card
   sellerCard: {
     flexDirection: 'row',
-    backgroundColor: '#111',
+    backgroundColor: Colors.card,
     borderRadius: 20,
     padding: 16,
     alignItems: 'center',
@@ -483,15 +487,15 @@ const styles = StyleSheet.create({
   msgBtnText: { fontSize: 13, fontFamily: 'Inter_600SemiBold', color: Colors.accent },
 
   // Transaction card
-  txCard: { backgroundColor: '#111', borderRadius: 20, paddingHorizontal: 20, paddingVertical: 8, marginBottom: 28 },
-  txDivider: { height: 1, backgroundColor: '#222', marginVertical: 6 },
+  txCard: { backgroundColor: Colors.card, borderRadius: 20, paddingHorizontal: 20, paddingVertical: 8, marginBottom: 28 },
+  txDivider: { height: 1, backgroundColor: Colors.border, marginVertical: 6 },
 
   // Actions
   actionsRow: { flexDirection: 'row', gap: 12 },
   actionBtnSecondary: {
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     gap: 8, paddingVertical: 16, borderRadius: 20,
-    backgroundColor: '#111',
+    backgroundColor: Colors.card,
   },
   actionBtnSecondaryText: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary },
   actionBtnPrimary: {

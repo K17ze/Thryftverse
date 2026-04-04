@@ -5,11 +5,11 @@ import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   ScrollView,
   StatusBar,
   Share
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
@@ -35,10 +35,12 @@ const MOCK_CONTACTS = [
 ];
 
 export default function InviteFriendsScreen({ navigation }: Props) {
+  const inviteLink = 'https://thryftverse.app/invite/user123';
+
   const handleShare = async () => {
     try {
       await Share.share({
-        message: 'Join me on Thryftverse — the premium marketplace for second-hand fashion! https://thryftverse.app/invite',
+        message: `Join me on Thryftverse - the premium marketplace for second-hand fashion! ${inviteLink}`,
         title: 'Invite to Thryftverse',
       });
     } catch {}
@@ -70,9 +72,9 @@ export default function InviteFriendsScreen({ navigation }: Props) {
           <Text style={styles.sectionLabel}>YOUR INVITE LINK</Text>
           <View style={styles.linkRow}>
             <Text style={styles.linkText} numberOfLines={1}>
-              thryftverse.app/invite/user123
+              {inviteLink}
             </Text>
-            <AnimatedPressable style={styles.copyBtn}>
+            <AnimatedPressable style={styles.copyBtn} onPress={handleShare}>
               <Ionicons name="copy-outline" size={16} color={TEAL} />
               <Text style={styles.copyText}>Copy</Text>
             </AnimatedPressable>

@@ -12,17 +12,23 @@ import { View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CachedImage } from '../components/CachedImage';
-import Reanimated, { useSharedValue, useAnimatedScrollHandler, useAnimatedRef, FadeInDown } from 'react-native-reanimated';
+import Reanimated, { useSharedValue, useAnimatedStyle, withSpring, withSequence, withDelay, useAnimatedScrollHandler, FadeInDown, runOnJS } from 'react-native-reanimated';
+import * as Haptics from 'expo-haptics';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { Ionicons } from '@expo/vector-icons';
 import { RouteProp, useNavigation, useRoute, useScrollToTop } from '@react-navigation/native';
 import { RefreshIndicator } from '../components/RefreshIndicator';
 import { EmptyState } from '../components/EmptyState';
+import { SkeletonLoader } from '../components/SkeletonLoader';
+import { SyncStatusPill } from '../components/SyncStatusPill';
+import { SyncRetryBanner } from '../components/SyncRetryBanner';
 import { RootStackParamList } from '../navigation/types';
 import { useStore } from '../store/useStore';
 import { useToast } from '../context/ToastContext';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useBackendData } from '../context/BackendDataContext';
+import { getBackendSyncStatus } from '../utils/syncStatus';
 
 const { width } = Dimensions.get('window');
 const GRID_SPACING = 16;
@@ -59,6 +65,102 @@ function getSubcategoryToken(categoryId: string, subcategoryId?: string, title?:
   return loweredTitle;
 }
 
+const BrowseGridItem = ({ item, index, navigation, wishlist, toggleWishlist, showToast, formatPrice }: any) => {
+  const isWishlisted = wishlist.includes(item.id);
+  const heartScale = useSharedValue(0);
+  const likeBtnScale = useSharedValue(1);
+
+  const performLikeSequence = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    
+    // Bubble big heart overlaid on image
+    heartScale.value = withSequence(
+      withSpring(1.2, { damping: 10 }),
+      withSpring(1, { damping: 12 }),
+      withDelay(600, withSpring(0, { damping: 15 }))
+    );
+
+    // Spring the mini corner button
+    likeBtnScale.value = withSequence(
+      withSpring(1.4, { damping: 5 }),
+      withSpring(1, { damping: 15 })
+    );
+
+    if (!isWishlisted) {
+      toggleWishlist(item.id);
+      showToast('Added to wishlist ♥', 'success');
+    }
+  };
+
+  const handleDoubleTap = () => {
+    performLikeSequence();
+  };
+
+  const taps = Gesture.Tap()
+    .numberOfTaps(2)
+    .onEnd(() => {
+      runOnJS(handleDoubleTap)();
+    });
+
+  const singleTap = Gesture.Tap()
+    .onEnd(() => {
+      runOnJS(navigation.navigate as any)('ItemDetail', { itemId: item.id });
+    });
+
+  const combinedGesture = Gesture.Exclusive(taps, singleTap);
+
+  const bigHeartStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: heartScale.value }],
+    opacity: heartScale.value,
+  }));
+
+  const likeCornerStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: likeBtnScale.value }],
+  }));
+
+  return (
+    <Reanimated.View 
+      entering={FadeInDown.delay(Math.min(index, 10) * 50).duration(400)}
+      style={[styles.gridItem, index % 2 === 0 ? { marginTop: 0 } : { marginTop: 24 }]}
+    >
+      <View style={styles.imageWrap}>
+        <GestureDetector gesture={combinedGesture}>
+          <View style={{ flex: 1 }}>
+            <CachedImage uri={item.images[0]} style={styles.gridImage} containerStyle={{ width: '100%', height: 180, borderRadius: 12 }} contentFit="cover" />
+
+            <Reanimated.View style={[StyleSheet.absoluteFill, { alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }, bigHeartStyle]}>
+              <Ionicons name="heart" size={60} color="#fff" style={{ shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 10 }} />
+            </Reanimated.View>
+          </View>
+        </GestureDetector>
+
+        <Reanimated.View style={[styles.likeBtn, likeCornerStyle]}>
+          <AnimatedPressable
+            style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' }}
+            activeOpacity={0.8}
+            onPress={() => {
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              toggleWishlist(item.id);
+              if (!isWishlisted) showToast('Added to wishlist ♥', 'success');
+            }}
+          >
+            <Ionicons name={isWishlisted ? 'heart' : 'heart-outline'} size={20} color={isWishlisted ? Colors.danger : "#fff"} />
+          </AnimatedPressable>
+        </Reanimated.View>
+      </View>
+      <AnimatedPressable activeOpacity={0.8} onPress={() => navigation.navigate('ItemDetail', { itemId: item.id })}>
+        <View style={styles.infoWrap}>
+          <View style={styles.priceRow}>
+            <Text style={styles.priceText}>{formatPrice(item.price, 'GBP', { displayMode: 'fiat' })}</Text>
+            <Text style={styles.brandText}>{item.brand}</Text>
+          </View>
+          <Text style={styles.sizeText}>{item.size} • {item.condition}</Text>
+        </View>
+      </AnimatedPressable>
+    </Reanimated.View>
+  );
+};
+
 export default function BrowseScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<BrowseRoute>();
@@ -69,7 +171,7 @@ export default function BrowseScreen() {
   const updateBrowseFilters = useStore((state) => state.updateBrowseFilters);
   const { show } = useToast();
   const { formatFromFiat } = useFormattedPrice();
-  const { listings, refreshListings } = useBackendData();
+  const { listings, source, isSyncing, lastError, refreshListings } = useBackendData();
 
   const [refreshing, setRefreshing] = useState(false);
   const scrollY = useSharedValue(0);
@@ -180,6 +282,32 @@ export default function BrowseScreen() {
     return sorted;
   }, [browseFilters, categoryId, listings, subcategoryId, title]);
 
+  const browseStatus = useMemo(
+    () =>
+      getBackendSyncStatus({
+        isSyncing,
+        source,
+        hasError: Boolean(lastError),
+      }),
+    [isSyncing, lastError, source],
+  );
+
+  const showBrowseLoadingSkeleton = isSyncing && source === 'mock' && dataToRender.length === 0 && !lastError;
+
+  const renderBrowseLoadingState = () => (
+    <View style={styles.loadingStateWrap}>
+      {Array.from({ length: 6 }).map((_, index) => (
+        <View key={`browse_loading_${index}`} style={[styles.loadingCard, index % 2 === 1 && styles.loadingCardOffset]}>
+          <SkeletonLoader width="100%" height={ITEM_WIDTH * 1.35} borderRadius={12} />
+          <View style={styles.loadingCardBody}>
+            <SkeletonLoader width="58%" height={12} borderRadius={6} />
+            <SkeletonLoader width="40%" height={11} borderRadius={6} style={{ marginTop: 6 }} />
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+
   const AnimatedFlatList = Reanimated.createAnimatedComponent(FlatList);
 
   return (
@@ -198,7 +326,10 @@ export default function BrowseScreen() {
 
       <View style={styles.titleContainer}>
         <Text style={styles.hugeTitle}>{title}</Text>
-        <Text style={styles.itemCountText}>{dataToRender.length} items found</Text>
+        <View style={styles.titleMetaRow}>
+          <Text style={styles.itemCountText}>{dataToRender.length} items found</Text>
+          <SyncStatusPill tone={browseStatus.tone} label={browseStatus.label} compact />
+        </View>
       </View>
 
       <View style={styles.filterBar}>
@@ -244,6 +375,16 @@ export default function BrowseScreen() {
         </ScrollView>
       </View>
 
+      {lastError ? (
+        <SyncRetryBanner
+          message="Live browse sync is unavailable. Showing cached listings."
+          onRetry={() => void refreshListings()}
+          isRetrying={isSyncing}
+          telemetryContext="browse_sync"
+          containerStyle={styles.syncRetryBanner}
+        />
+      ) : null}
+
       {/* Spacious 2-Column Grid */}
       <View style={{ flex: 1 }}>
         <RefreshIndicator scrollY={scrollY} isRefreshing={refreshing} topInset={40} />
@@ -268,58 +409,36 @@ export default function BrowseScreen() {
             />
           }
           renderItem={({ item, index }: any) => (
-            <Reanimated.View 
-              entering={FadeInDown.delay(Math.min(index, 10) * 50).duration(400)}
-              style={[styles.gridItem, index % 2 === 0 ? { marginTop: 0 } : { marginTop: 24 }]}
-            >
-              <AnimatedPressable 
-                style={{ flex: 1 }}
-                activeOpacity={0.9}
-                onPress={() => navigation.navigate('ItemDetail', { itemId: item.id })}
-              >
-            <View style={styles.imageWrap}>
-              <CachedImage uri={item.images[0]} style={styles.gridImage} containerStyle={{ width: '100%', height: 180, borderRadius: 12 }} contentFit="cover" />
-              <AnimatedPressable
-                style={styles.likeBtn}
-                activeOpacity={0.8}
-                onPress={(event) => {
-                  event.stopPropagation();
-                  const isCurrentlyWishlisted = wishlist.includes(item.id);
-                  toggleWishlist(item.id);
-                  if (!isCurrentlyWishlisted) {
-                    show('Added to wishlist ♥', 'success');
-                  }
-                }}
-              >
-                <Ionicons name={wishlist.includes(item.id) ? 'heart' : 'heart-outline'} size={20} color="#fff" />
-              </AnimatedPressable>
-            </View>
-            <View style={styles.infoWrap}>
-              <View style={styles.priceRow}>
-                <Text style={styles.priceText}>{formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}</Text>
-                <Text style={styles.brandText}>{item.brand}</Text>
-              </View>
-              <Text style={styles.sizeText}>{item.size} • {item.condition}</Text>
-            </View>
-              </AnimatedPressable>
-            </Reanimated.View>
+            <BrowseGridItem 
+              item={item} 
+              index={index} 
+              navigation={navigation} 
+              wishlist={wishlist} 
+              toggleWishlist={toggleWishlist} 
+              showToast={show} 
+              formatPrice={formatFromFiat} 
+            />
           )}
           ListEmptyComponent={
-            <EmptyState
-              icon="search-outline"
-              title="No matches found"
-              subtitle="Try clearing filters or searching for another keyword."
-              ctaLabel="Clear filters"
-              onCtaPress={() =>
-                updateBrowseFilters({
-                  query: '',
-                  sort: 'Recommended',
-                  brands: [],
-                  sizes: [],
-                  condition: 'Any',
-                })
-              }
-            />
+            showBrowseLoadingSkeleton ? (
+              renderBrowseLoadingState()
+            ) : (
+              <EmptyState
+                icon="search-outline"
+                title="No matches found"
+                subtitle="Try clearing filters or searching for another keyword."
+                ctaLabel="Clear filters"
+                onCtaPress={() =>
+                  updateBrowseFilters({
+                    query: '',
+                    sort: 'Recommended',
+                    brands: [],
+                    sizes: [],
+                    condition: 'Any',
+                  })
+                }
+              />
+            )
           }
         />
       </View>
@@ -339,7 +458,7 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
   },
   backBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  searchBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#111', alignItems: 'center', justifyContent: 'center' },
+  searchBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.card, alignItems: 'center', justifyContent: 'center' },
   
   titleContainer: {
     paddingHorizontal: 20,
@@ -359,6 +478,13 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_500Medium',
     color: Colors.textMuted,
     marginTop: 8,
+  },
+  titleMetaRow: {
+    marginTop: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
   },
 
   filterBar: { paddingBottom: 20 },
@@ -381,12 +507,33 @@ const styles = StyleSheet.create({
     paddingVertical: 10, 
     borderRadius: 24, 
     borderWidth: 1,
-    borderColor: '#333',
+    borderColor: Colors.border,
   },
   filterPillText: { color: Colors.textPrimary, fontSize: 13, fontFamily: 'Inter_600SemiBold' },
+  syncRetryBanner: {
+    marginHorizontal: 20,
+    marginBottom: 14,
+  },
 
   gridContent: { paddingHorizontal: 20, paddingBottom: 100 },
   rowWrapper: { justifyContent: 'space-between', marginBottom: 32 },
+  loadingStateWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    rowGap: 32,
+  },
+  loadingCard: {
+    width: ITEM_WIDTH,
+  },
+  loadingCardOffset: {
+    marginTop: 24,
+  },
+  loadingCardBody: {
+    marginTop: 10,
+    paddingHorizontal: 4,
+  },
   
   gridItem: { width: ITEM_WIDTH },
   imageWrap: {
@@ -394,7 +541,7 @@ const styles = StyleSheet.create({
     height: ITEM_WIDTH * 1.35,
     borderRadius: 16,
     overflow: 'hidden',
-    backgroundColor: '#111',
+    backgroundColor: Colors.surface,
     marginBottom: 12,
   },
   gridImage: { width: '100%', height: '100%' },

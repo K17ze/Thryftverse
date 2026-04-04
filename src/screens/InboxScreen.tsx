@@ -31,8 +31,8 @@ type NavT = StackNavigationProp<RootStackParamList>;
 const TEAL = '#e8dcc8';
 const IS_LIGHT = ActiveTheme === 'light';
 const BRAND = IS_LIGHT ? '#2f251b' : TEAL;
-const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111';
-const PANEL_ALT = IS_LIGHT ? '#f1ede6' : '#1a1a1a';
+const PANEL_BG = Colors.card;
+const PANEL_ALT = Colors.cardAlt;
 
 type ConvoItem = typeof MOCK_CONVERSATIONS[0];
 

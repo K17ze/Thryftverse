@@ -14,18 +14,19 @@ import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
 import { useStore } from '../store/useStore';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
+import { AddCardSheet } from '../components/checkout/AddCardSheet';
 import { CommercePaymentMethod, listUserPaymentMethods } from '../services/commerceApi';
 
 type Props = StackScreenProps<RootStackParamList, 'Payments'>;
-const IS_LIGHT = ActiveTheme === 'light';
-const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111111';
-const PANEL_SOFT_BG = IS_LIGHT ? '#f7f4ef' : '#151515';
-const PANEL_BORDER = IS_LIGHT ? '#d8d1c6' : '#2a2a2a';
+const PANEL_BG = Colors.card;
+const PANEL_SOFT_BG = Colors.cardAlt;
+const PANEL_BORDER = Colors.border;
 
 export default function PaymentsScreen({ navigation }: Props) {
   const [useBalance, setUseBalance] = useState(true);
   const [backendPaymentMethods, setBackendPaymentMethods] = useState<CommercePaymentMethod[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [addCardSheetVisible, setAddCardSheetVisible] = useState(false);
   const currentUser = useStore((state) => state.currentUser);
   const savedPaymentMethod = useStore((state) => state.savedPaymentMethod);
   const { formatFromFiat } = useFormattedPrice();
@@ -143,7 +144,7 @@ export default function PaymentsScreen({ navigation }: Props) {
               </View>
             </View>
           )}
-          <AnimatedPressable style={styles.addBtn} onPress={() => navigation.navigate('AddCard')}>
+          <AnimatedPressable style={styles.addBtn} onPress={() => setAddCardSheetVisible(true)}>
             <Ionicons name="add" size={20} color={Colors.textPrimary} />
             <Text style={styles.addText}>Add new card</Text>
           </AnimatedPressable>
@@ -196,6 +197,7 @@ export default function PaymentsScreen({ navigation }: Props) {
         </View>
       </ScrollView>
 
+      <AddCardSheet visible={addCardSheetVisible} onDismiss={() => setAddCardSheetVisible(false)} />
     </SafeAreaView>
   );
 }

@@ -124,8 +124,9 @@ export default function MyProfileScreen() {
   });
 
   const coverStyle = useAnimatedStyle(() => {
-    const translateY = interpolate(scrollY.value, [-100, 0, COVER_HEIGHT], [-50, 0, COVER_HEIGHT * 0.4], Extrapolation.CLAMP);
-    const scale = interpolate(scrollY.value, [-100, 0], [1.25, 1], Extrapolation.CLAMP);
+    const overscroll = Math.min(scrollY.value, 0);
+    const translateY = interpolate(overscroll, [-100, 0], [-50, 0], Extrapolation.CLAMP);
+    const scale = interpolate(overscroll, [-100, 0], [1.25, 1], Extrapolation.CLAMP);
     return { transform: [{ translateY }, { scale }] };
   });
 
@@ -393,6 +394,7 @@ const styles = StyleSheet.create({
     right: 0,
     height: COVER_HEIGHT,
     zIndex: 0,
+    overflow: 'hidden',
   },
   coverImage: { width: '100%', height: '100%' },
   coverGradient: {

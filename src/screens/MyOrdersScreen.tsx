@@ -155,6 +155,7 @@ export default function MyOrdersScreen() {
   }, [activeTab, backendBuyingOrders, backendOrders, backendSellingOrders, buyingOrders, sellingOrders]);
 
   const [refreshing, setRefreshing] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<'All' | 'In Progress' | 'Cancelled' | 'Completed'>('All');
   const scrollY = useSharedValue(0);
 
   const scrollHandler = useAnimatedScrollHandler({
@@ -168,6 +169,22 @@ export default function MyOrdersScreen() {
     await Promise.all([refreshListings(), syncOrders()]);
     setTimeout(() => setRefreshing(false), 400);
   };
+
+  const filteredOrders = React.useMemo(() => {
+    if (statusFilter === 'All') {
+      return activeOrders;
+    }
+
+    if (statusFilter === 'Cancelled') {
+      return activeOrders.filter((order) => /cancel/i.test(order.status));
+    }
+
+    if (statusFilter === 'Completed') {
+      return activeOrders.filter((order) => order.isDone && !/cancel/i.test(order.status));
+    }
+
+    return activeOrders.filter((order) => !order.isDone && !/cancel/i.test(order.status));
+  }, [activeOrders, statusFilter]);
 
   const AnimatedScrollView = Reanimated.createAnimatedComponent(ScrollView);
 
@@ -210,10 +227,11 @@ export default function MyOrdersScreen() {
           {['All', 'In Progress', 'Cancelled', 'Completed'].map(f => (
             <AnimatedPressable 
               key={f} 
-              style={styles.filterPill}
+              style={[styles.filterPill, statusFilter === f && styles.activeFilterPill]}
               activeOpacity={0.8}
+              onPress={() => setStatusFilter(f as 'All' | 'In Progress' | 'Cancelled' | 'Completed')}
             >
-              <Text style={styles.filterText}>{f}</Text>
+              <Text style={[styles.filterText, statusFilter === f && styles.activeFilterText]}>{f}</Text>
             </AnimatedPressable>
           ))}
         </ScrollView>
@@ -223,7 +241,7 @@ export default function MyOrdersScreen() {
         <RefreshIndicator scrollY={scrollY} isRefreshing={refreshing} topInset={10} />
         
         <AnimatedScrollView 
-          contentContainerStyle={[styles.content, activeOrders.length === 0 && { flex: 1, justifyContent: 'center' }]} 
+          contentContainerStyle={[styles.content, filteredOrders.length === 0 && { flex: 1, justifyContent: 'center' }]} 
           showsVerticalScrollIndicator={false}
           onScroll={scrollHandler}
           scrollEventThrottle={16}
@@ -237,16 +255,20 @@ export default function MyOrdersScreen() {
             />
           }
         >
-          {activeOrders.length === 0 ? (
+          {filteredOrders.length === 0 ? (
             <EmptyState
               icon="cube-outline"
-              title="No tracking data"
-              subtitle={`When you ${activeTab === 'buying' ? 'buy' : 'sell'} items, you'll track them here.`}
+              title={statusFilter === 'All' ? 'No tracking data' : `No ${statusFilter.toLowerCase()} orders`}
+              subtitle={
+                statusFilter === 'All'
+                  ? `When you ${activeTab === 'buying' ? 'buy' : 'sell'} items, you'll track them here.`
+                  : 'Try another status filter to view more orders.'
+              }
               ctaLabel={activeTab === 'buying' ? 'Start Browsing' : 'List an Item'}
               onCtaPress={() => navigation.navigate(activeTab === 'buying' ? 'MainTabs' : 'Sell')}
             />
           ) : (
-            activeOrders.map((order, index) => (
+            filteredOrders.map((order, index) => (
               <Reanimated.View key={order.id} entering={FadeInDown.delay(index * 60).duration(400)}>
                 <AnimatedPressable 
                   style={styles.cardGroup}
@@ -279,16 +301,16 @@ export default function MyOrdersScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 10, paddingBottom: 16, gap: 12 },
-  backBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#111', alignItems: 'center', justifyContent: 'center' },
+  backBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.card, alignItems: 'center', justifyContent: 'center' },
   hugeTitle: { fontSize: 34, fontFamily: 'Inter_700Bold', color: Colors.textPrimary, letterSpacing: -0.5 },
   
-  tabsContainer: { flexDirection: 'row', marginHorizontal: 20, backgroundColor: '#111', borderRadius: 24, padding: 4, marginBottom: 16 },
+  tabsContainer: { flexDirection: 'row', marginHorizontal: 20, backgroundColor: Colors.card, borderRadius: 24, padding: 4, marginBottom: 16 },
   tabBtn: { flex: 1, paddingVertical: 12, alignItems: 'center', borderRadius: 20 },
-  activeTabBtn: { backgroundColor: '#333' },
+  activeTabBtn: { backgroundColor: Colors.cardAlt },
   tabText: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: Colors.textMuted },
   activeTabText: { color: Colors.textPrimary },
 
-  filterPill: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: '#111', borderWidth: 1, borderColor: '#333' },
+  filterPill: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border },
   activeFilterPill: { backgroundColor: Colors.textPrimary, borderColor: Colors.textPrimary },
   filterText: { fontSize: 13, fontFamily: 'Inter_500Medium', color: Colors.textSecondary },
   activeFilterText: { color: Colors.background, fontFamily: 'Inter_700Bold' },
@@ -298,7 +320,7 @@ const styles = StyleSheet.create({
   emptyTitle: { fontSize: 18, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary, marginTop: 16 },
   emptySub: { fontSize: 14, fontFamily: 'Inter_400Regular', color: Colors.textSecondary, textAlign: 'center', marginTop: 8 },
 
-  cardGroup: { backgroundColor: '#111', borderRadius: 24, padding: 16, marginBottom: 16 },
+  cardGroup: { backgroundColor: Colors.card, borderRadius: 24, padding: 16, marginBottom: 16 },
   orderRow: { flexDirection: 'row', alignItems: 'center', gap: 16 },
   orderThumb: { width: 70, height: 70, borderRadius: 16 },
   orderInfo: { flex: 1, justifyContent: 'center' },

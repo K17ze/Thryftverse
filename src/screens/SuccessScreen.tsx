@@ -4,9 +4,9 @@ import {
 import { View,
   Text,
   StyleSheet,
-  StatusBar,
-  SafeAreaView
+  StatusBar
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { ActiveTheme, Colors } from '../constants/colors';

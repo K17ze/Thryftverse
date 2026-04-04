@@ -17,6 +17,7 @@ import { MOCK_LISTINGS } from '../data/mockData';
 import { RootStackParamList } from '../navigation/types';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useBackendData } from '../context/BackendDataContext';
+import { useToast } from '../context/ToastContext';
 
 type RouteT = RouteProp<RootStackParamList, 'ManageListing'>;
 
@@ -25,15 +26,53 @@ export default function ManageListingScreen() {
   const route = useRoute<RouteT>();
   const { formatFromFiat } = useFormattedPrice();
   const { listings } = useBackendData();
+  const { show } = useToast();
   const { itemId } = route.params;
 
   const item = listings.find((l) => l.id === itemId) || MOCK_LISTINGS.find((l) => l.id === itemId) || listings[0] || MOCK_LISTINGS[0];
+  const [isSold, setIsSold] = React.useState(Boolean(item.isSold));
+  const [hasRecentBoost, setHasRecentBoost] = React.useState(false);
   const bumpFeeLabel = formatFromFiat(1.95, 'GBP', { displayMode: 'fiat' });
 
-  const handleAction = (title: string, msg: string) => {
-    Alert.alert(title, msg, [
+  const handleBumpListing = () => {
+    Alert.alert('Bump Item', `Push this item to the top of the feed for ${bumpFeeLabel}?`, [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Confirm', style: 'default' }
+      {
+        text: 'Confirm',
+        style: 'default',
+        onPress: () => {
+          setHasRecentBoost(true);
+          show('Listing bumped for 3 days.', 'success');
+        },
+      },
+    ]);
+  };
+
+  const handleMarkAsSold = () => {
+    Alert.alert('Mark as Sold', 'Are you sure you want to mark this item as sold? It will no longer be available for purchase.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Confirm',
+        style: 'default',
+        onPress: () => {
+          setIsSold(true);
+          show('Listing marked as sold.', 'success');
+        },
+      },
+    ]);
+  };
+
+  const handleDeleteListing = () => {
+    Alert.alert('Delete Item', 'Are you sure you want to permanently delete this listing?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => {
+          show('Listing deleted from your wardrobe.', 'success');
+          navigation.goBack();
+        },
+      },
     ]);
   };
 
@@ -58,7 +97,7 @@ export default function ManageListingScreen() {
             <Text style={styles.itemTitle} numberOfLines={2}>{item.title}</Text>
             <Text style={styles.itemPrice}>{formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}</Text>
             <View style={styles.statusBadge}>
-              <Text style={styles.statusText}>{item.isSold ? 'SOLD' : 'ACTIVE'}</Text>
+              <Text style={styles.statusText}>{isSold ? 'SOLD' : 'ACTIVE'}</Text>
             </View>
           </View>
         </View>
@@ -67,7 +106,7 @@ export default function ManageListingScreen() {
         <AnimatedPressable 
           style={styles.actionBlock} 
           activeOpacity={0.8}
-          onPress={() => handleAction('Bump Item', `Push this item to the top of the feed for ${bumpFeeLabel}?`)}
+          onPress={handleBumpListing}
         >
           <View style={styles.blockLeft}>
             <View style={[styles.iconBox, { backgroundColor: 'rgba(245,166,35,0.1)' }]}>
@@ -75,7 +114,7 @@ export default function ManageListingScreen() {
             </View>
             <View style={styles.blockTextCol}>
               <Text style={styles.blockTitle}>Bump Listing</Text>
-              <Text style={styles.blockSub}>Get up to 5x more views</Text>
+              <Text style={styles.blockSub}>{hasRecentBoost ? 'Boosted just now' : 'Get up to 5x more views'}</Text>
             </View>
           </View>
           <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
@@ -96,11 +135,11 @@ export default function ManageListingScreen() {
           </View>
         </AnimatedPressable>
 
-        {!item.isSold && (
+        {!isSold && (
           <AnimatedPressable 
             style={styles.actionBlock} 
             activeOpacity={0.8}
-            onPress={() => handleAction('Mark as Sold', 'Are you sure you want to mark this item as sold? It will no longer be available for purchase.')}
+            onPress={handleMarkAsSold}
           >
             <View style={styles.blockLeft}>
               <View style={[styles.iconBox, { backgroundColor: 'rgba(52,199,89,0.1)' }]}>
@@ -114,7 +153,7 @@ export default function ManageListingScreen() {
         <AnimatedPressable 
           style={[styles.actionBlock, { borderBottomWidth: 0 }]} 
           activeOpacity={0.8}
-          onPress={() => handleAction('Delete Item', 'Are you sure you want to permanently delete this listing?')}
+          onPress={handleDeleteListing}
         >
           <View style={styles.blockLeft}>
             <View style={[styles.iconBox, { backgroundColor: 'rgba(255,59,48,0.1)' }]}>

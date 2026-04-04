@@ -5,18 +5,35 @@ import { View,
   Text,
   StyleSheet,
   ScrollView,
-  StatusBar
+  StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
+import { BottomSheetPicker } from '../components/BottomSheetPicker';
+import { useToast } from '../context/ToastContext';
 
 const TEAL = '#e8dcc8';
+const PANEL_BG = Colors.card;
+const PANEL_BORDER = Colors.border;
+const INFO_BG = ActiveTheme === 'light' ? '#e6efe8' : '#0d2020';
+const INFO_BORDER = ActiveTheme === 'light' ? '#c5d7ca' : '#1a3a3a';
+
+type PreferencePickerMode = 'categories' | 'brands' | 'members' | null;
+
+const CATEGORY_SIZE_OPTIONS = ['Balanced', 'Mostly XS-S', 'Mostly M-L', 'All sizes'];
+const BRAND_OPTIONS = ['Any', 'Streetwear first', 'Luxury first', 'Vintage first'];
+const MEMBER_OPTIONS = ['Everyone', 'Verified sellers first', 'People I follow first'];
 
 export default function PersonalisationScreen() {
   const navigation = useNavigation<any>();
   const [genderFilter, setGenderFilter] = useState<string[]>(['Women', 'Men']);
+  const [categoriesAndSizesPref, setCategoriesAndSizesPref] = useState('Balanced');
+  const [brandsPref, setBrandsPref] = useState('Any');
+  const [membersPref, setMembersPref] = useState('Everyone');
+  const [pickerMode, setPickerMode] = useState<PreferencePickerMode>(null);
+  const { show } = useToast();
 
   const genderOptions = ['Women', 'Men', 'Kids', 'All'];
 
@@ -24,6 +41,52 @@ export default function PersonalisationScreen() {
     setGenderFilter(prev =>
       prev.includes(g) ? prev.filter(x => x !== g) : [...prev, g]
     );
+  };
+
+  const pickerTitle =
+    pickerMode === 'categories'
+      ? 'Categories and Sizes'
+      : pickerMode === 'brands'
+      ? 'Brand Preference'
+      : pickerMode === 'members'
+      ? 'Member Preference'
+      : 'Preference';
+
+  const pickerOptions =
+    pickerMode === 'categories'
+      ? CATEGORY_SIZE_OPTIONS
+      : pickerMode === 'brands'
+      ? BRAND_OPTIONS
+      : pickerMode === 'members'
+      ? MEMBER_OPTIONS
+      : [];
+
+  const selectedPickerValue =
+    pickerMode === 'categories'
+      ? categoriesAndSizesPref
+      : pickerMode === 'brands'
+      ? brandsPref
+      : pickerMode === 'members'
+      ? membersPref
+      : undefined;
+
+  const handleSelectPreference = (value: string) => {
+    if (pickerMode === 'categories') {
+      setCategoriesAndSizesPref(value);
+      show('Categories and sizes preference updated.', 'success');
+      return;
+    }
+
+    if (pickerMode === 'brands') {
+      setBrandsPref(value);
+      show('Brand preference updated.', 'success');
+      return;
+    }
+
+    if (pickerMode === 'members') {
+      setMembersPref(value);
+      show('Member preference updated.', 'success');
+    }
   };
 
   return (
@@ -63,12 +126,30 @@ export default function PersonalisationScreen() {
         <Text style={styles.sectionLabel}>YOUR PREFERENCES</Text>
         <View style={styles.card}>
           {[
-            { icon: 'grid-outline', label: 'Categories and sizes', sub: 'Refine by size per category' },
-            { icon: 'barcode-outline', label: 'Brands', sub: 'Your favourite brands' },
-            { icon: 'people-outline', label: 'Members', sub: 'Sellers you follow' },
+            {
+              icon: 'grid-outline',
+              label: 'Categories and sizes',
+              sub: categoriesAndSizesPref,
+              onPress: () => setPickerMode('categories' as PreferencePickerMode),
+            },
+            {
+              icon: 'barcode-outline',
+              label: 'Brands',
+              sub: brandsPref,
+              onPress: () => setPickerMode('brands' as PreferencePickerMode),
+            },
+            {
+              icon: 'people-outline',
+              label: 'Members',
+              sub: membersPref,
+              onPress: () => setPickerMode('members' as PreferencePickerMode),
+            },
           ].map((row, idx) => (
             <View key={row.label}>
-              <AnimatedPressable style={styles.prefRow}>
+              <AnimatedPressable
+                style={styles.prefRow}
+                onPress={row.onPress}
+              >
                 <View style={styles.prefIcon}>
                   <Ionicons name={row.icon as any} size={20} color={Colors.textPrimary} />
                 </View>
@@ -90,6 +171,15 @@ export default function PersonalisationScreen() {
           </Text>
         </View>
       </ScrollView>
+
+      <BottomSheetPicker
+        visible={pickerMode !== null}
+        onClose={() => setPickerMode(null)}
+        title={pickerTitle}
+        options={pickerOptions}
+        selectedValue={selectedPickerValue}
+        onSelect={handleSelectPreference}
+      />
     </SafeAreaView>
   );
 }
@@ -108,7 +198,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#111',
+    backgroundColor: PANEL_BG,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -121,9 +211,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 10,
     borderRadius: 22,
-    backgroundColor: '#111',
+    backgroundColor: PANEL_BG,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
+    borderColor: PANEL_BORDER,
   },
   genderPillActive: { backgroundColor: TEAL + '22', borderColor: TEAL },
   genderPillText: { fontSize: 14, fontFamily: 'Inter_500Medium', color: Colors.textMuted },
@@ -132,7 +222,7 @@ const styles = StyleSheet.create({
     fontSize: 11, color: Colors.textMuted, letterSpacing: 1.2,
     textTransform: 'uppercase', marginBottom: 10, marginLeft: 4,
   },
-  card: { backgroundColor: '#111111', borderRadius: 20, overflow: 'hidden', marginBottom: 20 },
+  card: { backgroundColor: PANEL_BG, borderRadius: 20, overflow: 'hidden', marginBottom: 20, borderWidth: 1, borderColor: PANEL_BORDER },
   prefRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 18, paddingVertical: 16 },
   prefIcon: {
     width: 38, height: 38, borderRadius: 19, backgroundColor: Colors.card,
@@ -141,10 +231,10 @@ const styles = StyleSheet.create({
   prefText: { flex: 1 },
   prefLabel: { fontSize: 16, fontFamily: 'Inter_500Medium', color: Colors.textPrimary },
   prefSub: { fontSize: 12, fontFamily: 'Inter_400Regular', color: Colors.textMuted, marginTop: 2 },
-  divider: { height: 1, backgroundColor: '#1c1c1c', marginHorizontal: 18 },
+  divider: { height: 1, backgroundColor: PANEL_BORDER, marginHorizontal: 18 },
   infoCard: {
     flexDirection: 'row', alignItems: 'flex-start', gap: 12,
-    backgroundColor: '#0d2020', borderRadius: 14, padding: 16,
+    backgroundColor: INFO_BG, borderRadius: 14, padding: 16, borderWidth: 1, borderColor: INFO_BORDER,
   },
   infoText: { flex: 1, fontSize: 13, color: Colors.textSecondary, lineHeight: 19 },
 });

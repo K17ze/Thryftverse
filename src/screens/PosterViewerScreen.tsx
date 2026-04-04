@@ -10,7 +10,7 @@ import {
   Dimensions
 } from 'react-native';
 import { CachedImage } from '../components/CachedImage';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -29,7 +29,6 @@ type NavT = StackNavigationProp<RootStackParamList>;
 export default function PosterViewerScreen() {
   const navigation = useNavigation<NavT>();
   const route = useRoute<any>();
-  const insets = useSafeAreaInsets();
   const { show } = useToast();
   const currentUser = useStore((state) => state.currentUser);
   const markPosterSeen = useStore((state) => state.markPosterSeen);
@@ -55,15 +54,14 @@ export default function PosterViewerScreen() {
 
   const goNext = React.useCallback(() => {
     setProgress(0);
-    setCurrentIndex((prev) => {
-      if (prev >= posters.length - 1) {
-        navigation.goBack();
-        return prev;
-      }
 
-      return prev + 1;
-    });
-  }, [navigation, posters.length]);
+    if (currentIndex >= posters.length - 1) {
+      navigation.goBack();
+      return;
+    }
+
+    setCurrentIndex((prev) => Math.min(prev + 1, posters.length - 1));
+  }, [currentIndex, navigation, posters.length]);
 
   const goPrevious = React.useCallback(() => {
     setProgress(0);
@@ -86,11 +84,17 @@ export default function PosterViewerScreen() {
       return;
     }
 
+    if (currentIndex > posters.length - 1) {
+      setCurrentIndex(posters.length - 1);
+      setProgress(0);
+      return;
+    }
+
     if (activePoster) {
       markPosterSeen(activePoster.id);
       setProgress(0);
     }
-  }, [activePoster?.id, markPosterSeen, navigation, posters.length]);
+  }, [activePoster?.id, currentIndex, markPosterSeen, navigation, posters.length]);
 
   React.useEffect(() => {
     if (!activePoster || isPaused) {
@@ -134,7 +138,7 @@ export default function PosterViewerScreen() {
       <View style={styles.backdropOverlay} />
 
       <SafeAreaView style={styles.overlay} edges={['top', 'bottom']}>
-        <View style={[styles.progressRow, { marginTop: Math.max(insets.top - 2, 4) }]}>
+        <View style={styles.progressRow}>
           {posters.map((poster, index) => {
             const fillPercent = index < currentIndex ? 100 : index === currentIndex ? progress * 100 : 0;
             return (
@@ -210,15 +214,13 @@ export default function PosterViewerScreen() {
           <Pressable
             style={styles.tapLeft}
             onPress={goPrevious}
-            delayLongPress={180}
-            onLongPress={() => setIsPaused(true)}
+            onPressIn={() => setIsPaused(true)}
             onPressOut={() => setIsPaused(false)}
           />
           <Pressable
             style={styles.tapRight}
             onPress={goNext}
-            delayLongPress={180}
-            onLongPress={() => setIsPaused(true)}
+            onPressIn={() => setIsPaused(true)}
             onPressOut={() => setIsPaused(false)}
           />
         </View>
@@ -248,6 +250,7 @@ const styles = StyleSheet.create({
   progressRow: {
     flexDirection: 'row',
     gap: 5,
+    marginTop: 6,
   },
   progressTrack: {
     flex: 1,

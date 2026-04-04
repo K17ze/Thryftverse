@@ -58,14 +58,23 @@ export default function AccountSettingsScreen() {
   };
 
   const handleDownloadData = () => {
-    Alert.alert('Download requested', 'We will send your data export link to your account email within 24 hours.');
+    show('Data export requested. Check your email within 24 hours.', 'success');
+  };
+
+  const handleDeleteAccountSupport = () => {
+    navigation.navigate('HelpSupport');
+    show('Contact support to complete your account deletion request.', 'info');
   };
 
   const handleDeleteAccount = () => {
     Alert.alert('Delete account', 'This action cannot be undone. Contact support to complete account deletion.', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Understood', style: 'destructive' },
+      { text: 'Contact support', style: 'destructive', onPress: handleDeleteAccountSupport },
     ]);
+  };
+
+  const handleSaveChanges = () => {
+    show('Account details saved', 'success');
   };
 
   return (
@@ -124,7 +133,7 @@ export default function AccountSettingsScreen() {
             <Switch 
               value={holidayMode} 
               onValueChange={setHolidayMode}
-              trackColor={{ false: '#333', true: Colors.success }}
+              trackColor={{ false: Colors.border, true: Colors.success }}
               thumbColor="#fff"
             />
           </View>
@@ -136,7 +145,7 @@ export default function AccountSettingsScreen() {
             <Switch 
               value={privateProfile} 
               onValueChange={setPrivateProfile}
-              trackColor={{ false: '#333', true: Colors.success }}
+              trackColor={{ false: Colors.border, true: Colors.success }}
               thumbColor="#fff"
             />
           </View>
@@ -160,7 +169,7 @@ export default function AccountSettingsScreen() {
             <Switch 
               value={twoFactorEnabled} 
               onValueChange={handleToggleTwoFactor}
-              trackColor={{ false: '#333', true: Colors.success }}
+              trackColor={{ false: Colors.border, true: Colors.success }}
               thumbColor="#fff"
             />
           </View>
@@ -201,6 +210,10 @@ export default function AccountSettingsScreen() {
           </AnimatedPressable>
         </View>
 
+        <AnimatedPressable style={styles.saveBtn} onPress={handleSaveChanges} activeOpacity={0.9}>
+          <Text style={styles.saveBtnText}>Save Changes</Text>
+        </AnimatedPressable>
+
         {/* Footer Actions */}
         <AnimatedPressable style={styles.supportRow} onPress={handleDownloadData} activeOpacity={0.8}>
           <Ionicons name="download-outline" size={20} color={Colors.textPrimary} style={{ marginRight: 12 }} />
@@ -219,7 +232,7 @@ export default function AccountSettingsScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 10, paddingBottom: 20, gap: 12 },
-  backBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#111', alignItems: 'center', justifyContent: 'center' },
+  backBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.card, alignItems: 'center', justifyContent: 'center' },
   hugeTitle: { fontSize: 34, fontFamily: 'Inter_700Bold', color: Colors.textPrimary, letterSpacing: -0.5 },
   content: { paddingHorizontal: 20, paddingBottom: 40 },
 
@@ -227,21 +240,24 @@ const styles = StyleSheet.create({
   
   inputGroup: { marginBottom: 16 },
   label: { fontSize: 13, fontFamily: 'Inter_600SemiBold', color: Colors.textSecondary, marginBottom: 8, marginLeft: 6, textTransform: 'uppercase', letterSpacing: 1 },
-  pillInput: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#111', borderRadius: 24, paddingHorizontal: 20, height: 56 },
+  pillInput: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: Colors.card, borderRadius: 24, paddingHorizontal: 20, height: 56 },
   inputText: { flex: 1, color: Colors.textPrimary, fontFamily: 'Inter_500Medium', fontSize: 16 },
   helperText: { fontSize: 11, fontFamily: 'Inter_400Regular', color: Colors.textMuted, marginLeft: 6, marginTop: 6 },
 
-  cardGroup: { backgroundColor: '#111', borderRadius: 24, paddingVertical: 16, paddingHorizontal: 20 },
+  cardGroup: { backgroundColor: Colors.card, borderRadius: 24, paddingVertical: 16, paddingHorizontal: 20 },
   actionRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 24 },
   rowTitle: { fontSize: 16, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary, marginBottom: 4 },
   rowSub: { fontSize: 13, fontFamily: 'Inter_400Regular', color: Colors.textSecondary, paddingRight: 10 },
-  linkBadge: { backgroundColor: 'transparent', borderWidth: 1, borderColor: '#333', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 6 },
+  linkBadge: { backgroundColor: 'transparent', borderWidth: 1, borderColor: Colors.border, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 6 },
   linkBadgeText: { color: Colors.textPrimary, fontFamily: 'Inter_600SemiBold', fontSize: 13 },
-  linkBadgeActive: { backgroundColor: '#222', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 6 },
+  linkBadgeActive: { backgroundColor: Colors.cardAlt, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 6 },
   linkBadgeTextActive: { color: Colors.textSecondary, fontFamily: 'Inter_600SemiBold', fontSize: 13 },
+
+  saveBtn: { marginTop: 24, backgroundColor: Colors.accent, borderRadius: 30, height: 56, alignItems: 'center', justifyContent: 'center' },
+  saveBtnText: { color: Colors.textInverse, fontSize: 16, fontFamily: 'Inter_700Bold' },
 
   supportRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 24, marginTop: 16 },
 
-  dangerBtn: { borderWidth: 1, borderColor: 'rgba(255, 60, 60, 0.2)', backgroundColor: '#1A0000', borderRadius: 30, height: 56, alignItems: 'center', justifyContent: 'center', marginTop: 16 },
+  dangerBtn: { borderWidth: 1, borderColor: 'rgba(255, 60, 60, 0.2)', backgroundColor: 'rgba(255, 60, 60, 0.08)', borderRadius: 30, height: 56, alignItems: 'center', justifyContent: 'center', marginTop: 16 },
   dangerText: { color: Colors.danger, fontSize: 16, fontFamily: 'Inter_700Bold' },
 });

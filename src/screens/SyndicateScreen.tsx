@@ -27,6 +27,9 @@ import { EmptyState } from '../components/EmptyState';
 import { useStore } from '../store/useStore';
 import { useCurrencyContext } from '../context/CurrencyContext';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
+import { SkeletonLoader } from '../components/SkeletonLoader';
+import { SyncStatusPill } from '../components/SyncStatusPill';
+import { SyncRetryBanner } from '../components/SyncRetryBanner';
 import { formatIzeAmount, toIze } from '../utils/currency';
 import { listSyndicateAssets, placeSyndicateOrder } from '../services/marketApi';
 
@@ -93,6 +96,7 @@ export default function SyndicateScreen() {
   const [unitsInput, setUnitsInput] = React.useState('1');
   const [remoteAssets, setRemoteAssets] = React.useState<SyndicateAsset[]>([]);
   const [isSyncingAssets, setIsSyncingAssets] = React.useState(false);
+  const [syncError, setSyncError] = React.useState<string | null>(null);
   const [isSubmittingOrder, setIsSubmittingOrder] = React.useState(false);
 
   const syncSyndicateAssets = React.useCallback(async () => {
@@ -119,7 +123,9 @@ export default function SyndicateScreen() {
       }));
 
       setRemoteAssets(mapped);
-    } catch {
+      setSyncError(null);
+    } catch (error) {
+      setSyncError((error as Error).message || 'Unable to sync syndicate pools');
       // Keep existing local market state when backend sync is unavailable.
     } finally {
       setIsSyncingAssets(false);
@@ -213,6 +219,41 @@ export default function SyndicateScreen() {
   );
 
   const marketEligibility = checkSyndicateEligibility('HYBRID');
+
+  const poolStatus = React.useMemo(() => {
+    if (isSyncingAssets) {
+      return {
+        tone: 'syncing' as const,
+        label: 'Syncing',
+      };
+    }
+
+    if (syncError) {
+      return {
+        tone: 'offline' as const,
+        label: 'Reconnecting',
+      };
+    }
+
+    if (remoteAssets.length > 0) {
+      return {
+        tone: 'live' as const,
+        label: 'Live pools',
+      };
+    }
+
+    if (marketAssets.length > 0) {
+      return {
+        tone: 'offline' as const,
+        label: 'Local mode',
+      };
+    }
+
+    return {
+      tone: 'offline' as const,
+      label: 'No pools yet',
+    };
+  }, [isSyncingAssets, marketAssets.length, remoteAssets.length, syncError]);
 
   const openUnitsComposer = (asset: SyndicateAsset, mode: ComposerMode) => {
     const eligibility = checkSyndicateEligibility(asset.settlementMode);
@@ -364,6 +405,17 @@ export default function SyndicateScreen() {
         </AnimatedPressable>
       </View>
 
+      {syncError ? (
+        <SyncRetryBanner
+          message="Live syndicate pools are delayed. Showing local portfolio state."
+          onRetry={() => void syncSyndicateAssets()}
+          isRetrying={isSyncingAssets}
+          telemetryContext="syndicate_market_sync"
+          containerStyle={styles.syncBanner}
+          actionStyle={styles.syncBannerBtn}
+        />
+      ) : null}
+
       <View style={styles.quickActionsRow}>
         <AnimatedPressable
           style={styles.quickActionChip}
@@ -399,7 +451,7 @@ export default function SyndicateScreen() {
 
       <View style={styles.sectionRow}>
         <Text style={styles.sectionTitle}>{activeView === 'MARKET' ? 'Open Syndicates' : 'Your Holdings'}</Text>
-        <Text style={styles.sectionHint}>{isSyncingAssets ? 'Syncing backend pools...' : 'Settles in 1ze only with local previews'}</Text>
+        <SyncStatusPill tone={poolStatus.tone} label={poolStatus.label} compact />
       </View>
 
       <View style={styles.pegCard}>
@@ -734,6 +786,32 @@ export default function SyndicateScreen() {
     </Modal>
   );
 
+  const renderLoadingState = () => (
+    <View style={styles.loadingStateWrap}>
+      {Array.from({ length: 3 }).map((_, index) => (
+        <View key={`syndicate_loading_${index}`} style={styles.loadingCard}>
+          <View style={styles.loadingCardHeader}>
+            <SkeletonLoader width={54} height={54} borderRadius={14} />
+            <View style={styles.loadingCardTitleCol}>
+              <SkeletonLoader width="60%" height={15} borderRadius={7} />
+              <SkeletonLoader width="35%" height={11} borderRadius={6} style={{ marginTop: 7 }} />
+            </View>
+          </View>
+
+          <View style={styles.loadingCardBody}>
+            <SkeletonLoader width="48%" height={13} borderRadius={7} />
+            <SkeletonLoader width="100%" height={5} borderRadius={4} style={{ marginTop: 10 }} />
+            <SkeletonLoader width="70%" height={11} borderRadius={6} style={{ marginTop: 10 }} />
+            <View style={styles.loadingCtaRow}>
+              <SkeletonLoader width="60%" height={34} borderRadius={12} />
+              <SkeletonLoader width="35%" height={34} borderRadius={12} />
+            </View>
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+
   return (
     <>
       <FlatList
@@ -743,21 +821,25 @@ export default function SyndicateScreen() {
         ListHeaderComponent={renderHeader}
         ItemSeparatorComponent={() => <View style={styles.separator} />}
         ListEmptyComponent={
-          <EmptyState
-            icon="pie-chart-outline"
-            title={activeView === 'HOLDINGS' ? 'No holdings yet' : 'No open syndicates'}
-            subtitle={
-              activeView === 'HOLDINGS'
-                ? 'Buy fractions from an open pool to see your syndicate positions here.'
-                : 'Create a new syndicate to tokenize a listing and open fractional ownership.'
-            }
-            ctaLabel={activeView === 'HOLDINGS' ? 'Browse Market' : 'Issue Syndicate'}
-            onCtaPress={() =>
-              activeView === 'HOLDINGS'
-                ? setActiveView('MARKET')
-                : navigation.navigate('CreateSyndicate')
-            }
-          />
+          isSyncingAssets ? (
+            renderLoadingState()
+          ) : (
+            <EmptyState
+              icon="pie-chart-outline"
+              title={activeView === 'HOLDINGS' ? 'No holdings yet' : 'No open syndicates'}
+              subtitle={
+                activeView === 'HOLDINGS'
+                  ? 'Buy fractions from an open pool to see your syndicate positions here.'
+                  : 'Create a new syndicate to tokenize a listing and open fractional ownership.'
+              }
+              ctaLabel={activeView === 'HOLDINGS' ? 'Browse Market' : 'Issue Syndicate'}
+              onCtaPress={() =>
+                activeView === 'HOLDINGS'
+                  ? setActiveView('MARKET')
+                  : navigation.navigate('CreateSyndicate')
+              }
+            />
+          )
         }
         contentContainerStyle={styles.contentContainer}
         showsVerticalScrollIndicator={false}
@@ -918,6 +1000,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: 'Inter_700Bold',
   },
+  syncBanner: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+    borderColor: PANEL_BORDER,
+    backgroundColor: IS_LIGHT ? '#f5ece2' : '#1a1a1a',
+  },
+  syncBannerBtn: {
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
+  },
   quickActionsRow: {
     marginHorizontal: 16,
     marginBottom: 12,
@@ -1009,6 +1101,35 @@ const styles = StyleSheet.create({
   },
   separator: {
     height: 10,
+  },
+  loadingStateWrap: {
+    paddingHorizontal: 16,
+    gap: 10,
+  },
+  loadingCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    gap: 10,
+  },
+  loadingCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  loadingCardTitleCol: {
+    flex: 1,
+  },
+  loadingCardBody: {
+    gap: 2,
+  },
+  loadingCtaRow: {
+    marginTop: 10,
+    flexDirection: 'row',
+    gap: 8,
   },
   assetCard: {
     marginHorizontal: 16,

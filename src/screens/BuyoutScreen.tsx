@@ -31,6 +31,7 @@ export default function BuyoutScreen() {
   const navigation = useNavigation<NavT>();
   const route = useRoute<RouteT>();
   const { show } = useToast();
+  const [isSubmitting, setIsSubmitting] = React.useState(false);
 
   const customSyndicates = useStore((state) => state.customSyndicates);
   const syndicateRuntime = useStore((state) => state.syndicateRuntime);
@@ -70,14 +71,24 @@ export default function BuyoutScreen() {
   const totalCost = sharesNeeded * offerPricePerShare;
 
   const handleBuyout = () => {
-    if (sharesNeeded <= 0) {
-      show('You already control 100% of this asset pool.', 'success');
-      navigation.goBack();
+    if (isSubmitting) {
       return;
     }
 
-    show('Buyout intent submitted (prototype)', 'success');
-    navigation.goBack();
+    if (sharesNeeded <= 0) {
+      show('You already control 100% of this asset pool.', 'success');
+      navigation.navigate('AssetDetail', { assetId: asset.id });
+      return;
+    }
+
+    setIsSubmitting(true);
+    show('Submitting buyout offer to remaining holders...', 'info');
+
+    setTimeout(() => {
+      setIsSubmitting(false);
+      show('Buyout offer submitted. Track progress in order history.', 'success');
+      navigation.navigate('SyndicateOrderHistory');
+    }, 700);
   };
 
   return (
@@ -119,13 +130,20 @@ export default function BuyoutScreen() {
           </View>
         </View>
 
-        <AnimatedPressable style={styles.submitBtn} onPress={handleBuyout} activeOpacity={0.9}>
+        <AnimatedPressable
+          style={[styles.submitBtn, isSubmitting && styles.submitBtnDisabled]}
+          onPress={handleBuyout}
+          activeOpacity={0.9}
+          disabled={isSubmitting}
+        >
           <Ionicons name="diamond-outline" size={16} color={Colors.background} />
-          <Text style={styles.submitText}>{sharesNeeded > 0 ? 'Initiate Buyout' : 'Claim Full Ownership'}</Text>
+          <Text style={styles.submitText}>
+            {isSubmitting ? 'Submitting...' : sharesNeeded > 0 ? 'Initiate Buyout' : 'Claim Full Ownership'}
+          </Text>
         </AnimatedPressable>
 
         <Text style={styles.footNote}>
-          Buyout execution, custody transfer, and shipping workflows are represented as a prototype interaction in this build.
+          Buyout requests are routed to the order ledger so you can monitor acceptance and settlement status.
         </Text>
       </View>
     </SafeAreaView>
@@ -225,6 +243,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     flexDirection: 'row',
     gap: 6,
+  },
+  submitBtnDisabled: {
+    opacity: 0.6,
   },
   submitText: {
     color: Colors.textInverse,

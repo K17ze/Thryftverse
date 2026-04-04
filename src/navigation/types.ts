@@ -74,7 +74,14 @@ export type RootStackParamList = {
         subcategoryId?: string;
       }
     | undefined;
-  ListingSuccess: undefined;
+  ListingSuccess:
+    | {
+        title?: string;
+        price?: number;
+        categoryId?: string;
+        photoUri?: string;
+      }
+    | undefined;
   // Phase 27
   NotificationsList: undefined;
   // Phase 28

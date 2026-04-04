@@ -13,14 +13,16 @@ import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { ActiveTheme, Colors } from '../constants/colors';
+import { useToast } from '../context/ToastContext';
 
 export default function WriteReviewScreen() {
   const navigation = useNavigation<any>();
   const [rating, setRating] = useState(0);
   const [review, setReview] = useState('');
+  const { show } = useToast();
 
   const submitReview = () => {
-    // Navigate back to orders
+    show('Review submitted', 'success');
     navigation.goBack();
   };
 
@@ -94,9 +96,9 @@ const styles = StyleSheet.create({
     paddingTop: 10, 
     paddingBottom: 20,
     borderBottomWidth: 1,
-    borderBottomColor: '#1a1a1a',
+    borderBottomColor: Colors.border,
   },
-  backBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#111', alignItems: 'center', justifyContent: 'center' },
+  backBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.card, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { fontSize: 18, fontFamily: 'Inter_700Bold', color: Colors.textPrimary },
   
   content: { flex: 1, paddingHorizontal: 24, paddingTop: 32 },
@@ -110,7 +112,9 @@ const styles = StyleSheet.create({
   input: { 
     flex: 1,
     maxHeight: 200,
-    backgroundColor: '#111',
+    backgroundColor: Colors.card,
+    borderWidth: 1,
+    borderColor: Colors.border,
     borderRadius: 16,
     padding: 16,
     color: Colors.textPrimary, 

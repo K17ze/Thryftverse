@@ -17,6 +17,7 @@ import { ToastProvider } from './src/context/ToastContext';
 import { TabScrollProvider } from './src/context/TabScrollContext';
 import { CurrencyProvider } from './src/context/CurrencyContext';
 import { BackendDataProvider } from './src/context/BackendDataContext';
+import { SettingsPreferencesProvider } from './src/context/SettingsPreferencesContext';
 import { ToastContainer } from './src/components/Toast';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { BrandedSplash } from './src/components/BrandedSplash';
@@ -190,12 +191,14 @@ export default function App() {
           <ToastProvider>
             <BackendDataProvider>
               <CurrencyProvider>
-                <TabScrollProvider>
-                  <NavigationContainer theme={premiumNavigationTheme}>
-                    <StatusBar style={ActiveTheme === 'light' ? 'dark' : 'light'} backgroundColor={Colors.background} />
-                    {ThemeReadyNavigator ? <ThemeReadyNavigator /> : null}
-                  </NavigationContainer>
-                </TabScrollProvider>
+                <SettingsPreferencesProvider>
+                  <TabScrollProvider>
+                    <NavigationContainer theme={premiumNavigationTheme}>
+                      <StatusBar style={ActiveTheme === 'light' ? 'dark' : 'light'} backgroundColor={Colors.background} />
+                      {ThemeReadyNavigator ? <ThemeReadyNavigator /> : null}
+                    </NavigationContainer>
+                  </TabScrollProvider>
+                </SettingsPreferencesProvider>
               </CurrencyProvider>
             </BackendDataProvider>
             <ToastContainer />

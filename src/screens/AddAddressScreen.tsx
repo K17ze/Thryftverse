@@ -22,9 +22,9 @@ import { createUserAddress } from '../services/commerceApi';
 
 type Props = StackScreenProps<RootStackParamList, 'AddAddress'>;
 const IS_LIGHT = ActiveTheme === 'light';
-const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111111';
-const PANEL_SOFT_BG = IS_LIGHT ? '#f7f4ef' : '#151515';
-const PANEL_BORDER = IS_LIGHT ? '#d8d1c6' : '#2a2a2a';
+const PANEL_BG = Colors.card;
+const PANEL_SOFT_BG = Colors.cardAlt;
+const PANEL_BORDER = Colors.border;
 const FOOTER_BG = IS_LIGHT ? 'rgba(236,234,230,0.97)' : 'rgba(10,10,10,0.95)';
 
 export default function AddAddressScreen({ navigation }: Props) {
@@ -33,6 +33,7 @@ export default function AddAddressScreen({ navigation }: Props) {
   const [street, setStreet] = useState('');
   const [city, setCity] = useState('');
   const [postcode, setPostcode] = useState('');
+  const [isDefaultAddress, setIsDefaultAddress] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const currentUser = useStore((state) => state.currentUser);
   const saveAddress = useStore((state) => state.saveAddress);
@@ -50,7 +51,7 @@ export default function AddAddressScreen({ navigation }: Props) {
       street: street.trim(),
       city: city.trim(),
       postcode: postcode.trim().toUpperCase(),
-      isDefault: true,
+      isDefault: isDefaultAddress,
     };
 
     setIsSaving(true);
@@ -155,10 +156,19 @@ export default function AddAddressScreen({ navigation }: Props) {
             </View>
           </View>
 
-          {/* Dummy Default Toggle */}
-          <AnimatedPressable style={styles.defaultToggleRow} activeOpacity={0.9}>
-            <Ionicons name="checkmark-circle" size={24} color={Colors.textPrimary} />
-            <Text style={styles.defaultToggleText}>Set as default delivery address</Text>
+          <AnimatedPressable
+            style={[styles.defaultToggleRow, isDefaultAddress && styles.defaultToggleRowActive]}
+            activeOpacity={0.9}
+            onPress={() => setIsDefaultAddress((current) => !current)}
+          >
+            <Ionicons
+              name={isDefaultAddress ? 'checkmark-circle' : 'ellipse-outline'}
+              size={24}
+              color={isDefaultAddress ? Colors.accent : Colors.textSecondary}
+            />
+            <Text style={[styles.defaultToggleText, !isDefaultAddress && styles.defaultToggleTextMuted]}>
+              Set as default delivery address
+            </Text>
           </AnimatedPressable>
 
         </ScrollView>
@@ -253,10 +263,17 @@ const styles = StyleSheet.create({
     marginTop: 16,
     gap: 12,
   },
+  defaultToggleRowActive: {
+    borderColor: Colors.accent,
+    backgroundColor: PANEL_SOFT_BG,
+  },
   defaultToggleText: {
     fontSize: 15,
     fontFamily: 'Inter_600SemiBold',
     color: Colors.textPrimary,
+  },
+  defaultToggleTextMuted: {
+    color: Colors.textSecondary,
   },
 
   footer: {

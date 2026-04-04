@@ -22,6 +22,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useStore } from '../store/useStore';
 import { SortablePhotoStrip } from '../components/SortablePhotoStrip';
 import { BottomSheetPicker } from '../components/BottomSheetPicker';
+import { SyncStatusPill } from '../components/SyncStatusPill';
 import { CURRENCIES } from '../constants/currencies';
 import { useCurrencyPref } from '../hooks/useCurrencyPref';
 import { sanitizeDecimalInput, sanitizeIntegerInput } from '../utils/currencyAuthoringFlows';
@@ -216,12 +217,60 @@ export default function SellScreen() {
 
     setErrorMsg('');
 
-    navigation.replace('ListingSuccess');
+    navigation.replace('ListingSuccess', {
+      title: trimmedTitle,
+      price: numericPrice,
+      categoryId: sellDraft.categoryId,
+      photoUri: photos[0],
+    });
   };
 
   const handlePriceChange = (value: string) => {
     setPrice(sanitizeDecimalInput(value));
   };
+
+  const normalizedPrice = Number(sanitizeDecimalInput(price));
+  const hasBasePhotos = photos.length > 0;
+  const hasRequiredDetails = Boolean(title.trim() && sellDraft.categoryId && sellDraft.size && sellDraft.condition);
+  const hasDescription = desc.trim().length >= 10;
+  const hasValidPrice = Number.isFinite(normalizedPrice) && normalizedPrice > 0;
+  const parsedShareCount = Math.floor(Number(shareCountInput));
+  const hasValidShareCount = Number.isFinite(parsedShareCount) && parsedShareCount > 0;
+  const parsedSharePrice = Number(sanitizeDecimalInput(sharePriceInput));
+  const hasValidSharePrice = Number.isFinite(parsedSharePrice) && parsedSharePrice > 0;
+  const syndicateFinancialReady = !syndicateEnabled || (hasValidShareCount && hasValidSharePrice);
+  const syndicateAuthReady = !syndicateEnabled || authPhotos.length > 0;
+
+  const readinessItems = [
+    { key: 'photos', label: 'Photos', done: hasBasePhotos },
+    { key: 'details', label: 'Details', done: hasRequiredDetails },
+    { key: 'description', label: 'Description', done: hasDescription },
+    { key: 'price', label: 'Price', done: hasValidPrice },
+    { key: 'syndicatePrice', label: 'Share setup', done: syndicateFinancialReady },
+    { key: 'syndicateAuth', label: 'Auth proof', done: syndicateAuthReady },
+  ];
+
+  const visibleReadinessItems = syndicateEnabled
+    ? readinessItems
+    : readinessItems.filter((item) => item.key !== 'syndicatePrice' && item.key !== 'syndicateAuth');
+
+  const incompleteReadinessCount = visibleReadinessItems.reduce(
+    (count, item) => (item.done ? count : count + 1),
+    0,
+  );
+
+  const publishReady = incompleteReadinessCount === 0;
+  const readinessLabel = publishReady
+    ? syndicateEnabled
+      ? 'Ready for issuing'
+      : 'Ready to publish'
+    : `${incompleteReadinessCount} checks left`;
+
+  React.useEffect(() => {
+    if (publishReady && errorMsg) {
+      setErrorMsg('');
+    }
+  }, [publishReady, errorMsg]);
 
   const getPickerOptions = () => {
     switch (pickerMode) {
@@ -261,7 +310,7 @@ export default function SellScreen() {
             <Ionicons name="close" size={28} color={Colors.textPrimary} />
           </AnimatedPressable>
           <Text style={styles.headerTitle}>Scan Item</Text>
-          <AnimatedPressable style={styles.iconBtn} activeOpacity={0.8}>
+          <AnimatedPressable style={styles.iconBtn} activeOpacity={0.8} onPress={handlePickFromCamera}>
             <Ionicons name="flash-outline" size={24} color={Colors.textPrimary} />
           </AnimatedPressable>
         </View>
@@ -515,6 +564,38 @@ export default function SellScreen() {
             )}
           </View>
 
+          <View style={styles.readinessCard}>
+            <View style={styles.readinessHeader}>
+              <Text style={styles.readinessTitle}>Publish Readiness</Text>
+              <SyncStatusPill
+                tone={publishReady ? 'live' : 'syncing'}
+                label={readinessLabel}
+                compact
+              />
+            </View>
+
+            <View style={styles.readinessChipRow}>
+              {visibleReadinessItems.map((item) => (
+                <View key={item.key} style={[styles.readinessChip, item.done && styles.readinessChipDone]}>
+                  <Ionicons
+                    name={item.done ? 'checkmark-circle' : 'ellipse-outline'}
+                    size={14}
+                    color={item.done ? BRAND : Colors.textMuted}
+                  />
+                  <Text style={[styles.readinessChipText, item.done && styles.readinessChipTextDone]}>
+                    {item.label}
+                  </Text>
+                </View>
+              ))}
+            </View>
+
+            <Text style={[styles.readinessHint, publishReady && styles.readinessHintReady]}>
+              {publishReady
+                ? 'All required checks are complete. You can safely continue.'
+                : 'Complete all highlighted checks before you publish this listing.'}
+            </Text>
+          </View>
+
           <View style={{ height: 120 }} />
         </ScrollView>
       </KeyboardAvoidingView>
@@ -532,8 +613,15 @@ export default function SellScreen() {
           </Reanimated.Text>
         )}
         <Reanimated.View style={[shakeStyle, { width: '100%' }]} layout={Layout.springify()}>
-          <AnimatedPressable style={styles.uploadCta} activeOpacity={0.9} onPress={handlePublish}>
-            <Text style={styles.uploadCtaText}>Publish Item</Text>
+          <AnimatedPressable
+            style={[styles.uploadCta, !publishReady && styles.uploadCtaDisabled]}
+            activeOpacity={0.9}
+            onPress={handlePublish}
+            disabled={!publishReady}
+          >
+            <Text style={[styles.uploadCtaText, !publishReady && styles.uploadCtaTextDisabled]}>
+              {publishReady ? (syndicateEnabled ? 'Continue to Issue' : 'Publish Item') : 'Complete Required Fields'}
+            </Text>
           </AnimatedPressable>
         </Reanimated.View>
       </View>
@@ -837,6 +925,67 @@ const styles = StyleSheet.create({
   authBtnTextMuted: {
     color: Colors.textSecondary,
   },
+  readinessCard: {
+    backgroundColor: PANEL_BG,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: PANEL_BORDER,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 8,
+  },
+  readinessHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginBottom: 10,
+  },
+  readinessTitle: {
+    fontSize: 13,
+    fontFamily: 'Inter_700Bold',
+    color: Colors.textPrimary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.7,
+  },
+  readinessChipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  readinessChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_SOFT_BG,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  readinessChipDone: {
+    borderColor: BRAND,
+    backgroundColor: IS_LIGHT ? '#efe5d5' : '#2f291f',
+  },
+  readinessChipText: {
+    fontSize: 11,
+    fontFamily: 'Inter_600SemiBold',
+    color: Colors.textSecondary,
+  },
+  readinessChipTextDone: {
+    color: BRAND,
+  },
+  readinessHint: {
+    marginTop: 10,
+    fontSize: 11,
+    lineHeight: 16,
+    fontFamily: 'Inter_500Medium',
+    color: Colors.textMuted,
+  },
+  readinessHintReady: {
+    color: Colors.textSecondary,
+  },
 
   stickyFooter: {
     position: 'absolute',
@@ -856,5 +1005,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  uploadCtaDisabled: {
+    backgroundColor: PANEL_BORDER,
+  },
   uploadCtaText: { color: Colors.textInverse, fontSize: 18, fontFamily: 'Inter_700Bold', letterSpacing: -0.5 },
+  uploadCtaTextDisabled: {
+    color: Colors.textMuted,
+  },
 });

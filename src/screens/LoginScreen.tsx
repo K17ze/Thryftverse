@@ -26,8 +26,10 @@ export default function LoginScreen() {
   const canGoBack = navigation.canGoBack();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const login = useStore(state => state.login);
+  const canSubmit = email.trim().length > 0 && password.length > 0 && !isSubmitting;
 
   const shakeOffset = useSharedValue(0);
 
@@ -46,6 +48,10 @@ export default function LoginScreen() {
   }));
 
   const handleLogin = () => {
+    if (isSubmitting) {
+      return;
+    }
+
     const normalizedEmail = email.trim().toLowerCase();
 
     if (!normalizedEmail || !password) {
@@ -67,7 +73,8 @@ export default function LoginScreen() {
     }
 
     setErrorMsg('');
-    // Navigate straight to MainTabs temporarily (dummy auth)
+    setIsSubmitting(true);
+    // Use local mock auth state, then continue to the main app shell.
     login(MY_USER);
     navigation.replace('MainTabs');
   };
@@ -140,8 +147,13 @@ export default function LoginScreen() {
           )}
 
           <Reanimated.View style={shakeStyle} layout={Layout.springify()}>
-            <AnimatedPressable style={styles.primaryBtn} onPress={handleLogin} activeOpacity={0.9}>
-              <Text style={styles.primaryText}>Log In</Text>
+            <AnimatedPressable
+              style={[styles.primaryBtn, !canSubmit && styles.primaryBtnDisabled]}
+              onPress={handleLogin}
+              activeOpacity={0.9}
+              disabled={!canSubmit}
+            >
+              <Text style={styles.primaryText}>{isSubmitting ? 'Logging in...' : 'Log In'}</Text>
             </AnimatedPressable>
           </Reanimated.View>
 
@@ -188,6 +200,7 @@ const styles = StyleSheet.create({
   footer: { paddingBottom: 24, position: 'relative' },
   errorText: { color: Colors.danger, fontSize: 13, fontFamily: Typography.family.medium, textAlign: 'center', marginBottom: 12 },
   primaryBtn: { backgroundColor: Colors.textPrimary, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center' },
+  primaryBtnDisabled: { opacity: 0.45 },
   primaryText: { color: Colors.background, fontSize: 16, fontFamily: Typography.family.semibold },
   switchRow: {
     marginTop: 14,

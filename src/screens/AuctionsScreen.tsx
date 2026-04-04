@@ -30,6 +30,9 @@ import { EmptyState } from '../components/EmptyState';
 import { useStore } from '../store/useStore';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useCurrencyContext } from '../context/CurrencyContext';
+import { SkeletonLoader } from '../components/SkeletonLoader';
+import { SyncStatusPill } from '../components/SyncStatusPill';
+import { SyncRetryBanner } from '../components/SyncRetryBanner';
 import {
   convertDisplayToGbpAmount,
   getSuggestedBidDisplayAmount,
@@ -70,6 +73,7 @@ export default function AuctionsScreen() {
   const [bidInput, setBidInput] = React.useState('');
   const [remoteAuctions, setRemoteAuctions] = React.useState<AuctionMarketItem[]>([]);
   const [isSyncingAuctions, setIsSyncingAuctions] = React.useState(false);
+  const [syncError, setSyncError] = React.useState<string | null>(null);
   const [isSubmittingBid, setIsSubmittingBid] = React.useState(false);
   const [buyNowAuctionId, setBuyNowAuctionId] = React.useState<string | null>(null);
 
@@ -91,7 +95,9 @@ export default function AuctionsScreen() {
         buyNowPrice: item.buyNowPriceGbp ?? undefined,
       }));
       setRemoteAuctions(mapped);
-    } catch {
+      setSyncError(null);
+    } catch (error) {
+      setSyncError((error as Error).message || 'Unable to sync auctions feed');
       // Keep local market state when backend sync is unavailable.
     } finally {
       setIsSyncingAuctions(false);
@@ -174,6 +180,41 @@ export default function AuctionsScreen() {
     const upcomingListingIds = new Set(upcomingAuctions.map((item) => item.listingId));
     return getFreshPosters(nowTs, 24, customPosters).filter((poster) => upcomingListingIds.has(poster.listingId));
   }, [customPosters, nowTs, upcomingAuctions]);
+
+  const marketStatus = React.useMemo(() => {
+    if (isSyncingAuctions) {
+      return {
+        tone: 'syncing' as const,
+        label: 'Syncing',
+      };
+    }
+
+    if (syncError) {
+      return {
+        tone: 'offline' as const,
+        label: 'Reconnecting',
+      };
+    }
+
+    if (remoteAuctions.length > 0) {
+      return {
+        tone: 'live' as const,
+        label: 'Live backend',
+      };
+    }
+
+    if (auctions.length > 0) {
+      return {
+        tone: 'offline' as const,
+        label: 'Local mode',
+      };
+    }
+
+    return {
+      tone: 'offline' as const,
+      label: 'No feed yet',
+    };
+  }, [auctions.length, isSyncingAuctions, remoteAuctions.length, syncError]);
 
   const openBidComposer = (auction: AuctionViewModel) => {
     const suggestedDisplayBid = getSuggestedBidDisplayAmount(
@@ -419,13 +460,40 @@ export default function AuctionsScreen() {
         </AnimatedPressable>
       </View>
 
+      {syncError ? (
+        <SyncRetryBanner
+          message="Live auction sync is delayed. Showing cached auction activity."
+          onRetry={() => void syncAuctions()}
+          isRetrying={isSyncingAuctions}
+          telemetryContext="auctions_market_sync"
+          containerStyle={styles.syncBanner}
+          actionStyle={styles.syncBannerBtn}
+        />
+      ) : null}
+
       {renderPosterAds()}
       {renderUpcomingStrip()}
 
       <View style={styles.sectionTitleRow}>
         <Text style={styles.sectionTitle}>Live Auctions</Text>
-        <Text style={styles.sectionHint}>{isSyncingAuctions ? 'Syncing backend...' : 'Auto-updates every second'}</Text>
+        <SyncStatusPill tone={marketStatus.tone} label={marketStatus.label} compact />
       </View>
+    </View>
+  );
+
+  const renderLoadingState = () => (
+    <View style={styles.loadingStateWrap}>
+      {Array.from({ length: 3 }).map((_, index) => (
+        <View key={`auction_loading_${index}`} style={styles.loadingCard}>
+          <SkeletonLoader width="100%" height={160} borderRadius={14} />
+          <View style={styles.loadingCardBody}>
+            <SkeletonLoader width="55%" height={14} borderRadius={7} />
+            <SkeletonLoader width="35%" height={11} borderRadius={6} style={{ marginTop: 8 }} />
+            <SkeletonLoader width="40%" height={18} borderRadius={9} style={{ marginTop: 12 }} />
+            <SkeletonLoader width="100%" height={5} borderRadius={4} style={{ marginTop: 10 }} />
+          </View>
+        </View>
+      ))}
     </View>
   );
 
@@ -572,11 +640,15 @@ export default function AuctionsScreen() {
         renderItem={renderLiveAuction}
         ListHeaderComponent={renderHeader}
         ListEmptyComponent={
-          <EmptyState
-            icon="hourglass-outline"
-            title="No live auctions right now"
-            subtitle="Upcoming auctions are listed above and open automatically when their 6-hour window begins."
-          />
+          isSyncingAuctions ? (
+            renderLoadingState()
+          ) : (
+            <EmptyState
+              icon="hourglass-outline"
+              title="No live auctions right now"
+              subtitle="Upcoming auctions are listed above and open automatically when their 6-hour window begins."
+            />
+          )
         }
         contentContainerStyle={styles.contentContainer}
         showsVerticalScrollIndicator={false}
@@ -685,6 +757,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: 'Inter_700Bold',
   },
+  syncBanner: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+    borderColor: PANEL_BORDER,
+    backgroundColor: IS_LIGHT ? '#f5ece2' : '#1a1a1a',
+  },
+  syncBannerBtn: {
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
+  },
   sectionWrap: {
     marginBottom: 14,
   },
@@ -780,6 +862,21 @@ const styles = StyleSheet.create({
   },
   liveSeparator: {
     height: 10,
+  },
+  loadingStateWrap: {
+    paddingHorizontal: 16,
+    gap: 10,
+  },
+  loadingCard: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
+    overflow: 'hidden',
+  },
+  loadingCardBody: {
+    paddingHorizontal: 12,
+    paddingVertical: 12,
   },
   liveCard: {
     marginHorizontal: 16,

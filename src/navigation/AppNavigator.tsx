@@ -44,8 +44,6 @@ import PostageScreen from '../screens/PostageScreen';
 import InviteFriendsScreen from '../screens/InviteFriendsScreen';
 import BalanceHistoryScreen from '../screens/BalanceHistoryScreen';
 
-// Phase 17 new screens
-import AddCardScreen from '../screens/AddCardScreen';
 import AddBankAccountScreen from '../screens/AddBankAccountScreen';
 import HelpSupportScreen from '../screens/HelpSupportScreen';
 
@@ -61,7 +59,6 @@ import CategoryTreeScreen from '../screens/CategoryTreeScreen';
 
 // Phase 24 new screens
 import GlobalSearchScreen from '../screens/GlobalSearchScreen';
-import AddAddressScreen from '../screens/AddAddressScreen';
 
 // Phase 25 new screens
 import FilterScreen from '../screens/FilterScreen';
@@ -127,7 +124,6 @@ export default function AppNavigator() {
       <Stack.Screen name="BalanceHistory" component={BalanceHistoryScreen} />
 
       {/* Phase 17 new screens */}
-      <Stack.Screen name="AddCard" component={AddCardScreen} />
       <Stack.Screen name="AddBankAccount" component={AddBankAccountScreen} />
       <Stack.Screen name="HelpSupport" component={HelpSupportScreen} />
 
@@ -143,7 +139,6 @@ export default function AppNavigator() {
       
       {/* Phase 24 new screens */}
       <Stack.Screen name="GlobalSearch" component={GlobalSearchScreen} />
-      <Stack.Screen name="AddAddress" component={AddAddressScreen} />
 
       {/* Phase 25 new screens */}
       <Stack.Screen name="Filter" component={FilterScreen} options={{ presentation: 'transparentModal', headerShown: false, cardOverlayEnabled: true, cardStyle: { backgroundColor: 'transparent' } }} />

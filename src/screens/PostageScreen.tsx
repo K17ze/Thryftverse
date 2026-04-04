@@ -5,11 +5,11 @@ import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   Switch,
   ScrollView,
   StatusBar
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';

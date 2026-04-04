@@ -29,7 +29,7 @@ export default function CategoryDetailScreen() {
   const { categoryId } = route.params || {};
   
   const category = MOCK_CATEGORIES.find((c) => c.id === categoryId) || MOCK_CATEGORIES[0];
-  // Filter listings based on the selected category instead of using dummy mock data
+  // Filter listings based on the selected category for the grid preview.
   const gridData = listings.filter(l => l.category.toLowerCase() === category.name.toLowerCase() || categoryId === 'cat1');
 
   return (
@@ -85,14 +85,14 @@ export default function CategoryDetailScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   header: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: 16 },
-  backBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#111', alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
+  backBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.card, alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
   hugeTitle: { fontSize: 34, fontFamily: 'Inter_700Bold', color: Colors.textPrimary, letterSpacing: -0.5 },
   content: { paddingBottom: 40 },
   chipsScroll: { paddingHorizontal: 20, gap: 8, paddingBottom: 24 },
-  chip: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, backgroundColor: '#111' },
+  chip: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, backgroundColor: Colors.card },
   chipText: { color: Colors.textPrimary, fontSize: 13, fontFamily: 'Inter_600SemiBold' },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: GRID_SPACING },
-  gridItem: { width: ITEM_SIZE, height: ITEM_SIZE * 1.25, backgroundColor: Colors.card, position: 'relative' },
+  gridItem: { width: ITEM_SIZE, height: ITEM_SIZE * 1.25, backgroundColor: Colors.card, position: 'relative', overflow: 'hidden' },
   gridImage: { width: '100%', height: '100%' },
   pricePill: { position: 'absolute', bottom: 6, left: 6, backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 6, paddingVertical: 4, borderRadius: 8 },
   priceText: { color: '#fff', fontSize: 11, fontFamily: 'Inter_700Bold' },

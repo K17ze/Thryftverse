@@ -5,13 +5,13 @@ import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   TextInput,
   ScrollView,
   StatusBar,
   KeyboardAvoidingView,
-  Platform
+  Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import Reanimated, { 
   SlideInRight, 
   SlideInLeft, 
@@ -72,6 +72,9 @@ const INITIAL_MESSAGES: Message[] = [
   },
 ];
 
+const CHAT_PARTNER_ID = 'u2';
+const CHAT_ORDER_ID = 'ord1';
+
 export default function ChatScreen({ navigation }: Props) {
   const [messages, setMessages] = useState<Message[]>(INITIAL_MESSAGES);
   const [input, setInput] = useState('');
@@ -82,6 +85,14 @@ export default function ChatScreen({ navigation }: Props) {
     if (!input.trim()) return;
     setMessages(prev => [...prev, { id: String(Date.now()), type: 'text', sender: 'me', text: input.trim() }]);
     setInput('');
+    setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
+  };
+
+  const handleAttachPhoto = () => {
+    setMessages(prev => [
+      ...prev,
+      { id: String(Date.now()), type: 'text', sender: 'me', text: 'Sent a photo.' },
+    ]);
     setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
   };
 
@@ -109,9 +120,9 @@ export default function ChatScreen({ navigation }: Props) {
         <Reanimated.View key={msg.id} entering={FadeIn.delay(200)} layout={Layout.springify()} style={styles.statusBlock}>
           <Text style={styles.statusTitle}>{lines[0]}</Text>
           <Text style={styles.statusBody}>{lines.slice(1).join('\n')}</Text>
-          {msg.id === 's2' && (
-            <AnimatedPressable><Text style={styles.tealLink}>Tracking information</Text></AnimatedPressable>
-          )}
+          <AnimatedPressable onPress={() => navigation.navigate('OrderDetail', { orderId: CHAT_ORDER_ID })}>
+            <Text style={styles.tealLink}>Tracking information</Text>
+          </AnimatedPressable>
         </Reanimated.View>
       );
     }
@@ -188,7 +199,10 @@ export default function ChatScreen({ navigation }: Props) {
           <Ionicons name="arrow-back" size={24} color={TEXT} />
         </AnimatedPressable>
         <Text style={styles.headerTitle}>mariefullery</Text>
-        <AnimatedPressable style={styles.headerIconBtn}>
+        <AnimatedPressable
+          style={styles.headerIconBtn}
+          onPress={() => navigation.navigate('UserProfile', { userId: CHAT_PARTNER_ID })}
+        >
           <Ionicons name="information-circle-outline" size={24} color={TEXT} />
         </AnimatedPressable>
       </View>
@@ -239,7 +253,7 @@ export default function ChatScreen({ navigation }: Props) {
         {/* Floating Input Row */}
         <View style={styles.inputContainer}>
           <View style={styles.inputFloatingPill}>
-            <AnimatedPressable style={styles.cameraBtn}>
+            <AnimatedPressable style={styles.cameraBtn} onPress={handleAttachPhoto}>
               <Ionicons name="camera-outline" size={22} color={MUTED} />
             </AnimatedPressable>
             <TextInput

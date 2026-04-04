@@ -127,7 +127,7 @@ function SortableItem({ id, index, total, photos, onReorder }: ItemProps) {
     <GestureDetector gesture={panGesture}>
       <Reanimated.View style={[styles.itemWrap, animatedStyle]}>
         <Image source={{ uri: id }} style={styles.image} />
-        {index === 0 && !isDragging.value && (
+        {index === 0 && (
           <View style={styles.coverBadge}>
             <Text style={styles.coverText}>COVER</Text>
           </View>

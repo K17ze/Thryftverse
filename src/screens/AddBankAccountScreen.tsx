@@ -5,13 +5,13 @@ import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   TextInput,
   ScrollView,
   StatusBar,
   KeyboardAvoidingView,
   Platform
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
@@ -25,10 +25,10 @@ type Props = StackScreenProps<RootStackParamList, 'AddBankAccount'>;
 
 const IS_LIGHT = ActiveTheme === 'light';
 const BG = Colors.background;
-const CARD = IS_LIGHT ? '#ffffff' : '#111111';
-const CARD_SOFT = IS_LIGHT ? '#f7f4ef' : '#151515';
-const BORDER = IS_LIGHT ? '#d8d1c6' : '#2a2a2a';
-const DIVIDER = IS_LIGHT ? '#e4ded3' : '#1c1c1c';
+const CARD = Colors.card;
+const CARD_SOFT = Colors.cardAlt;
+const BORDER = Colors.border;
+const DIVIDER = Colors.border;
 const MUTED = Colors.textMuted;
 const TEXT = Colors.textPrimary;
 const BRAND = IS_LIGHT ? '#2f251b' : '#e8dcc8';

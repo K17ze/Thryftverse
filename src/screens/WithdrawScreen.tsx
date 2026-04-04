@@ -39,6 +39,8 @@ export default function WithdrawScreen() {
 
   const numericAmountDisplay = Number(amount) || 0;
   const numericAmount = convertDisplayToGbpAmount(numericAmountDisplay, currencyCode, goldRates);
+  const exceedsBalance = numericAmount > availableBalance;
+  const canWithdraw = numericAmount > 0 && !exceedsBalance;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -67,6 +69,7 @@ export default function WithdrawScreen() {
             />
           </View>
           <Text style={styles.availableText}>Available: {formatFromFiat(availableBalance, 'GBP', { displayMode: 'fiat' })}</Text>
+          {exceedsBalance ? <Text style={styles.balanceError}>Entered amount exceeds available balance.</Text> : null}
 
           <Text style={styles.sectionTitle}>Transfer to</Text>
           <AnimatedPressable style={styles.bankCard} activeOpacity={0.8}>
@@ -92,10 +95,13 @@ export default function WithdrawScreen() {
         <View style={styles.footer}>
           <Text style={styles.feeText}>Withdrawals take 3-5 working days. No fees apply.</Text>
           <AnimatedPressable 
-            style={styles.primaryBtn} 
+            style={[styles.primaryBtn, !canWithdraw && styles.primaryBtnDisabled]} 
             activeOpacity={0.9} 
+            disabled={!canWithdraw}
             onPress={() => {
-              // Simulate success and return
+              if (!canWithdraw) {
+                return;
+              }
               navigation.goBack();
             }}
           >
@@ -109,7 +115,7 @@ export default function WithdrawScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, height: 56, borderBottomWidth: 1, borderBottomColor: '#1A1A1A' },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, height: 56, borderBottomWidth: 1, borderBottomColor: Colors.border },
   backBtn: { width: 44, height: 44, justifyContent: 'center', alignItems: 'flex-start' },
   headerTitle: { fontSize: 17, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary },
 
@@ -119,20 +125,22 @@ const styles = StyleSheet.create({
   currencySymbol: { fontSize: 44, fontFamily: 'Inter_700Bold', color: Colors.textPrimary, marginRight: 8 },
   amountInput: { fontSize: 56, fontFamily: 'Inter_700Bold', color: Colors.textPrimary, minWidth: 150 },
   availableText: { textAlign: 'center', fontSize: 14, fontFamily: 'Inter_500Medium', color: Colors.textSecondary, marginBottom: 40 },
+  balanceError: { textAlign: 'center', marginTop: -28, marginBottom: 24, fontSize: 12, fontFamily: 'Inter_600SemiBold', color: Colors.danger },
 
   sectionTitle: { fontSize: 13, fontFamily: 'Inter_600SemiBold', color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 12 },
 
-  bankCard: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#111', padding: 16, borderRadius: 16, marginBottom: 12 },
+  bankCard: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: Colors.card, padding: 16, borderRadius: 16, marginBottom: 12 },
   bankLeft: { flexDirection: 'row', alignItems: 'center', gap: 16 },
-  bankIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#222', alignItems: 'center', justifyContent: 'center' },
+  bankIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: Colors.cardAlt, alignItems: 'center', justifyContent: 'center' },
   bankName: { fontSize: 16, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary, marginBottom: 4 },
   bankDetails: { fontSize: 13, fontFamily: 'Inter_400Regular', color: Colors.textSecondary },
 
   addBankBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 12 },
   addBankText: { fontSize: 15, fontFamily: 'Inter_600SemiBold', color: Colors.accent },
 
-  footer: { paddingVertical: 20, borderTopWidth: 1, borderTopColor: '#1A1A1A', backgroundColor: Colors.background },
+  footer: { paddingVertical: 20, borderTopWidth: 1, borderTopColor: Colors.border, backgroundColor: Colors.background },
   feeText: { fontSize: 12, fontFamily: 'Inter_400Regular', color: Colors.textMuted, textAlign: 'center', marginBottom: 16 },
   primaryBtn: { backgroundColor: Colors.textPrimary, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center' },
+  primaryBtnDisabled: { opacity: 0.45 },
   primaryText: { color: Colors.background, fontSize: 16, fontFamily: 'Inter_700Bold' },
 });

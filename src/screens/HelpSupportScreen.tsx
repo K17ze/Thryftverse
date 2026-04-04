@@ -1,31 +1,32 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   ScrollView,
   StatusBar,
   TextInput,
   KeyboardAvoidingView,
   Platform,
-  Alert
+  Linking,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
+import { useToast } from '../context/ToastContext';
 
 type Props = StackScreenProps<RootStackParamList, 'HelpSupport'>;
 
 const IS_LIGHT = ActiveTheme === 'light';
 const TEAL = IS_LIGHT ? '#2f251b' : '#e8dcc8';
 const BG = Colors.background;
-const CARD = IS_LIGHT ? '#ffffff' : '#111111';
-const BORDER = IS_LIGHT ? '#d8d1c6' : '#1c1c1c';
+const CARD = Colors.card;
+const BORDER = Colors.border;
 const MUTED = Colors.textMuted;
 const TEXT = Colors.textPrimary;
 
@@ -33,6 +34,40 @@ export default function HelpSupportScreen({ navigation }: Props) {
   const { formatFromFiat } = useFormattedPrice();
   const [expanded, setExpanded] = useState<string | null>(null);
   const [message, setMessage] = useState('');
+  const scrollRef = useRef<ScrollView>(null);
+  const messageInputRef = useRef<TextInput>(null);
+  const { show } = useToast();
+
+  const handleOpenExternal = React.useCallback(async (url: string) => {
+    try {
+      await Linking.openURL(url);
+    } catch {
+      show('Unable to open link right now. Please try again.', 'error');
+    }
+  }, [show]);
+
+  const handleOpenLiveChat = React.useCallback(() => {
+    navigation.navigate('Chat', { conversationId: 'c1' });
+  }, [navigation]);
+
+  const handleOpenEmail = React.useCallback(() => {
+    void handleOpenExternal('mailto:support@thryftverse.com?subject=Thryftverse%20Support');
+  }, [handleOpenExternal]);
+
+  const handleOpenTickets = React.useCallback(() => {
+    scrollRef.current?.scrollTo({ y: 760, animated: true });
+    setTimeout(() => messageInputRef.current?.focus(), 220);
+    show('No open tickets. Start a new support message below.', 'info');
+  }, [show]);
+
+  const handleSendMessage = React.useCallback(() => {
+    if (!message.trim()) {
+      return;
+    }
+
+    setMessage('');
+    show('Support message sent. We usually reply within 2 hours.', 'success');
+  }, [message, show]);
 
   const fixedFeeLabel = formatFromFiat(0.7, 'GBP', { displayMode: 'fiat' });
   const faqs = React.useMemo(
@@ -72,13 +107,13 @@ export default function HelpSupportScreen({ navigation }: Props) {
         <View style={{ width: 24 }} />
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
+      <ScrollView ref={scrollRef} showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
         {/* Quick Actions */}
         <View style={styles.quickRow}>
           {[
-            { icon: 'chatbubble-outline', label: 'Live Chat', onPress: () => Alert.alert('Live Chat', 'Our chat support is available Mon–Fri, 9am–6pm.') },
-            { icon: 'mail-outline', label: 'Email Us', onPress: () => Alert.alert('Email Support', 'Email us at support@thryftverse.com') },
-            { icon: 'document-text-outline', label: 'My Tickets', onPress: () => Alert.alert('My Tickets', 'You have no open support tickets.') },
+            { icon: 'chatbubble-outline', label: 'Live Chat', onPress: handleOpenLiveChat },
+            { icon: 'mail-outline', label: 'Email Us', onPress: handleOpenEmail },
+            { icon: 'document-text-outline', label: 'My Tickets', onPress: handleOpenTickets },
           ].map(a => (
             <AnimatedPressable key={a.label} style={styles.quickBtn} onPress={a.onPress}>
               <View style={styles.quickIcon}>
@@ -117,6 +152,7 @@ export default function HelpSupportScreen({ navigation }: Props) {
         <Text style={styles.sectionLabel}>SEND A MESSAGE</Text>
         <View style={styles.contactCard}>
           <TextInput
+            ref={messageInputRef}
             style={styles.messageInput}
             value={message}
             onChangeText={setMessage}
@@ -130,7 +166,7 @@ export default function HelpSupportScreen({ navigation }: Props) {
           <AnimatedPressable
             style={[styles.sendBtn, !message.trim() && { opacity: 0.4 }]}
             disabled={!message.trim()}
-            onPress={() => setMessage('')}
+            onPress={handleSendMessage}
           >
             <Ionicons name="send" size={16} color={Colors.textInverse} />
             <Text style={styles.sendBtnText}>Send message</Text>
@@ -140,12 +176,12 @@ export default function HelpSupportScreen({ navigation }: Props) {
         {/* Links */}
         <View style={styles.linksCard}>
           {[
-            { icon: 'document-text-outline', label: 'Terms & Conditions' },
-            { icon: 'shield-checkmark-outline', label: 'Privacy Policy' },
-            { icon: 'globe-outline', label: 'Thryftverse Blog' },
+            { icon: 'document-text-outline', label: 'Terms & Conditions', url: 'https://thryftverse.app/terms' },
+            { icon: 'shield-checkmark-outline', label: 'Privacy Policy', url: 'https://thryftverse.app/privacy' },
+            { icon: 'globe-outline', label: 'Thryftverse Blog', url: 'https://thryftverse.app/blog' },
           ].map((l, idx) => (
             <View key={l.label}>
-              <AnimatedPressable style={styles.linkRow}>
+              <AnimatedPressable style={styles.linkRow} onPress={() => void handleOpenExternal(l.url)}>
                 <Ionicons name={l.icon as any} size={18} color={MUTED} />
                 <Text style={styles.linkText}>{l.label}</Text>
                 <Ionicons name="open-outline" size={14} color={MUTED} />

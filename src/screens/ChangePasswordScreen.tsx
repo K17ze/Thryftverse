@@ -7,6 +7,8 @@ import { ActiveTheme, Colors } from '../constants/colors';
 import { useToast } from '../context/ToastContext';
 import { AnimatedPressable } from '../components/AnimatedPressable';
 
+const FOOTER_BG = ActiveTheme === 'light' ? 'rgba(236, 234, 230, 0.96)' : 'rgba(10, 10, 10, 0.95)';
+
 export default function ChangePasswordScreen() {
   const navigation = useNavigation();
   const { show } = useToast();
@@ -117,7 +119,7 @@ export default function ChangePasswordScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 10, paddingBottom: 20, gap: 12 },
-  backBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#111', alignItems: 'center', justifyContent: 'center' },
+  backBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.card, alignItems: 'center', justifyContent: 'center' },
   hugeTitle: { fontSize: 28, fontFamily: 'Inter_700Bold', color: Colors.textPrimary, letterSpacing: -0.5 },
   content: { paddingHorizontal: 20, paddingBottom: 40 },
   
@@ -125,7 +127,7 @@ const styles = StyleSheet.create({
   
   inputGroup: { marginBottom: 20 },
   label: { fontSize: 13, fontFamily: 'Inter_600SemiBold', color: Colors.textSecondary, marginBottom: 8, marginLeft: 6, textTransform: 'uppercase', letterSpacing: 1 },
-  pillInput: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#111', borderRadius: 24, paddingHorizontal: 20, height: 56 },
+  pillInput: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: Colors.card, borderRadius: 24, paddingHorizontal: 20, height: 56 },
   inputText: { flex: 1, color: Colors.textPrimary, fontFamily: 'Inter_500Medium', fontSize: 16 },
   helperText: { fontSize: 11, fontFamily: 'Inter_400Regular', color: Colors.textMuted, marginLeft: 6, marginTop: 6 },
 
@@ -133,9 +135,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 16,
     paddingBottom: Platform.OS === 'ios' ? 34 : 24,
-    backgroundColor: 'rgba(10, 10, 10, 0.95)',
+    backgroundColor: FOOTER_BG,
     borderTopWidth: 1,
-    borderTopColor: '#1A1A1A',
+    borderTopColor: Colors.border,
   },
   saveBtn: {
     backgroundColor: Colors.accent,
@@ -145,7 +147,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   saveBtnText: {
-    color: '#000',
+    color: Colors.textInverse,
     fontSize: 16,
     fontFamily: 'Inter_700Bold',
   },

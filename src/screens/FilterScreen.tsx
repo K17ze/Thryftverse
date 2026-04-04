@@ -27,6 +27,10 @@ import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { RootStackParamList } from '../navigation/types';
 import { useStore } from '../store/useStore';
 import { useBackendData } from '../context/BackendDataContext';
+import { SyncStatusPill } from '../components/SyncStatusPill';
+import { SkeletonLoader } from '../components/SkeletonLoader';
+import { SyncRetryBanner } from '../components/SyncRetryBanner';
+import { getBackendSyncStatus } from '../utils/syncStatus';
 
 const { height, width } = Dimensions.get('window');
 const SNAP_HALF = height * 0.5;
@@ -69,7 +73,7 @@ export default function FilterScreen() {
   const route = useRoute<FilterRoute>();
   const browseFilters = useStore((state) => state.browseFilters);
   const updateBrowseFilters = useStore((state) => state.updateBrowseFilters);
-  const { listings } = useBackendData();
+  const { listings, source, isSyncing, lastError, refreshListings } = useBackendData();
 
   const categoryId = route.params?.categoryId ?? 'search';
   const title = route.params?.title;
@@ -79,6 +83,7 @@ export default function FilterScreen() {
   const [selectedBrands, setSelectedBrands] = useState<string[]>(browseFilters.brands);
   const [selectedSizes, setSelectedSizes] = useState<string[]>(browseFilters.sizes);
   const [selectedCondition, setSelectedCondition] = useState<ConditionOption>(browseFilters.condition);
+  const [showAllBrands, setShowAllBrands] = useState(false);
 
   const translateY = useSharedValue(height);
   const contextY = useSharedValue(0);
@@ -126,6 +131,75 @@ export default function FilterScreen() {
   const MOCK_BRANDS = ['Nike', 'Adidas', 'Stüssy', 'Carhartt', 'Arc\'teryx', 'Levi\'s', 'Off-White', 'Zara'];
   const MOCK_SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
   const MOCK_CONDITIONS: ConditionOption[] = ['Any', 'New with tags', 'Very good', 'Good', 'Satisfactory'];
+
+  const brandOptions = React.useMemo(() => {
+    const derived = Array.from(
+      new Set(
+        listings
+          .map((listing) => listing.brand?.trim())
+          .filter((brand): brand is string => Boolean(brand)),
+      ),
+    );
+
+    return derived.length > 0 ? derived : MOCK_BRANDS;
+  }, [listings]);
+
+  const visibleBrandOptions = React.useMemo(() => {
+    if (showAllBrands) {
+      return brandOptions;
+    }
+
+    return brandOptions.slice(0, 8);
+  }, [brandOptions, showAllBrands]);
+
+  const sizeOptions = React.useMemo(() => {
+    const derived = Array.from(
+      new Set(
+        listings
+          .map((listing) => listing.size?.trim())
+          .filter((size): size is string => Boolean(size)),
+      ),
+    );
+
+    return derived.length > 0 ? derived : MOCK_SIZES;
+  }, [listings]);
+
+  const filterStatus = React.useMemo(
+    () =>
+      getBackendSyncStatus({
+        isSyncing,
+        source,
+        hasError: Boolean(lastError),
+        labels: {
+          live: 'Live data',
+        },
+      }),
+    [isSyncing, lastError, source],
+  );
+
+  const showFilterLoadingState = isSyncing && source === 'mock' && listings.length === 0 && !lastError;
+
+  const renderLoadingState = () => (
+    <View style={styles.loadingStateWrap}>
+      <View style={styles.loadingSection}>
+        <SkeletonLoader width="32%" height={14} borderRadius={7} style={{ marginBottom: 12 }} />
+        <View style={styles.loadingChipRow}>
+          {Array.from({ length: 4 }).map((_, index) => (
+            <SkeletonLoader key={`filter_sort_loading_${index}`} width={120} height={42} borderRadius={21} />
+          ))}
+        </View>
+      </View>
+
+      <View style={styles.loadingSection}>
+        <SkeletonLoader width="24%" height={14} borderRadius={7} style={{ marginBottom: 12 }} />
+        <View style={styles.loadingChipWrap}>
+          {Array.from({ length: 8 }).map((_, index) => (
+            <SkeletonLoader key={`filter_brand_loading_${index}`} width={104} height={42} borderRadius={21} />
+          ))}
+        </View>
+      </View>
+    </View>
+  );
 
   const toggleBrand = (b: string) => {
     setSelectedBrands(prev => prev.includes(b) ? prev.filter(x => x !== b) : [...prev, b]);
@@ -202,6 +276,9 @@ export default function FilterScreen() {
     closeBottomSheet();
   };
 
+  const resultCount = getResultsCount();
+  const applyLabel = showFilterLoadingState ? 'Loading options...' : `Show ${resultCount} items`;
+
   return (
     <View style={styles.container}>
       <Reanimated.View style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }, overlayStyle]}>
@@ -222,87 +299,112 @@ export default function FilterScreen() {
             </AnimatedPressable>
           </View>
 
+          <View style={styles.statusRow}>
+            <Text style={styles.statusMeta}>{resultCount} matches currently</Text>
+            <SyncStatusPill tone={filterStatus.tone} label={filterStatus.label} compact />
+          </View>
+
+          {lastError ? (
+            <SyncRetryBanner
+              message="Live filter data is delayed. Showing cached catalog options."
+              onRetry={() => void refreshListings()}
+              isRetrying={isSyncing}
+              telemetryContext="filter_sync"
+              containerStyle={styles.syncRetryBanner}
+              actionStyle={styles.syncRetryBtn}
+            />
+          ) : null}
+
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-        
-        {/* Sort Section */}
-        <Text style={styles.sectionHeading}>Sort By</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.hScroll}>
-          {(['Recommended', 'Newest', 'Price: Low to High', 'Price: High to Low'] as SortOption[]).map((s) => (
-            <AnimatedPressable 
-              key={s} 
-              style={[styles.chip, activeSort === s && styles.chipActive]}
-              activeOpacity={0.8}
-              onPress={() => setActiveSort(s)}
-            >
-              <Text style={[styles.chipText, activeSort === s && styles.chipTextActive]}>{s}</Text>
-            </AnimatedPressable>
-          ))}
-        </ScrollView>
+            {showFilterLoadingState ? (
+              renderLoadingState()
+            ) : (
+              <>
+                {/* Sort Section */}
+                <Text style={styles.sectionHeading}>Sort By</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.hScroll}>
+                  {(['Recommended', 'Newest', 'Price: Low to High', 'Price: High to Low'] as SortOption[]).map((s) => (
+                    <AnimatedPressable 
+                      key={s} 
+                      style={[styles.chip, activeSort === s && styles.chipActive]}
+                      activeOpacity={0.8}
+                      onPress={() => setActiveSort(s)}
+                    >
+                      <Text style={[styles.chipText, activeSort === s && styles.chipTextActive]}>{s}</Text>
+                    </AnimatedPressable>
+                  ))}
+                </ScrollView>
 
-        <View style={styles.sectionDivider} />
+                <View style={styles.sectionDivider} />
 
-        {/* Brand Section */}
-        <View style={styles.sectionHeaderRow}>
-          <Text style={styles.sectionHeading}>Brand</Text>
-          <AnimatedPressable activeOpacity={0.7}><Text style={styles.seeAllText}>See all</Text></AnimatedPressable>
-        </View>
-        <View style={styles.wrapContainer}>
-          {MOCK_BRANDS.map(b => {
-            const isActive = selectedBrands.includes(b);
-            return (
-              <AnimatedPressable
-                key={b}
-                style={[styles.chip, isActive && styles.chipActive]}
-                activeOpacity={0.8}
-                onPress={() => toggleBrand(b)}
-              >
-                <Text style={[styles.chipText, isActive && styles.chipTextActive]}>{b}</Text>
-              </AnimatedPressable>
-            );
-          })}
-        </View>
+                {/* Brand Section */}
+                <View style={styles.sectionHeaderRow}>
+                  <Text style={styles.sectionHeading}>Brand</Text>
+                  {brandOptions.length > 8 ? (
+                    <AnimatedPressable activeOpacity={0.7} onPress={() => setShowAllBrands((current) => !current)}>
+                      <Text style={styles.seeAllText}>{showAllBrands ? 'Show less' : 'See all'}</Text>
+                    </AnimatedPressable>
+                  ) : null}
+                </View>
+                <View style={styles.wrapContainer}>
+                  {visibleBrandOptions.map(b => {
+                    const isActive = selectedBrands.includes(b);
+                    return (
+                      <AnimatedPressable
+                        key={b}
+                        style={[styles.chip, isActive && styles.chipActive]}
+                        activeOpacity={0.8}
+                        onPress={() => toggleBrand(b)}
+                      >
+                        <Text style={[styles.chipText, isActive && styles.chipTextActive]}>{b}</Text>
+                      </AnimatedPressable>
+                    );
+                  })}
+                </View>
 
-        <View style={styles.sectionDivider} />
+                <View style={styles.sectionDivider} />
 
-        {/* Size Section */}
-        <Text style={styles.sectionHeading}>Size</Text>
-        <View style={styles.wrapContainer}>
-          {MOCK_SIZES.map(s => {
-            const isActive = selectedSizes.includes(s);
-            return (
-              <AnimatedPressable
-                key={s}
-                style={[styles.chip, styles.sizeChip, isActive && styles.chipActive]}
-                activeOpacity={0.8}
-                onPress={() => toggleSize(s)}
-              >
-                <Text style={[styles.chipText, isActive && styles.chipTextActive]}>{s}</Text>
-              </AnimatedPressable>
-            );
-          })}
-        </View>
+                {/* Size Section */}
+                <Text style={styles.sectionHeading}>Size</Text>
+                <View style={styles.wrapContainer}>
+                  {sizeOptions.map(s => {
+                    const isActive = selectedSizes.includes(s);
+                    return (
+                      <AnimatedPressable
+                        key={s}
+                        style={[styles.chip, styles.sizeChip, isActive && styles.chipActive]}
+                        activeOpacity={0.8}
+                        onPress={() => toggleSize(s)}
+                      >
+                        <Text style={[styles.chipText, isActive && styles.chipTextActive]}>{s}</Text>
+                      </AnimatedPressable>
+                    );
+                  })}
+                </View>
 
-        <View style={styles.sectionDivider} />
+                <View style={styles.sectionDivider} />
 
-        {/* Condition Section */}
-        <Text style={styles.sectionHeading}>Condition</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.hScroll}>
-          {MOCK_CONDITIONS.map(c => (
-            <AnimatedPressable 
-              key={c} 
-              style={[styles.chip, selectedCondition === c && styles.chipActive]}
-              activeOpacity={0.8}
-              onPress={() => setSelectedCondition(c)}
-            >
-              <Text style={[styles.chipText, selectedCondition === c && styles.chipTextActive]}>{c}</Text>
-            </AnimatedPressable>
-          ))}
-        </ScrollView>
+                {/* Condition Section */}
+                <Text style={styles.sectionHeading}>Condition</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.hScroll}>
+                  {MOCK_CONDITIONS.map(c => (
+                    <AnimatedPressable 
+                      key={c} 
+                      style={[styles.chip, selectedCondition === c && styles.chipActive]}
+                      activeOpacity={0.8}
+                      onPress={() => setSelectedCondition(c)}
+                    >
+                      <Text style={[styles.chipText, selectedCondition === c && styles.chipTextActive]}>{c}</Text>
+                    </AnimatedPressable>
+                  ))}
+                </ScrollView>
+              </>
+            )}
 
             {/* Sticky Bottom Action */}
             <View style={styles.footer}>
-              <AnimatedPressable style={styles.applyBtn} onPress={handleApply} activeOpacity={0.9}>
-                <Text style={styles.applyBtnText}>Show {getResultsCount()} items</Text>
+              <AnimatedPressable style={[styles.applyBtn, showFilterLoadingState && styles.applyBtnDisabled]} onPress={handleApply} activeOpacity={0.9} disabled={showFilterLoadingState}>
+                <Text style={[styles.applyBtnText, showFilterLoadingState && styles.applyBtnTextDisabled]}>{applyLabel}</Text>
               </AnimatedPressable>
             </View>
           </ScrollView>
@@ -348,8 +450,45 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: 22, fontFamily: 'Inter_700Bold', color: Colors.textPrimary, letterSpacing: -0.5 },
   clearText: { color: '#e8dcc8', fontSize: 16, fontFamily: 'Inter_600SemiBold' },
+  statusRow: {
+    paddingHorizontal: 24,
+    paddingBottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  statusMeta: {
+    color: Colors.textMuted,
+    fontSize: 12,
+    fontFamily: 'Inter_500Medium',
+  },
+  syncRetryBanner: {
+    marginHorizontal: 24,
+    marginBottom: 10,
+    backgroundColor: 'rgba(26,26,26,0.95)',
+  },
+  syncRetryBtn: {
+    backgroundColor: '#111',
+  },
 
   scrollContent: { paddingTop: 10, paddingBottom: 40 },
+  loadingStateWrap: {
+    paddingHorizontal: 20,
+    gap: 22,
+  },
+  loadingSection: {
+    gap: 8,
+  },
+  loadingChipRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  loadingChipWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
   
   sectionHeading: {
     fontSize: 16,
@@ -415,10 +554,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  applyBtnDisabled: {
+    backgroundColor: '#333',
+  },
   applyBtnText: {
     color: Colors.background,
     fontSize: 18,
     fontFamily: 'Inter_700Bold',
     letterSpacing: -0.5,
+  },
+  applyBtnTextDisabled: {
+    color: Colors.textMuted,
   },
 });

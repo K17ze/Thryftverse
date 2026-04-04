@@ -20,6 +20,9 @@ import { useToast } from '../context/ToastContext';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { isCheckoutReady } from '../utils/checkoutFlow';
 import { useBackendData } from '../context/BackendDataContext';
+import { SyncStatusPill } from '../components/SyncStatusPill';
+import { AddCardSheet } from '../components/checkout/AddCardSheet';
+import { AddAddressSheet } from '../components/checkout/AddAddressSheet';
 import {
   createOrder,
   listUserAddresses,
@@ -29,7 +32,9 @@ import {
 
 type RouteT = RouteProp<RootStackParamList, 'Checkout'>;
 const IS_LIGHT = ActiveTheme === 'light';
+const BRAND = IS_LIGHT ? '#2f251b' : '#e8dcc8';
 const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111111';
+const PANEL_SOFT_BG = IS_LIGHT ? '#f7f4ef' : '#161616';
 const PANEL_BORDER = IS_LIGHT ? '#d8d1c6' : '#2a2a2a';
 const FOOTER_BG = IS_LIGHT ? 'rgba(236,234,230,0.97)' : 'rgba(10,10,10,0.95)';
 
@@ -45,6 +50,8 @@ export default function CheckoutScreen() {
   const savePaymentMethod = useStore((state) => state.savePaymentMethod);
   const [isHydratingCheckout, setIsHydratingCheckout] = useState(false);
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
+  const [addCardSheetVisible, setAddCardSheetVisible] = useState(false);
+  const [addAddressSheetVisible, setAddAddressSheetVisible] = useState(false);
   const { show } = useToast();
   const { formatFromFiat } = useFormattedPrice();
 
@@ -55,6 +62,34 @@ export default function CheckoutScreen() {
   const POSTAGE_FEE = 2.89;
   const TOTAL = item.price + PROTECTION_FEE + POSTAGE_FEE;
   const checkoutReady = isCheckoutReady(savedAddress, savedPaymentMethod);
+
+  const checkoutStatus = React.useMemo(() => {
+    if (isSubmittingPayment) {
+      return {
+        tone: 'syncing' as const,
+        label: 'Processing payment',
+      };
+    }
+
+    if (isHydratingCheckout) {
+      return {
+        tone: 'syncing' as const,
+        label: 'Syncing details',
+      };
+    }
+
+    if (checkoutReady) {
+      return {
+        tone: 'live' as const,
+        label: 'Ready to pay',
+      };
+    }
+
+    return {
+      tone: 'offline' as const,
+      label: 'Incomplete setup',
+    };
+  }, [checkoutReady, isHydratingCheckout, isSubmittingPayment]);
 
   useEffect(() => {
     let cancelled = false;
@@ -167,8 +202,33 @@ export default function CheckoutScreen() {
           </View>
         </View>
 
+        <View style={styles.readinessCard}>
+          <View style={styles.readinessTopRow}>
+            <Text style={styles.readinessTitle}>Checkout readiness</Text>
+            <SyncStatusPill tone={checkoutStatus.tone} label={checkoutStatus.label} compact />
+          </View>
+
+          <View style={styles.readinessChipsRow}>
+            <View style={[styles.readinessChip, savedAddress ? styles.readinessChipReady : styles.readinessChipPending]}>
+              <Text style={[styles.readinessChipText, savedAddress ? styles.readinessChipTextReady : styles.readinessChipTextPending]}>
+                Address
+              </Text>
+            </View>
+            <View style={[styles.readinessChip, savedPaymentMethod ? styles.readinessChipReady : styles.readinessChipPending]}>
+              <Text style={[styles.readinessChipText, savedPaymentMethod ? styles.readinessChipTextReady : styles.readinessChipTextPending]}>
+                Payment
+              </Text>
+            </View>
+            <View style={[styles.readinessChip, checkoutReady ? styles.readinessChipReady : styles.readinessChipPending]}>
+              <Text style={[styles.readinessChipText, checkoutReady ? styles.readinessChipTextReady : styles.readinessChipTextPending]}>
+                Confirm
+              </Text>
+            </View>
+          </View>
+        </View>
+
         <Text style={styles.sectionTitle}>Delivery</Text>
-        <AnimatedPressable style={styles.blockBtn} activeOpacity={0.8} onPress={() => navigation.navigate('AddAddress')}>
+        <AnimatedPressable style={styles.blockBtn} activeOpacity={0.8} onPress={() => setAddAddressSheetVisible(true)}>
           <View style={styles.blockLeft}>
             <Ionicons name="location-outline" size={24} color={Colors.textPrimary} />
             <View style={styles.blockTextCol}>
@@ -193,7 +253,7 @@ export default function CheckoutScreen() {
         </AnimatedPressable>
 
         <Text style={styles.sectionTitle}>Payment</Text>
-        <AnimatedPressable style={styles.blockBtn} activeOpacity={0.8} onPress={() => navigation.navigate('Payments')}>
+        <AnimatedPressable style={styles.blockBtn} activeOpacity={0.8} onPress={() => setAddCardSheetVisible(true)}>
           <View style={styles.blockLeft}>
             <Ionicons name="card-outline" size={24} color={Colors.textPrimary} />
             <View style={styles.blockTextCol}>
@@ -241,9 +301,12 @@ export default function CheckoutScreen() {
           onPress={handlePay}
           disabled={!checkoutReady || isSubmittingPayment}
         >
-          <Text style={styles.payBtnText}>{isSubmittingPayment ? 'Processing...' : 'Pay'}</Text>
+          <Text style={styles.payBtnText}>{isSubmittingPayment ? 'Processing...' : 'Pay securely'}</Text>
         </AnimatedPressable>
       </View>
+
+      <AddCardSheet visible={addCardSheetVisible} onDismiss={() => setAddCardSheetVisible(false)} />
+      <AddAddressSheet visible={addAddressSheetVisible} onDismiss={() => setAddAddressSheetVisible(false)} />
     </SafeAreaView>
   );
 }
@@ -292,6 +355,59 @@ const styles = StyleSheet.create({
   itemTitle: { fontSize: 16, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary, marginBottom: 4 },
   itemSeller: { fontSize: 13, fontFamily: 'Inter_400Regular', color: Colors.textSecondary, marginBottom: 4 },
   itemPrice: { fontSize: 15, fontFamily: 'Inter_700Bold', color: Colors.textPrimary },
+
+  readinessCard: {
+    backgroundColor: PANEL_BG,
+    borderWidth: 1,
+    borderColor: PANEL_BORDER,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 20,
+  },
+  readinessTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  readinessTitle: {
+    color: Colors.textPrimary,
+    fontSize: 13,
+    fontFamily: 'Inter_700Bold',
+  },
+  readinessChipsRow: {
+    marginTop: 10,
+    flexDirection: 'row',
+    gap: 8,
+  },
+  readinessChip: {
+    flex: 1,
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingVertical: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  readinessChipReady: {
+    backgroundColor: IS_LIGHT ? '#ece4d8' : '#1b2e23',
+    borderColor: IS_LIGHT ? '#cdbc9f' : '#335444',
+  },
+  readinessChipPending: {
+    backgroundColor: PANEL_SOFT_BG,
+    borderColor: PANEL_BORDER,
+  },
+  readinessChipText: {
+    fontSize: 11,
+    fontFamily: 'Inter_600SemiBold',
+    letterSpacing: 0.2,
+  },
+  readinessChipTextReady: {
+    color: BRAND,
+  },
+  readinessChipTextPending: {
+    color: Colors.textSecondary,
+  },
 
   sectionTitle: { fontSize: 13, fontFamily: 'Inter_600SemiBold', color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 12 },
 

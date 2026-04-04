@@ -5,7 +5,8 @@ import { View,
   Text,
   StyleSheet,
   ScrollView,
-  StatusBar
+  StatusBar,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -13,10 +14,15 @@ import { ActiveTheme, Colors } from '../constants/colors';
 import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
 import { useStore } from '../store/useStore';
-import { Alert } from 'react-native';
 import { CURRENCIES, SupportedCurrencyCode } from '../constants/currencies';
 import { useCurrencyPref } from '../hooks/useCurrencyPref';
 import { BottomSheetPicker } from '../components/BottomSheetPicker';
+import { useToast } from '../context/ToastContext';
+import {
+  LANGUAGE_OPTIONS,
+  SupportedLanguageOption,
+} from '../preferences/settingsPreferences';
+import { useSettingsPreferences } from '../context/SettingsPreferencesContext';
 import {
   getStoredThemePreference,
   getThemePreferenceLabel,
@@ -28,8 +34,8 @@ type Props = StackScreenProps<RootStackParamList, 'Settings'>;
 const TEAL = '#e8dcc8';
 const IS_LIGHT = ActiveTheme === 'light';
 const BRAND = IS_LIGHT ? '#2f251b' : TEAL;
-const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111';
-const PANEL_BORDER = IS_LIGHT ? '#d8d1c6' : '#1c1c1c';
+const PANEL_BG = Colors.card;
+const PANEL_BORDER = Colors.border;
 
 interface SettingItem {
   icon: string;
@@ -41,8 +47,18 @@ interface SettingItem {
 
 export default function SettingsScreen({ navigation }: Props) {
   const logout = useStore(state => state.logout);
+  const { show } = useToast();
+  const {
+    language: selectedLanguage,
+    emailNotificationsEnabled,
+    pushEnabledCount,
+    pushTotalCount,
+    setLanguage,
+    toggleEmailNotifications,
+  } = useSettingsPreferences();
   const [currencyPickerVisible, setCurrencyPickerVisible] = React.useState(false);
   const [themePickerVisible, setThemePickerVisible] = React.useState(false);
+  const [languagePickerVisible, setLanguagePickerVisible] = React.useState(false);
   const [themePreference, setThemePreference] = React.useState<ThemePreference>('system');
   const {
     currencyCode,
@@ -66,11 +82,13 @@ export default function SettingsScreen({ navigation }: Props) {
   );
 
   const themeOptions = React.useMemo(() => ['System', 'Light', 'Dark'], []);
+  const languageOptions = React.useMemo(() => [...LANGUAGE_OPTIONS], []);
 
   const selectedThemeOption = React.useMemo(
     () => themeOptions.find((option) => option.toLowerCase() === themePreference),
     [themeOptions, themePreference]
   );
+  const pushNotificationsSubtitle = `${pushEnabledCount}/${pushTotalCount} types enabled`;
 
   React.useEffect(() => {
     getStoredThemePreference().then(setThemePreference).catch(() => {
@@ -96,27 +114,61 @@ export default function SettingsScreen({ navigation }: Props) {
     const reloaded = await updateThemePreference(nextPreference, { reloadApp: true });
 
     if (!reloaded) {
-      Alert.alert('Theme updated', 'Please restart the app to fully apply this theme mode.');
+      show('Theme updated. Restart the app to fully apply this mode.', 'info');
     }
   };
 
-  const renderSettingRow = (item: SettingItem, isLast: boolean = false) => (
-    <AnimatedPressable
-      key={item.title}
-      style={[styles.settingRow, !isLast && styles.settingRowBorder]}
-      activeOpacity={0.7}
-      onPress={item.onPress}
-    >
-      <View style={[styles.iconSquare, { backgroundColor: item.color + '18', borderColor: item.color + '30' }]}>
-        <Ionicons name={item.icon as any} size={20} color={item.color} />
-      </View>
-      <View style={styles.settingTexts}>
-        <Text style={styles.settingTitle}>{item.title}</Text>
-        {item.subtitle && <Text style={styles.settingSubtitle}>{item.subtitle}</Text>}
-      </View>
-      <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
-    </AnimatedPressable>
-  );
+  const handleLanguageSelect = (option: string) => {
+    if (!LANGUAGE_OPTIONS.includes(option as SupportedLanguageOption)) {
+      return;
+    }
+
+    const nextLanguage = option as SupportedLanguageOption;
+
+    if (nextLanguage === selectedLanguage) {
+      return;
+    }
+
+    setLanguage(nextLanguage);
+    show('Language preference saved. Some content may still appear in English.', 'info');
+  };
+
+  const handleToggleEmailNotifications = React.useCallback(() => {
+    const next = !emailNotificationsEnabled;
+    toggleEmailNotifications();
+    show(next ? 'Email notifications enabled' : 'Email notifications paused', next ? 'success' : 'info');
+  }, [emailNotificationsEnabled, show, toggleEmailNotifications]);
+
+  const handleOpenExternal = React.useCallback(async (url: string) => {
+    try {
+      await Linking.openURL(url);
+    } catch {
+      show('Unable to open link. Please try again in a moment.', 'error');
+    }
+  }, [show]);
+
+  const renderSettingRow = (item: SettingItem, isLast: boolean = false) => {
+    const isInteractive = Boolean(item.onPress);
+
+    return (
+      <AnimatedPressable
+        key={item.title}
+        style={[styles.settingRow, !isLast && styles.settingRowBorder, !isInteractive && styles.settingRowDisabled]}
+        activeOpacity={0.7}
+        onPress={item.onPress}
+        disabled={!isInteractive}
+      >
+        <View style={[styles.iconSquare, { backgroundColor: item.color + '18', borderColor: item.color + '30' }]}>
+          <Ionicons name={item.icon as any} size={20} color={item.color} />
+        </View>
+        <View style={styles.settingTexts}>
+          <Text style={styles.settingTitle}>{item.title}</Text>
+          {item.subtitle && <Text style={styles.settingSubtitle}>{item.subtitle}</Text>}
+        </View>
+        {isInteractive ? <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} /> : null}
+      </AnimatedPressable>
+    );
+  };
 
   const accountItems: SettingItem[] = [
     { icon: 'person-outline', title: 'Profile Details', subtitle: 'Username, bio, location', color: TEAL, onPress: () => navigation.navigate('EditProfile') },
@@ -126,12 +178,30 @@ export default function SettingsScreen({ navigation }: Props) {
   ];
 
   const notifItems: SettingItem[] = [
-    { icon: 'notifications-outline', title: 'Push Notifications', subtitle: 'Messages, offers, wishlist', color: TEAL, onPress: () => navigation.navigate('PushNotifications') },
-    { icon: 'mail-outline', title: 'Email Notifications', subtitle: 'Newsletters and updates', color: '#64B5F6' },
+    {
+      icon: 'notifications-outline',
+      title: 'Push Notifications',
+      subtitle: pushNotificationsSubtitle,
+      color: TEAL,
+      onPress: () => navigation.navigate('PushNotifications'),
+    },
+    {
+      icon: 'mail-outline',
+      title: 'Email Notifications',
+      subtitle: emailNotificationsEnabled ? 'Enabled for newsletters and updates' : 'Paused',
+      color: '#64B5F6',
+      onPress: handleToggleEmailNotifications,
+    },
   ];
 
   const appItems: SettingItem[] = [
-    { icon: 'language-outline', title: 'Language', subtitle: 'English EN', color: '#FFD700', onPress: () => Alert.alert('Language', 'Language switching coming soon.') },
+    {
+      icon: 'language-outline',
+      title: 'Language',
+      subtitle: selectedLanguage,
+      color: '#FFD700',
+      onPress: () => setLanguagePickerVisible(true),
+    },
     {
       icon: 'swap-horizontal-outline',
       title: 'Currency Display',
@@ -157,8 +227,22 @@ export default function SettingsScreen({ navigation }: Props) {
 
   const supportItems: SettingItem[] = [
     { icon: 'help-circle-outline', title: 'Help Centre', subtitle: 'FAQs and support', color: TEAL, onPress: () => navigation.navigate('HelpSupport') },
-    { icon: 'document-text-outline', title: 'Terms & Conditions', color: '#a0a0a0', onPress: () => Alert.alert('Terms & Conditions', 'Opening terms...') },
-    { icon: 'shield-checkmark-outline', title: 'Privacy Policy', color: '#a0a0a0', onPress: () => Alert.alert('Privacy Policy', 'Opening privacy policy...') },
+    {
+      icon: 'document-text-outline',
+      title: 'Terms & Conditions',
+      color: '#a0a0a0',
+      onPress: () => {
+        void handleOpenExternal('https://thryftverse.app/terms');
+      },
+    },
+    {
+      icon: 'shield-checkmark-outline',
+      title: 'Privacy Policy',
+      color: '#a0a0a0',
+      onPress: () => {
+        void handleOpenExternal('https://thryftverse.app/privacy');
+      },
+    },
   ];
 
   return (
@@ -242,6 +326,15 @@ export default function SettingsScreen({ navigation }: Props) {
       />
 
       <BottomSheetPicker
+        visible={languagePickerVisible}
+        onClose={() => setLanguagePickerVisible(false)}
+        title="Language"
+        options={languageOptions}
+        selectedValue={selectedLanguage}
+        onSelect={handleLanguageSelect}
+      />
+
+      <BottomSheetPicker
         visible={themePickerVisible}
         onClose={() => setThemePickerVisible(false)}
         title="Theme Mode"
@@ -316,6 +409,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 16,
   },
+  settingRowDisabled: {
+    opacity: 0.72,
+  },
   settingRowBorder: {
     borderBottomWidth: 1,
     borderBottomColor: PANEL_BORDER,
@@ -337,7 +433,7 @@ const styles = StyleSheet.create({
 
   logoutPill: {
     marginTop: 32,
-    backgroundColor: '#1A0000',
+    backgroundColor: 'rgba(255, 60, 60, 0.08)',
     borderRadius: 20,
     paddingVertical: 16,
     alignItems: 'center',

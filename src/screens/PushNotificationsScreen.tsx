@@ -1,49 +1,59 @@
-import React, { useState } from 'react';
+import React from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
   Switch,
   ScrollView,
   StatusBar
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
 import { ActiveTheme, Colors } from '../constants/colors';
+import {
+  PUSH_NOTIFICATION_DEFINITIONS,
+} from '../preferences/settingsPreferences';
+import { useToast } from '../context/ToastContext';
+import { useSettingsPreferences } from '../context/SettingsPreferencesContext';
 
 type Props = StackScreenProps<RootStackParamList, 'PushNotifications'>;
 
 const IS_LIGHT = ActiveTheme === 'light';
 const TEAL = IS_LIGHT ? '#2f251b' : '#e8dcc8';
 const BG = Colors.background;
-const CARD = IS_LIGHT ? '#ffffff' : '#111111';
-const BORDER = IS_LIGHT ? '#d8d1c6' : '#1c1c1c';
+const CARD = Colors.card;
+const BORDER = Colors.border;
 const MUTED = Colors.textMuted;
 const TEXT = Colors.textPrimary;
 
-type NotifItem = { key: string; label: string; subtitle: string };
-
-const NOTIFICATIONS: NotifItem[] = [
-  { key: 'messages', label: 'New messages', subtitle: 'When someone sends you a message' },
-  { key: 'offers', label: 'Offers received', subtitle: 'When buyers make an offer on your item' },
-  { key: 'wishlist', label: 'Wishlist activity', subtitle: 'When someone likes your item' },
-  { key: 'followers', label: 'New followers', subtitle: 'When someone starts following you' },
-  { key: 'orderUpdates', label: 'Order updates', subtitle: 'Shipping and delivery status changes' },
-  { key: 'priceDrops', label: 'Price drops', subtitle: 'For items on your wishlist' },
-  { key: 'news', label: 'Thryftverse news', subtitle: 'Promotions, features and announcements' },
-];
+const NOTIFICATIONS = PUSH_NOTIFICATION_DEFINITIONS;
 
 export default function PushNotificationsScreen({ navigation }: Props) {
-  const [toggles, setToggles] = useState<Record<string, boolean>>(
-    Object.fromEntries(NOTIFICATIONS.map(n => [n.key, true]))
-  );
+  const { show } = useToast();
+  const {
+    pushNotificationToggles: toggles,
+    pushEnabledCount: enabledCount,
+    pushTotalCount,
+    setPushNotificationToggle,
+    setAllPushNotificationToggles,
+  } = useSettingsPreferences();
 
-  const toggle = (key: string) =>
-    setToggles(prev => ({ ...prev, [key]: !prev[key] }));
+  const toggle = (key: string) => {
+    setPushNotificationToggle(key, !toggles[key]);
+  };
+
+  const handleToggleAll = React.useCallback(() => {
+    const shouldEnableAll = enabledCount !== pushTotalCount;
+    setAllPushNotificationToggles(shouldEnableAll);
+    show(
+      shouldEnableAll ? 'All push notifications enabled' : 'All push notifications paused',
+      shouldEnableAll ? 'success' : 'info'
+    );
+  }, [enabledCount, pushTotalCount, setAllPushNotificationToggles, show]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -53,7 +63,13 @@ export default function PushNotificationsScreen({ navigation }: Props) {
           <Ionicons name="arrow-back" size={24} color={TEXT} />
         </AnimatedPressable>
         <Text style={styles.headerTitle}>Push notifications</Text>
-        <View style={{ width: 24 }} />
+        <AnimatedPressable onPress={handleToggleAll}>
+          <Ionicons
+            name={enabledCount === pushTotalCount ? 'notifications-off-outline' : 'notifications-outline'}
+            size={22}
+            color={TEXT}
+          />
+        </AnimatedPressable>
       </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -81,6 +97,7 @@ export default function PushNotificationsScreen({ navigation }: Props) {
         <Text style={styles.footerNote}>
           You can also manage push notifications from your device Settings app.
         </Text>
+        <Text style={styles.footerMeta}>{enabledCount}/{pushTotalCount} notification types enabled</Text>
       </ScrollView>
     </SafeAreaView>
   );
@@ -119,4 +136,5 @@ const styles = StyleSheet.create({
   rowSubtitle: { fontSize: 12, color: MUTED },
   divider: { height: 1, backgroundColor: BORDER, marginHorizontal: 18 },
   footerNote: { fontSize: 12, color: MUTED, textAlign: 'center', lineHeight: 18, paddingHorizontal: 10 },
+  footerMeta: { marginTop: 10, fontSize: 12, color: MUTED, textAlign: 'center' },
 });

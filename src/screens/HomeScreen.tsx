@@ -39,6 +39,10 @@ import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useBackendData } from '../context/BackendDataContext';
 import { AnimatedPressable } from '../components/AnimatedPressable';
 import { CachedImage } from '../components/CachedImage';
+import { SyncStatusPill } from '../components/SyncStatusPill';
+import { SyncRetryBanner } from '../components/SyncRetryBanner';
+import { SkeletonLoader } from '../components/SkeletonLoader';
+import { getBackendSyncStatus } from '../utils/syncStatus';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -114,7 +118,7 @@ export default function HomeScreen() {
   const hasSeenPoster = useStore(state => state.hasSeenPoster);
   const customPosters = useStore(state => state.customPosters);
   const { formatFromFiat } = useFormattedPrice();
-  const { listings, source, refreshListings } = useBackendData();
+  const { listings, source, isSyncing, lastError, refreshListings } = useBackendData();
   const [refreshing, setRefreshing] = useState(false);
 
   const scrollY = useSharedValue(0);
@@ -147,12 +151,24 @@ export default function HomeScreen() {
     [refreshing, customPosters]
   );
 
+  const feedStatus = React.useMemo(
+    () =>
+      getBackendSyncStatus({
+        isSyncing,
+        source,
+        hasError: Boolean(lastError),
+      }),
+    [isSyncing, lastError, source],
+  );
+
+  const showFeedLoadingSkeleton = isSyncing && source === 'mock' && !lastError;
+
   // ── Fresh Posters (Thryftverse editorial square cards) ──
   const renderPosters = () => (
     <View style={styles.postersContainer}>
       <View style={styles.postersHeaderRow}>
         <Text style={styles.postersTitle}>Fresh Posters</Text>
-        <Text style={styles.postersHint}>{source === 'api' ? 'Live API listings active' : 'Mock fallback active'}</Text>
+        <SyncStatusPill tone={feedStatus.tone} label={feedStatus.label} compact />
       </View>
 
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.postersScroll}>
@@ -215,6 +231,16 @@ export default function HomeScreen() {
           </AnimatedPressable>
         ))}
       </ScrollView>
+
+      {lastError ? (
+        <SyncRetryBanner
+          message="Live sync is unavailable. Showing cached items."
+          onRetry={() => void handleRefresh()}
+          isRetrying={isSyncing || refreshing}
+          telemetryContext="home_feed_sync"
+          containerStyle={styles.feedStatusBanner}
+        />
+      ) : null}
     </View>
   );
 
@@ -264,6 +290,8 @@ export default function HomeScreen() {
 
     return result;
   }, [fallbackListingId, listingById, listings]);
+
+  const feedGridData = showFeedLoadingSkeleton ? [] : EXPLORE_DATA;
 
   // ── Full-width editorial look card (Thryftverse original — shoppable outfit card) ──
   const renderEditorialCard = (look: FeedLook) => (
@@ -360,7 +388,7 @@ export default function HomeScreen() {
         style={styles.exploreItemBox}
       >
         <GestureDetector gesture={combinedGesture}>
-          <AnimatedPressable style={{ flex: 1 }} activeOpacity={0.9}>
+          <View style={{ flex: 1 }}>
             <CachedImage uri={item.cover} style={styles.exploreImage} contentFit="cover" />
 
             <View style={styles.exploreOverlay}>
@@ -388,7 +416,7 @@ export default function HomeScreen() {
             <Reanimated.View style={[StyleSheet.absoluteFill, { alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 5 }, bigHeartStyle]}>
               <Ionicons name="heart" size={50} color="#fff" style={{ shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 10 }} />
             </Reanimated.View>
-          </AnimatedPressable>
+          </View>
         </GestureDetector>
       </Reanimated.View>
     );
@@ -400,6 +428,16 @@ export default function HomeScreen() {
     }
     return <ExploreGridItem item={item} index={index} />;
   };
+
+  const renderExploreLoadingState = () => (
+    <View style={styles.exploreLoadingGrid}>
+      {Array.from({ length: 9 }).map((_, index) => (
+        <View key={`feed_loading_${index}`} style={styles.exploreLoadingItem}>
+          <SkeletonLoader width="100%" height={160} borderRadius={0} />
+        </View>
+      ))}
+    </View>
+  );
 
   const AnimatedFlatList = Reanimated.createAnimatedComponent(FlatList);
 
@@ -426,13 +464,14 @@ export default function HomeScreen() {
       <AnimatedFlatList
         ref={scrollRef}
         key="explore-grid-3"
-        data={EXPLORE_DATA}
+        data={feedGridData}
         keyExtractor={(item: any) => item.id}
         numColumns={3}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: 120 }}
         columnWrapperStyle={EXPLORE_DATA.length > 0 ? { gap: 2 } : undefined}
         ListHeaderComponent={renderPosters}
+        ListEmptyComponent={showFeedLoadingSkeleton ? renderExploreLoadingState : null}
         renderItem={renderExploreItem}
         onScroll={scrollHandler}
         scrollEventThrottle={16}
@@ -512,6 +551,11 @@ const styles = StyleSheet.create({
   postersScroll: {
     paddingHorizontal: 16,
     gap: 12,
+  },
+  feedStatusBanner: {
+    marginTop: 10,
+    marginHorizontal: 16,
+    marginBottom: 2,
   },
   posterCard: {
     width: 120,
@@ -668,6 +712,16 @@ const styles = StyleSheet.create({
     backgroundColor: PANEL_BG,
     marginBottom: 2,
     position: 'relative',
+    overflow: 'hidden',
+  },
+  exploreLoadingGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  exploreLoadingItem: {
+    width: (SCREEN_WIDTH - 4) / 3,
+    aspectRatio: 0.8,
+    marginBottom: 2,
   },
   exploreImage: {
     width: '100%',
@@ -717,6 +771,7 @@ const styles = StyleSheet.create({
   editorialImageWrap: {
     width: SCREEN_WIDTH,
     height: SCREEN_WIDTH * 0.75,
+    overflow: 'hidden',
   },
   editorialImage: {
     width: '100%',

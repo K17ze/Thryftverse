@@ -19,6 +19,7 @@ export default function ForgotPasswordScreen() {
   const [email, setEmail] = useState('');
   const [isSent, setIsSent] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const canSendReset = email.trim().length > 0;
 
   const handleReset = () => {
     const normalizedEmail = email.trim().toLowerCase();
@@ -84,7 +85,12 @@ export default function ForgotPasswordScreen() {
             {!!errorMsg && <Text style={styles.errorText}>{errorMsg}</Text>}
 
             <View style={styles.footer}>
-              <AnimatedPressable style={styles.primaryBtn} onPress={handleReset} activeOpacity={0.9}>
+              <AnimatedPressable
+                style={[styles.primaryBtn, !canSendReset && styles.primaryBtnDisabled]}
+                onPress={handleReset}
+                activeOpacity={0.9}
+                disabled={!canSendReset}
+              >
                 <Text style={styles.primaryText}>Send Reset Link</Text>
               </AnimatedPressable>
             </View>
@@ -99,7 +105,7 @@ export default function ForgotPasswordScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   header: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: 20 },
-  backBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#111', alignItems: 'center', justifyContent: 'center' },
+  backBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.card, alignItems: 'center', justifyContent: 'center' },
   
   content: { flex: 1, paddingHorizontal: 24, justifyContent: 'center' },
   title: { fontSize: 44, fontFamily: 'Inter_700Bold', color: Colors.textPrimary, lineHeight: 48, letterSpacing: -1, marginBottom: 20 },
@@ -111,7 +117,7 @@ const styles = StyleSheet.create({
   input: { 
     height: 56, 
     borderBottomWidth: 1, 
-    borderBottomColor: '#222', 
+    borderBottomColor: Colors.border, 
     color: Colors.textPrimary, 
     fontSize: 16, 
     fontFamily: 'Inter_400Regular' 
@@ -120,6 +126,7 @@ const styles = StyleSheet.create({
   footer: { paddingBottom: 40 },
   errorText: { color: Colors.danger, fontSize: 13, fontFamily: 'Inter_500Medium', marginBottom: 4 },
   primaryBtn: { backgroundColor: Colors.textPrimary, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', width: '100%', marginTop: 20 },
+  primaryBtnDisabled: { opacity: 0.45 },
   primaryText: { color: Colors.background, fontSize: 16, fontFamily: 'Inter_700Bold' },
 
   successState: {

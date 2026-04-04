@@ -11,6 +11,7 @@ import {
   FlatList,
   Share
 } from 'react-native';
+import { BlurView } from 'expo-blur';
 import { CachedImage } from '../components/CachedImage';
 import Reanimated, {
   useAnimatedScrollHandler,
@@ -33,7 +34,10 @@ import { AnimatedHeart } from '../components/AnimatedHeart';
 import { useToast } from '../context/ToastContext';
 import { useHaptic } from '../hooks/useHaptic';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
+import { SyncStatusPill } from '../components/SyncStatusPill';
+import { SyncRetryBanner } from '../components/SyncRetryBanner';
 import { useBackendData } from '../context/BackendDataContext';
+import { getBackendSyncStatus } from '../utils/syncStatus';
 
 const { width, height } = Dimensions.get('window');
 const IS_LIGHT = ActiveTheme === 'light';
@@ -50,17 +54,34 @@ export default function ItemDetailScreen() {
   
   const isFav = useStore(state => state.isWishlisted(route.params?.itemId));
   const toggleFav = useStore(state => state.toggleWishlist);
-  const { listings } = useBackendData();
+  const { listings, source, isSyncing, lastError, refreshListings } = useBackendData();
 
   const { itemId } = route.params || {};
   const fallbackItem = listings[0] || MOCK_LISTINGS[0];
   const item: Listing = listings.find(l => l.id === itemId) || fallbackItem;
+  const hasExactListing = React.useMemo(
+    () => (itemId ? listings.some((listing) => listing.id === itemId) : true),
+    [itemId, listings],
+  );
   const seller: User = MOCK_USERS.find(u => u.id === item.sellerId) || MOCK_USERS[0];
   const sellerItems = listings.filter(l => l.sellerId === seller.id && l.id !== item.id);
 
   const { show } = useToast();
   const haptic = useHaptic();
   const { formatFromFiat } = useFormattedPrice();
+
+  const detailStatus = React.useMemo(
+    () =>
+      getBackendSyncStatus({
+        isSyncing,
+        source,
+        hasError: Boolean(lastError),
+        labels: {
+          live: 'Live listing',
+        },
+      }),
+    [isSyncing, lastError, source],
+  );
 
   const handleToggleFav = () => {
     toggleFav(item.id);
@@ -85,8 +106,9 @@ export default function ItemDetailScreen() {
   });
 
   const heroStyle = useAnimatedStyle(() => {
-    const translateY = interpolate(scrollY.value, [-100, 0, height * 0.65], [-50, 0, height * 0.65 * 0.5], Extrapolation.CLAMP);
-    const scale = interpolate(scrollY.value, [-100, 0], [1.2, 1], Extrapolation.CLAMP);
+    const overscroll = Math.min(scrollY.value, 0);
+    const translateY = interpolate(overscroll, [-100, 0], [-50, 0], Extrapolation.CLAMP);
+    const scale = interpolate(overscroll, [-100, 0], [1.2, 1], Extrapolation.CLAMP);
     return {
       transform: [{ translateY }, { scale }],
     };
@@ -176,6 +198,27 @@ export default function ItemDetailScreen() {
           <Text style={styles.title}>{item.title}</Text>
           <Text style={styles.sizeCondition}>{item.size} • {item.condition}</Text>
 
+          <View style={styles.syncStatusCard}>
+            <View style={styles.syncStatusTopRow}>
+              <SyncStatusPill tone={detailStatus.tone} label={detailStatus.label} compact />
+            </View>
+            <Text style={styles.syncStatusHint}>
+              {lastError ? 'Live item updates are delayed. Displaying cached listing data.' : 'Listing details auto-refresh when backend data changes.'}
+            </Text>
+            {lastError ? (
+              <SyncRetryBanner
+                message="Pull latest listing changes now."
+                onRetry={() => void refreshListings()}
+                isRetrying={isSyncing}
+                telemetryContext="item_detail_listing_sync"
+                containerStyle={styles.syncRetryBanner}
+              />
+            ) : null}
+            {!hasExactListing && itemId ? (
+              <Text style={styles.syncFallbackHint}>This item is temporarily unavailable. Showing a nearby listing while reconnecting.</Text>
+            ) : null}
+          </View>
+
           <View style={styles.descriptionBox}>
             <Text style={styles.description}>{item.description}</Text>
             <Text style={styles.timePosted}>Posted 2 hours ago in {seller.location}</Text>
@@ -224,6 +267,7 @@ export default function ItemDetailScreen() {
       {/* ── Floating Buy Bar ── */}
       {!item.isSold && (
         <Reanimated.View style={[styles.floatingBuyBar, { paddingBottom: Math.max(insets.bottom, 20) }]}>
+          <BlurView intensity={85} tint={ActiveTheme === 'light' ? 'light' : 'dark'} style={StyleSheet.absoluteFillObject} />
           <AnimatedPressable
             style={styles.buyBtn}
             activeOpacity={0.9}
@@ -246,7 +290,13 @@ export default function ItemDetailScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  heroContainer: { width: width, height: height * 0.65, position: 'relative', backgroundColor: Colors.surface },
+  heroContainer: {
+    width: width,
+    height: height * 0.65,
+    position: 'relative',
+    backgroundColor: Colors.surface,
+    overflow: 'hidden',
+  },
   heroTopScrim: { position: 'absolute', top: 0, left: 0, right: 0, height: 132, backgroundColor: TOP_SCRIM_BG },
   heroImage: { width: width, height: '100%' },
   soldOverlay: { position: 'absolute', bottom: 32, left: 20, backgroundColor: Colors.success, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
@@ -260,6 +310,38 @@ const styles = StyleSheet.create({
   protectionText: { fontSize: 12, color: Colors.textSecondary, fontFamily: 'Inter_400Regular', marginBottom: 12 },
   title: { fontSize: 20, fontFamily: 'Inter_400Regular', color: Colors.textSecondary, marginBottom: 12, lineHeight: 28 },
   sizeCondition: { fontSize: 15, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary },
+  syncStatusCard: {
+    marginTop: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  syncStatusTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  syncStatusHint: {
+    marginTop: 8,
+    fontSize: 11,
+    lineHeight: 15,
+    color: Colors.textSecondary,
+    fontFamily: 'Inter_500Medium',
+  },
+  syncRetryBanner: {
+    marginTop: 10,
+  },
+  syncFallbackHint: {
+    marginTop: 8,
+    fontSize: 11,
+    lineHeight: 15,
+    color: Colors.textMuted,
+    fontFamily: 'Inter_500Medium',
+  },
   descriptionBox: { marginTop: 24, backgroundColor: PANEL_BG, borderWidth: 1, borderColor: PANEL_BORDER, padding: 20, borderRadius: 24 },
   description: { fontSize: 15, fontFamily: 'Inter_400Regular', color: Colors.textSecondary, lineHeight: 24 },
   timePosted: { fontSize: 12, fontFamily: 'Inter_500Medium', color: Colors.textMuted, marginTop: 12 },
@@ -289,8 +371,9 @@ const styles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 20,
     borderTopWidth: 1,
-    borderTopColor: PANEL_BORDER,
-    backgroundColor: FOOTER_BG,
+    borderTopColor: 'rgba(150,150,150,0.1)',
+    backgroundColor: 'transparent',
+    overflow: 'hidden',
   },
   buyBtn: {
     flex: 2,

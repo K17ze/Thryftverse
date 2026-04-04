@@ -14,13 +14,18 @@ import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { ActiveTheme, Colors } from '../constants/colors';
+import { useStore } from '../store/useStore';
+import { MY_USER } from '../data/mockData';
 
 export default function SignUpScreen() {
   const navigation = useNavigation<any>();
+  const login = useStore((state) => state.login);
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const canSubmit = username.trim().length > 0 && email.trim().length > 0 && password.length > 0 && !isSubmitting;
 
   const shakeOffset = useSharedValue(0);
 
@@ -39,6 +44,10 @@ export default function SignUpScreen() {
   }));
 
   const handleSignUp = () => {
+    if (isSubmitting) {
+      return;
+    }
+
     const normalizedUsername = username.trim();
     const normalizedEmail = email.trim().toLowerCase();
 
@@ -67,7 +76,8 @@ export default function SignUpScreen() {
     }
 
     setErrorMsg('');
-    // Navigate straight to MainTabs temporarily (dummy auth)
+    setIsSubmitting(true);
+    login({ ...MY_USER, username: normalizedUsername });
     navigation.replace('MainTabs');
   };
 
@@ -143,8 +153,13 @@ export default function SignUpScreen() {
           )}
 
           <Reanimated.View style={shakeStyle} layout={Layout.springify()}>
-            <AnimatedPressable style={styles.primaryBtn} onPress={handleSignUp} activeOpacity={0.9}>
-              <Text style={styles.primaryText}>Create Account</Text>
+            <AnimatedPressable
+              style={[styles.primaryBtn, !canSubmit && styles.primaryBtnDisabled]}
+              onPress={handleSignUp}
+              activeOpacity={0.9}
+              disabled={!canSubmit}
+            >
+              <Text style={styles.primaryText}>{isSubmitting ? 'Creating account...' : 'Create Account'}</Text>
             </AnimatedPressable>
           </Reanimated.View>
         </View>
@@ -177,5 +192,6 @@ const styles = StyleSheet.create({
   termsText: { fontSize: 12, fontFamily: 'Inter_400Regular', color: Colors.textMuted, textAlign: 'center', marginBottom: 20, lineHeight: 18 },
   errorText: { color: Colors.danger, fontSize: 13, fontFamily: 'Inter_500Medium', textAlign: 'center', marginBottom: 12 },
   primaryBtn: { backgroundColor: Colors.textPrimary, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center' },
+  primaryBtnDisabled: { opacity: 0.45 },
   primaryText: { color: Colors.background, fontSize: 16, fontFamily: 'Inter_700Bold' },
 });

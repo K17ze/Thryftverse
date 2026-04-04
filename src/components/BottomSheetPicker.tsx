@@ -29,6 +29,7 @@ interface Props {
 
 export function BottomSheetPicker({ visible, onClose, title, options, selectedValue, onSelect, searchable }: Props) {
   const [searchQuery, setSearchQuery] = useState('');
+  const [shouldRender, setShouldRender] = useState(visible);
   const translateY = useSharedValue(height);
   const contextY = useSharedValue(0);
 
@@ -37,12 +38,15 @@ export function BottomSheetPicker({ visible, onClose, title, options, selectedVa
 
   useEffect(() => {
     if (visible) {
+      setShouldRender(true);
       setSearchQuery('');
       translateY.value = withSpring(height * 0.4, { damping: 22, stiffness: 220 });
-    } else {
-      translateY.value = withTiming(height, { duration: 300 });
+    } else if (shouldRender) {
+      translateY.value = withTiming(height, { duration: 300 }, () => {
+        runOnJS(setShouldRender)(false);
+      });
     }
-  }, [visible]);
+  }, [shouldRender, visible]);
 
   const handleClose = () => {
     translateY.value = withTiming(height, { duration: 300 }, () => {
@@ -84,7 +88,9 @@ export function BottomSheetPicker({ visible, onClose, title, options, selectedVa
     };
   });
 
-  if (!visible && translateY.value === height) return null;
+  if (!shouldRender) {
+    return null;
+  }
 
   return (
     <View style={[StyleSheet.absoluteFill, { zIndex: 9999 }]} pointerEvents="box-none">

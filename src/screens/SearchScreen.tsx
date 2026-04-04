@@ -24,14 +24,19 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
 import { RefreshIndicator } from '../components/RefreshIndicator';
 import { EmptyState } from '../components/EmptyState';
+import { SyncStatusPill } from '../components/SyncStatusPill';
+import { SkeletonLoader } from '../components/SkeletonLoader';
+import { SyncRetryBanner } from '../components/SyncRetryBanner';
 import { useStore } from '../store/useStore';
 import { useBackendData } from '../context/BackendDataContext';
+import { getBackendSyncStatus } from '../utils/syncStatus';
+import { useToast } from '../context/ToastContext';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const TEAL = '#e8dcc8';
 const IS_LIGHT = ActiveTheme === 'light';
-const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111';
+const PANEL_BG = Colors.card;
 const PANEL_ALT = IS_LIGHT ? '#ece4d8' : '#1f1f1f';
 const BRAND = IS_LIGHT ? '#2f251b' : TEAL;
 
@@ -92,7 +97,25 @@ const SAVED_LOOKS: SavedLook[] = [
 ];
 
 // ── Look Card Component ──────────────────────────────────────
-function LookCard({ look, onPress }: { look: SavedLook; onPress: () => void }) {
+function LookCard({
+  look,
+  onPress,
+  onLikePress,
+  onCommentPress,
+  onSavePress,
+  isLiked,
+  isSaved,
+}: {
+  look: SavedLook;
+  onPress: () => void;
+  onLikePress: () => void;
+  onCommentPress: () => void;
+  onSavePress: () => void;
+  isLiked: boolean;
+  isSaved: boolean;
+}) {
+  const likeCount = look.likes + (isLiked ? 1 : 0);
+
   return (
     <AnimatedPressable style={lookStyles.card} onPress={onPress} activeOpacity={0.92}>
       {/* Cover Image */}
@@ -125,16 +148,34 @@ function LookCard({ look, onPress }: { look: SavedLook; onPress: () => void }) {
           <Text style={lookStyles.creatorName}>by @{look.creator.name}</Text>
         </View>
         <View style={lookStyles.statsRow}>
-          <AnimatedPressable style={lookStyles.statBtn}>
-            <Ionicons name="heart" size={18} color={BRAND} />
-            <Text style={lookStyles.statCount}>{look.likes}</Text>
+          <AnimatedPressable
+            style={lookStyles.statBtn}
+            onPress={(event) => {
+              event.stopPropagation();
+              onLikePress();
+            }}
+          >
+            <Ionicons name={isLiked ? 'heart' : 'heart-outline'} size={18} color={isLiked ? Colors.danger : BRAND} />
+            <Text style={lookStyles.statCount}>{likeCount}</Text>
           </AnimatedPressable>
-          <AnimatedPressable style={lookStyles.statBtn}>
+          <AnimatedPressable
+            style={lookStyles.statBtn}
+            onPress={(event) => {
+              event.stopPropagation();
+              onCommentPress();
+            }}
+          >
             <Ionicons name="chatbubble-outline" size={16} color={Colors.textSecondary} />
             <Text style={lookStyles.statCount}>{look.comments}</Text>
           </AnimatedPressable>
-          <AnimatedPressable style={lookStyles.statBtn}>
-            <Ionicons name="bookmark" size={16} color={BRAND} />
+          <AnimatedPressable
+            style={lookStyles.statBtn}
+            onPress={(event) => {
+              event.stopPropagation();
+              onSavePress();
+            }}
+          >
+            <Ionicons name={isSaved ? 'bookmark' : 'bookmark-outline'} size={16} color={isSaved ? BRAND : Colors.textSecondary} />
           </AnimatedPressable>
         </View>
       </View>
@@ -147,9 +188,14 @@ export default function SearchScreen() {
   const [activeTab, setActiveTab] = useState<'SAVED' | 'WISHLIST'>('SAVED');
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchFocused, setIsSearchFocused] = useState(false);
+  const [likedLooks, setLikedLooks] = useState<Record<string, boolean>>({});
+  const [savedLooksMap, setSavedLooksMap] = useState<Record<string, boolean>>(
+    () => Object.fromEntries(SAVED_LOOKS.map((look) => [look.id, look.saved]))
+  );
   const navigation = useNavigation<NavT>();
+  const { show } = useToast();
   const wishlistIds = useStore(state => state.wishlist);
-  const { listings, refreshListings } = useBackendData();
+  const { listings, source, isSyncing, lastError, refreshListings } = useBackendData();
 
   const [refreshing, setRefreshing] = useState(false);
   const scrollY = useSharedValue(0);
@@ -179,9 +225,72 @@ export default function SearchScreen() {
     !searchQuery || l.title.toLowerCase().includes(searchQuery.toLowerCase()) || l.brand?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const filteredLooks = SAVED_LOOKS.filter(l =>
+  const savedLooks = React.useMemo(
+    () => SAVED_LOOKS.filter((look) => savedLooksMap[look.id] ?? look.saved),
+    [savedLooksMap],
+  );
+
+  const filteredLooks = savedLooks.filter(l =>
     !searchQuery || l.title.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  const handleToggleLookLike = React.useCallback(
+    (look: SavedLook) => {
+      setLikedLooks((prev) => {
+        const nextLiked = !prev[look.id];
+        show(nextLiked ? 'Added to liked looks' : 'Removed from liked looks', 'info');
+        return {
+          ...prev,
+          [look.id]: nextLiked,
+        };
+      });
+    },
+    [show],
+  );
+
+  const handleToggleLookSave = React.useCallback(
+    (look: SavedLook) => {
+      setSavedLooksMap((prev) => {
+        const currentlySaved = prev[look.id] ?? look.saved;
+        const nextSaved = !currentlySaved;
+        show(nextSaved ? 'Look saved' : 'Look removed from saved', 'info');
+        return {
+          ...prev,
+          [look.id]: nextSaved,
+        };
+      });
+    },
+    [show],
+  );
+
+  const handleOpenLookComments = React.useCallback(
+    (look: SavedLook) => {
+      show(`Opening conversation about ${look.title}.`, 'info');
+      navigation.navigate('Chat', { conversationId: 'c1' });
+    },
+    [navigation, show],
+  );
+
+  const closetStatus = React.useMemo(
+    () =>
+      getBackendSyncStatus({
+        isSyncing,
+        source,
+        hasError: Boolean(lastError),
+        labels: {
+          live: 'Live closet',
+        },
+      }),
+    [isSyncing, lastError, source],
+  );
+
+  const showWishlistLoadingState =
+    activeTab === 'WISHLIST' &&
+    isSyncing &&
+    source === 'mock' &&
+    wishlistItems.length === 0 &&
+    !lastError &&
+    !searchQuery;
 
   const closetTabs = [
     { key: 'SAVED' as const, label: 'Saved', icon: 'layers-outline' as const },
@@ -191,6 +300,20 @@ export default function SearchScreen() {
   const resolveLookItemId = React.useCallback(
     (look: SavedLook) => look.items.find((entry) => listingIdSet.has(entry.id))?.id ?? listings[0]?.id,
     [listingIdSet, listings]
+  );
+
+  const renderWishlistLoadingState = () => (
+    <View style={styles.wishlistLoadingGrid}>
+      {Array.from({ length: 6 }).map((_, index) => (
+        <View key={`wishlist_loading_${index}`} style={styles.wishlistLoadingCard}>
+          <SkeletonLoader width="100%" height={190} borderRadius={14} />
+          <View style={styles.wishlistLoadingBody}>
+            <SkeletonLoader width="56%" height={13} borderRadius={6} />
+            <SkeletonLoader width="40%" height={11} borderRadius={6} style={{ marginTop: 7 }} />
+          </View>
+        </View>
+      ))}
+    </View>
   );
 
   return (
@@ -203,7 +326,10 @@ export default function SearchScreen() {
           <Text style={styles.hugeTitle}>Saved</Text>
         </View>
         <View style={styles.headerRight}>
-          <Text style={styles.itemCount}>{wishlistItems.length + SAVED_LOOKS.length} items</Text>
+          <Text style={styles.itemCount}>{wishlistItems.length + savedLooks.length} items</Text>
+          <View style={styles.headerStatusWrap}>
+            <SyncStatusPill tone={closetStatus.tone} label={closetStatus.label} compact />
+          </View>
         </View>
       </View>
 
@@ -255,6 +381,16 @@ export default function SearchScreen() {
         </View>
       </View>
 
+      {lastError ? (
+        <SyncRetryBanner
+          message="Live closet sync is delayed. Showing cached saved items."
+          onRetry={() => void refreshListings()}
+          isRetrying={isSyncing}
+          telemetryContext="search_saved_sync"
+          containerStyle={styles.syncRetryBanner}
+        />
+      ) : null}
+
       {/* ── Content ── */}
       <View style={{ flex: 1 }}>
         <RefreshIndicator scrollY={scrollY} isRefreshing={refreshing} topInset={20} />
@@ -282,12 +418,17 @@ export default function SearchScreen() {
                 <Reanimated.View entering={FadeInDown.delay(Math.min(index, 10) * 50).duration(400)}>
                   <LookCard
                     look={item}
+                    isLiked={Boolean(likedLooks[item.id])}
+                    isSaved={Boolean(savedLooksMap[item.id] ?? item.saved)}
                     onPress={() => {
                       const itemId = resolveLookItemId(item);
                       if (itemId) {
                         navigation.navigate('ItemDetail', { itemId });
                       }
                     }}
+                    onLikePress={() => handleToggleLookLike(item)}
+                    onCommentPress={() => handleOpenLookComments(item)}
+                    onSavePress={() => handleToggleLookSave(item)}
                   />
                 </Reanimated.View>
               )}
@@ -307,7 +448,9 @@ export default function SearchScreen() {
             />
           )
         ) : (
-          filteredWishlist.length > 0 ? (
+          showWishlistLoadingState ? (
+            renderWishlistLoadingState()
+          ) : filteredWishlist.length > 0 ? (
             <AnimatedFlatList
               key="wishlist-items"
               data={filteredWishlist}
@@ -486,6 +629,9 @@ const styles = StyleSheet.create({
     letterSpacing: 0.12,
     color: Colors.textSecondary,
   },
+  headerStatusWrap: {
+    marginTop: 7,
+  },
 
   // Search
   searchRow: { paddingHorizontal: 20, paddingBottom: 12 },
@@ -540,11 +686,35 @@ const styles = StyleSheet.create({
     backgroundColor: '#d4c5aa',
     color: Colors.background,
   },
+  syncRetryBanner: {
+    marginHorizontal: 20,
+    marginBottom: 12,
+  },
 
   // Lists
   listContent: { paddingHorizontal: 20, paddingBottom: 120 },
   gridContent: { paddingHorizontal: 16, paddingBottom: 120 },
   gridRow: { justifyContent: 'space-between' },
+  wishlistLoadingGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingBottom: 120,
+    rowGap: 16,
+  },
+  wishlistLoadingCard: {
+    width: (SCREEN_WIDTH - 44) / 2,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: PANEL_BG,
+    overflow: 'hidden',
+  },
+  wishlistLoadingBody: {
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+  },
 
   // Empty states
   emptyState: {

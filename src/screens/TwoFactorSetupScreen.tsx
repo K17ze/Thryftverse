@@ -19,12 +19,15 @@ import { useStore } from '../store/useStore';
 import { useToast } from '../context/ToastContext';
 
 type Props = StackScreenProps<RootStackParamList, 'TwoFactorSetup'>;
+const PANEL_BG = Colors.card;
+const PANEL_BORDER = Colors.border;
 
 export default function TwoFactorSetupScreen({ navigation }: Props) {
   const [code, setCode] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const setTwoFactorEnabled = useStore((state) => state.setTwoFactorEnabled);
   const { show } = useToast();
+  const canEnable = code.trim().length === 6;
 
   const handleEnable = () => {
     if (code.trim().length !== 6) {
@@ -83,7 +86,12 @@ export default function TwoFactorSetupScreen({ navigation }: Props) {
           <Text style={styles.secondaryBtnText}>I need a new code</Text>
         </AnimatedPressable>
 
-        <AnimatedPressable style={styles.primaryBtn} onPress={handleEnable} activeOpacity={0.9}>
+        <AnimatedPressable
+          style={[styles.primaryBtn, !canEnable && styles.primaryBtnDisabled]}
+          onPress={handleEnable}
+          activeOpacity={0.9}
+          disabled={!canEnable}
+        >
           <Text style={styles.primaryBtnText}>Enable 2FA</Text>
         </AnimatedPressable>
       </KeyboardAvoidingView>
@@ -105,7 +113,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: '#111',
+    backgroundColor: PANEL_BG,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -133,14 +141,14 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   qrCard: {
-    backgroundColor: '#111',
+    backgroundColor: PANEL_BG,
     borderRadius: 20,
     paddingVertical: 28,
     paddingHorizontal: 20,
     alignItems: 'center',
     marginBottom: 24,
     borderWidth: 1,
-    borderColor: '#1f1f1f',
+    borderColor: PANEL_BORDER,
   },
   qrHint: {
     marginTop: 16,
@@ -159,7 +167,7 @@ const styles = StyleSheet.create({
   input: {
     height: 56,
     borderBottomWidth: 1,
-    borderBottomColor: '#222',
+    borderBottomColor: Colors.border,
     color: Colors.textPrimary,
     fontSize: 24,
     fontFamily: 'Inter_700Bold',
@@ -190,6 +198,9 @@ const styles = StyleSheet.create({
     borderRadius: 28,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  primaryBtnDisabled: {
+    opacity: 0.45,
   },
   primaryBtnText: {
     color: Colors.background,
