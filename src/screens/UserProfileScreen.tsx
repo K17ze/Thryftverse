@@ -5,7 +5,8 @@ import {
   StyleSheet,
   ScrollView,
   StatusBar,
-  Dimensions
+  Dimensions,
+  Share,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -24,7 +25,7 @@ import { BottomSheet } from '../components/BottomSheet';
 import { AnimatedPressable } from '../components/AnimatedPressable';
 import { useStore } from '../store/useStore';
 import { ActiveTheme, Colors } from '../constants/colors';
-import { Listing } from '../data/mockData';
+import { Listing, MOCK_USERS, MY_USER } from '../data/mockData';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useBackendData } from '../context/BackendDataContext';
 
@@ -43,7 +44,7 @@ const { width } = Dimensions.get('window');
 const GRID_SPACING = 16;
 const ITEM_SIZE = (width - 40 - GRID_SPACING) / 2;
 const COVER_HEIGHT = 170;
-const COVER_IMAGE = 'https://images.unsplash.com/photo-1558618666-fcd25c85f82e?w=800&q=80';
+const COVER_IMAGE = 'https://picsum.photos/seed/profilecoverdefault/1200/800';
 
 type Tab = 'Listings' | 'Reviews' | 'About';
 
@@ -88,6 +89,29 @@ export default function UserProfileScreen({ navigation, route }: Props) {
     return !r.auto;
   });
 
+  const profileUser = React.useMemo(
+    () =>
+      route.params.isMe
+        ? MY_USER
+        : MOCK_USERS.find((candidate) => candidate.id === route.params.userId) ?? MY_USER,
+    [route.params.isMe, route.params.userId]
+  );
+
+  const displayUsername = route.params.isMe ? MY_USER.username : profileUser.username;
+  const displayHandle = `@${displayUsername}`;
+  const displayAvatar = route.params.isMe ? userAvatar || MY_USER.avatar : profileUser.avatar;
+  const displayCover = route.params.isMe
+    ? userCover || MY_USER.coverPhoto || COVER_IMAGE
+    : profileUser.coverPhoto || COVER_IMAGE;
+
+  const handleShare = React.useCallback(async () => {
+    try {
+      await Share.share({ message: `Check out ${displayHandle} on Thryftverse!` });
+    } catch {
+      // Ignore share cancellation errors.
+    }
+  }, [displayHandle]);
+
   const scrollY = useSharedValue(0);
   const scrollHandler = useAnimatedScrollHandler({
     onScroll: (e) => {
@@ -107,10 +131,10 @@ export default function UserProfileScreen({ navigation, route }: Props) {
     return { opacity, backgroundColor: BG };
   });
 
-  const renderItem = (item: Listing, index: number) => (
+  const renderItem = (item: Listing) => (
     <AnimatedPressable
       key={item.id}
-      style={[styles.gridItem, index % 2 === 0 ? { marginTop: 0 } : { marginTop: 24 }]}
+      style={styles.gridItem}
       activeOpacity={0.9}
       onPress={() => {
         if (route.params?.isMe) {
@@ -121,7 +145,11 @@ export default function UserProfileScreen({ navigation, route }: Props) {
       }}
     >
       <View style={styles.gridImageWrap}>
-        <CachedImage uri={item.images[0]} style={styles.gridImage} contentFit="cover" />
+        <CachedImage
+          uri={item.images[0] || `https://picsum.photos/seed/${item.id}/600/800`}
+          style={styles.gridImage}
+          contentFit="cover"
+        />
         <View style={styles.likeBtnPill}>
           <Ionicons name="heart-outline" size={14} color="#fff" />
         </View>
@@ -146,7 +174,7 @@ export default function UserProfileScreen({ navigation, route }: Props) {
       {/* Floating Translucent Header Layer */}
       <Reanimated.View style={[styles.floatingHeader, { paddingTop: insets.top }, headerOpacityStyle]}>
          <View style={{ flex: 1 }} />
-         <Text style={styles.floatingHeaderTitle}>mariefullery</Text>
+        <Text style={styles.floatingHeaderTitle}>{displayUsername}</Text>
          <View style={{ flex: 1 }} />
       </Reanimated.View>
       
@@ -165,7 +193,7 @@ export default function UserProfileScreen({ navigation, route }: Props) {
 
       {/* Cover photo with parallax */}
       <Reanimated.View style={[styles.coverWrap, coverStyle]}>
-        <CachedImage uri={userCover || COVER_IMAGE} style={styles.coverImage} contentFit="cover" priority="high" />
+        <CachedImage uri={displayCover} style={styles.coverImage} contentFit="cover" priority="high" />
         <View style={styles.coverGradient} />
       </Reanimated.View>
 
@@ -181,14 +209,11 @@ export default function UserProfileScreen({ navigation, route }: Props) {
         <View style={styles.profileHeader}>
           <View style={styles.heroRow}>
             <View style={[styles.avatarLarge, { overflow: 'hidden' }]}>
-              {route.params.isMe && userAvatar ? (
-                <CachedImage uri={userAvatar} style={{ width: '100%', height: '100%' }} contentFit="cover" />
-              ) : (
-                <Ionicons name="person" size={32} color={MUTED} />
-              )}
+              <CachedImage uri={displayAvatar} style={{ width: '100%', height: '100%' }} contentFit="cover" />
             </View>
             <View style={styles.heroInfo}>
-              <Text style={styles.heroUsername}>mariefullery</Text>
+              <Text style={styles.heroUsername}>{displayUsername}</Text>
+              <Text style={styles.heroHandle}>{displayHandle}</Text>
               <View style={styles.heroRatingRow}>
                 <StarRating rating={5} size={14} />
                 <Text style={styles.heroReviewCount}>(54 reviews)</Text>
@@ -198,30 +223,47 @@ export default function UserProfileScreen({ navigation, route }: Props) {
           
           <View style={styles.statsCard}>
             <View style={styles.statCol}>
-              <Text style={styles.statValue}>10</Text>
+              <Text style={styles.statValue}>{profileUser.followers}</Text>
               <Text style={styles.statLabel}>Followers</Text>
             </View>
             <View style={styles.statDivider} />
             <View style={styles.statCol}>
-              <Text style={styles.statValue}>0</Text>
+              <Text style={styles.statValue}>{profileUser.following}</Text>
               <Text style={styles.statLabel}>Following</Text>
             </View>
             <View style={styles.statDivider} />
             <View style={styles.statCol}>
-              <Text style={styles.statValue}>26</Text>
+              <Text style={styles.statValue}>{profileUser.listingCount}</Text>
               <Text style={styles.statLabel}>Active Items</Text>
             </View>
           </View>
 
-          <AnimatedPressable
-            style={[styles.followCta, following && styles.followCtaActive]}
-            onPress={() => setFollowing(p => !p)}
-            activeOpacity={0.85}
-          >
-            <Text style={[styles.followCtaText, following && styles.followCtaTextActive]}>
-              {following ? 'Following' : 'Follow user'}
-            </Text>
-          </AnimatedPressable>
+          <View style={styles.heroActionRow}>
+            <AnimatedPressable
+              style={[styles.heroActionPrimary, following && !route.params.isMe && styles.heroActionPrimaryActive]}
+              onPress={() => {
+                if (route.params.isMe) {
+                  navigation.navigate('EditProfile');
+                  return;
+                }
+
+                setFollowing((prev) => !prev);
+              }}
+              activeOpacity={0.85}
+            >
+              <Text style={[styles.heroActionPrimaryText, following && !route.params.isMe && styles.heroActionPrimaryTextActive]}>
+                {route.params.isMe ? 'Edit profile' : following ? 'Following' : 'Follow user'}
+              </Text>
+            </AnimatedPressable>
+
+            <AnimatedPressable style={styles.heroActionSecondary} onPress={handleShare} activeOpacity={0.85}>
+              <Text style={styles.heroActionSecondaryText}>Share profile</Text>
+            </AnimatedPressable>
+
+            <AnimatedPressable style={styles.heroActionIcon} onPress={() => setActionSheetVisible(true)} activeOpacity={0.85}>
+              <Ionicons name="ellipsis-horizontal" size={18} color={TEXT} />
+            </AnimatedPressable>
+          </View>
         </View>
 
         {/* Index 1: Sticky Tabs */}
@@ -248,8 +290,8 @@ export default function UserProfileScreen({ navigation, route }: Props) {
             <View style={styles.gridListContent}>
               {groupedListings.map((pair, rowIndex) => (
                 <View key={rowIndex} style={styles.rowWrapper}>
-                  {pair[0] && renderItem(pair[0], rowIndex * 2)}
-                  {pair[1] && renderItem(pair[1], rowIndex * 2 + 1)}
+                  {pair[0] && renderItem(pair[0])}
+                  {pair[1] && renderItem(pair[1])}
                 </View>
               ))}
             </View>
@@ -306,14 +348,10 @@ export default function UserProfileScreen({ navigation, route }: Props) {
           {activeTab === 'About' && (
             <View style={styles.aboutContent}>
               <View style={[styles.aboutBannerImage, { overflow: 'hidden' }]}>
-                {route.params.isMe && userCover ? (
-                  <CachedImage uri={userCover} style={{ width: '100%', height: '100%' }} contentFit="cover" />
-                ) : (
-                  <Ionicons name="image-outline" size={48} color={MUTED} />
-                )}
+                <CachedImage uri={displayCover} style={{ width: '100%', height: '100%' }} contentFit="cover" />
               </View>
               
-              <Text style={styles.aboutBigName}>mariefullery</Text>
+              <Text style={styles.aboutBigName}>{displayUsername}</Text>
               
               <View style={styles.aboutInfoCard}>
                 <Text style={styles.aboutSectionHeading}>Verified Details</Text>
@@ -331,27 +369,26 @@ export default function UserProfileScreen({ navigation, route }: Props) {
                 <Text style={styles.aboutSectionHeading}>Location & Activity</Text>
                 <View style={styles.aboutRow}>
                   <Ionicons name="location" size={20} color={MUTED} />
-                  <Text style={styles.aboutRowText}>South Elmsall, United Kingdom</Text>
+                  <Text style={styles.aboutRowText}>{profileUser.location}</Text>
                 </View>
                 <View style={styles.aboutRow}>
                   <Ionicons name="time" size={20} color={MUTED} />
-                  <Text style={styles.aboutRowText}>Last seen 2 hours ago</Text>
+                  <Text style={styles.aboutRowText}>Last seen {profileUser.lastSeen}</Text>
                 </View>
               </View>
-              
+
               <View style={{ height: 40 }} />
             </View>
           )}
         </View>
-
       </AnimatedScrollView>
 
       {/* Flagship Bottom Sheet Overrides */}
       <BottomSheet visible={actionSheetVisible} onDismiss={() => setActionSheetVisible(false)} snapPoint={0.3}>
         <View style={{ paddingVertical: 10 }}>
           <Text style={{ fontSize: 18, fontFamily: 'Inter_700Bold', color: TEXT, marginBottom: 20 }}>User Actions</Text>
-          
-          <AnimatedPressable 
+
+          <AnimatedPressable
             style={{ paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: BORDER, flexDirection: 'row', alignItems: 'center', gap: 12 }}
             onPress={() => {
               setActionSheetVisible(false);
@@ -362,7 +399,7 @@ export default function UserProfileScreen({ navigation, route }: Props) {
             <Text style={{ fontSize: 16, fontFamily: 'Inter_500Medium', color: TEXT }}>Report user</Text>
           </AnimatedPressable>
 
-          <AnimatedPressable 
+          <AnimatedPressable
             style={{ paddingVertical: 16, flexDirection: 'row', alignItems: 'center', gap: 12 }}
             onPress={() => {
               setActionSheetVisible(false);
@@ -442,6 +479,7 @@ const styles = StyleSheet.create({
   },
   heroInfo: { flex: 1 },
   heroUsername: { fontSize: 24, fontFamily: 'Inter_700Bold', color: TEXT, letterSpacing: -0.5, marginBottom: 6 },
+  heroHandle: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: MUTED, marginBottom: 7 },
   heroRatingRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   heroReviewCount: { fontSize: 14, fontFamily: 'Inter_500Medium', color: MUTED },
   
@@ -459,16 +497,60 @@ const styles = StyleSheet.create({
   statLabel: { fontSize: 12, fontFamily: 'Inter_500Medium', color: MUTED },
   statDivider: { width: 1, backgroundColor: BORDER },
   
-  followCta: {
-    backgroundColor: Colors.accent,
-    borderRadius: 30,
-    paddingVertical: 16,
+  heroActionRow: {
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 8,
+    marginBottom: 4,
   },
-  followCtaActive: { backgroundColor: CARD, borderWidth: 1, borderColor: BORDER },
-  followCtaText: { fontSize: 16, fontFamily: 'Inter_700Bold', color: Colors.textInverse },
-  followCtaTextActive: { color: TEXT },
-
+  heroActionPrimary: {
+    flex: 1,
+    backgroundColor: Colors.accent,
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroActionPrimaryActive: {
+    backgroundColor: CARD,
+    borderWidth: 1,
+    borderColor: BORDER,
+  },
+  heroActionPrimaryText: {
+    fontSize: 13,
+    fontFamily: 'Inter_700Bold',
+    color: Colors.textInverse,
+    letterSpacing: 0.15,
+  },
+  heroActionPrimaryTextActive: {
+    color: TEXT,
+  },
+  heroActionSecondary: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: BORDER,
+    backgroundColor: CARD,
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroActionSecondaryText: {
+    fontSize: 13,
+    fontFamily: 'Inter_700Bold',
+    color: TEXT,
+    letterSpacing: 0.15,
+  },
+  heroActionIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: BORDER,
+    backgroundColor: CARD,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   stickyTabWrapper: {
     backgroundColor: BG,
     paddingBottom: 16,
@@ -501,11 +583,11 @@ const styles = StyleSheet.create({
 
   // Grid / Listings
   gridListContent: { paddingHorizontal: 20 },
-  rowWrapper: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 32 },
+  rowWrapper: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 22 },
   gridItem: { width: ITEM_SIZE },
   gridImageWrap: {
     width: ITEM_SIZE,
-    height: ITEM_SIZE * 1.35,
+    height: ITEM_SIZE * 1.2,
     borderRadius: 16,
     overflow: 'hidden',
     backgroundColor: CARD,

@@ -1,15 +1,9 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { AnimatedPressable } from '../components/AnimatedPressable';
 import { View, Text, StyleSheet, StatusBar, LayoutChangeEvent } from 'react-native';
 import Reanimated, {
   useSharedValue,
   useAnimatedStyle,
-  withSpring,
-  withRepeat,
-  withSequence,
-  withTiming,
-  Easing,
-  FadeInDown,
 } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -38,6 +32,9 @@ export default function TradeHubScreen() {
   const { formatFromFiat } = useFormattedPrice();
   const [activeTab, setActiveTab] = React.useState<TradeHubTab>('AUCTIONS');
   const marketLedger = useStore((state) => state.marketLedger);
+  const customAuctions = useStore((state) => state.customAuctions);
+  const customSyndicates = useStore((state) => state.customSyndicates);
+  const syndicateRuntime = useStore((state) => state.syndicateRuntime);
 
   // ── Animated tab slider ──
   const tabLayouts = React.useRef<{ [key: string]: { x: number; width: number } }>({});
@@ -48,39 +45,22 @@ export default function TradeHubScreen() {
     const { x, width } = e.nativeEvent.layout;
     tabLayouts.current[tab] = { x, width };
     if (tab === activeTab) {
-      indicatorX.value = withSpring(x, { damping: 18, stiffness: 220 });
-      indicatorWidth.value = withSpring(width, { damping: 18, stiffness: 220 });
+      indicatorX.value = x;
+      indicatorWidth.value = width;
     }
   };
 
   React.useEffect(() => {
     const layout = tabLayouts.current[activeTab];
     if (layout) {
-      indicatorX.value = withSpring(layout.x, { damping: 18, stiffness: 220 });
-      indicatorWidth.value = withSpring(layout.width, { damping: 18, stiffness: 220 });
+      indicatorX.value = layout.x;
+      indicatorWidth.value = layout.width;
     }
   }, [activeTab, indicatorX, indicatorWidth]);
 
   const indicatorStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: indicatorX.value }],
     width: indicatorWidth.value,
-  }));
-
-  // ── Pulse dot for live ──
-  const pulseOpacity = useSharedValue(1);
-  useEffect(() => {
-    pulseOpacity.value = withRepeat(
-      withSequence(
-        withTiming(0.3, { duration: 750, easing: Easing.inOut(Easing.ease) }),
-        withTiming(1, { duration: 750, easing: Easing.inOut(Easing.ease) })
-      ),
-      -1,
-      true
-    );
-  }, [pulseOpacity]);
-
-  const pulseDotStyle = useAnimatedStyle(() => ({
-    opacity: pulseOpacity.value,
   }));
 
   const latestActivity = marketLedger[0];
@@ -103,6 +83,31 @@ export default function TradeHubScreen() {
     return `Bought ${units} unit${units === 1 ? '' : 's'} on ${latestActivity.referenceId}`;
   }, [formatFromFiat, latestActivity]);
 
+  const marketSnapshot = React.useMemo(() => {
+    const nowTs = Date.now();
+
+    const liveAuctions = customAuctions.filter((auction) => {
+      const startsAtMs = new Date(auction.startsAt).getTime();
+      const endsAtMs = new Date(auction.endsAt).getTime();
+      return startsAtMs <= nowTs && endsAtMs > nowTs;
+    }).length;
+
+    const openPools = customSyndicates.filter((asset) => asset.isOpen).length;
+
+    const holdingsValue = customSyndicates.reduce((sum, asset) => {
+      const runtime = syndicateRuntime[asset.id];
+      const units = runtime?.yourUnits ?? asset.yourUnits ?? 0;
+      const unitPrice = runtime?.unitPriceGBP ?? asset.unitPriceGBP;
+      return sum + units * unitPrice;
+    }, 0);
+
+    return {
+      liveAuctions,
+      openPools,
+      holdingsValue,
+    };
+  }, [customAuctions, customSyndicates, syndicateRuntime]);
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
@@ -110,10 +115,43 @@ export default function TradeHubScreen() {
       <View style={styles.headerWrap}>
         <View>
           <View style={styles.titleRow}>
-            <Reanimated.View style={[styles.liveDot, pulseDotStyle]} />
+            <View style={styles.liveDot} />
             <Text style={styles.headerTitle}>Trade Hub</Text>
             <Ionicons name="sparkles-outline" size={18} color={BRAND} />
           </View>
+          <Text style={styles.headerSubtitle}>Auctions + syndicated fractions in one tape</Text>
+        </View>
+
+        <AnimatedPressable
+          style={styles.ledgerShortcutBtn}
+          activeOpacity={0.9}
+          onPress={() => navigation.navigate('MarketLedger')}
+        >
+          <Ionicons name="pulse-outline" size={15} color={BRAND} />
+          <Text style={styles.ledgerShortcutText}>Ledger</Text>
+        </AnimatedPressable>
+      </View>
+
+      <View style={styles.snapshotCard}>
+        <View style={styles.snapshotMetric}>
+          <AnimatedCounter value={marketSnapshot.liveAuctions} style={styles.snapshotValue} duration={700} />
+          <Text style={styles.snapshotLabel}>Live auctions</Text>
+        </View>
+
+        <View style={styles.snapshotDivider} />
+
+        <View style={styles.snapshotMetric}>
+          <AnimatedCounter value={marketSnapshot.openPools} style={styles.snapshotValue} duration={700} />
+          <Text style={styles.snapshotLabel}>Open pools</Text>
+        </View>
+
+        <View style={styles.snapshotDivider} />
+
+        <View style={styles.snapshotMetricWide}>
+          <Text style={styles.snapshotValueMoney} numberOfLines={1}>
+            {formatFromFiat(marketSnapshot.holdingsValue, 'GBP', { displayMode: 'fiat' })}
+          </Text>
+          <Text style={styles.snapshotLabel}>Your syndicate value</Text>
         </View>
       </View>
 
@@ -155,7 +193,7 @@ export default function TradeHubScreen() {
       >
         <View style={styles.activityTopRow}>
           <View style={styles.activityLabelRow}>
-            <Reanimated.View style={[styles.tapeDot, pulseDotStyle]} />
+            <View style={styles.tapeDot} />
             <Text style={styles.activityLabel}>MARKET TAPE</Text>
           </View>
           <View style={styles.activityRightWrap}>
@@ -180,11 +218,12 @@ const styles = StyleSheet.create({
   },
   headerWrap: {
     paddingHorizontal: 16,
-    paddingTop: 10,
-    paddingBottom: 14,
+    paddingTop: 8,
+    paddingBottom: 10,
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 10,
   },
   headerLabelRow: {
     flexDirection: 'row',
@@ -211,15 +250,77 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     color: Colors.textPrimary,
-    fontSize: 31,
+    fontSize: 28,
     fontFamily: Typography.family.bold,
-    letterSpacing: -0.4,
+    letterSpacing: -0.3,
   },
   headerSubtitle: {
     marginTop: 4,
     color: Colors.textSecondary,
-    fontSize: 13,
+    fontSize: 12,
     fontFamily: Typography.family.medium,
+  },
+  ledgerShortcutBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  ledgerShortcutText: {
+    color: BRAND,
+    fontSize: 12,
+    fontFamily: Typography.family.semibold,
+    letterSpacing: 0.2,
+  },
+  snapshotCard: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: PANEL_BORDER_STRONG,
+    backgroundColor: PANEL_BG,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  snapshotMetric: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  snapshotMetricWide: {
+    flex: 1.3,
+    alignItems: 'center',
+  },
+  snapshotDivider: {
+    width: 1,
+    alignSelf: 'stretch',
+    backgroundColor: PANEL_BORDER,
+    marginHorizontal: 8,
+  },
+  snapshotValue: {
+    color: Colors.textPrimary,
+    fontSize: 20,
+    fontFamily: Typography.family.bold,
+  },
+  snapshotValueMoney: {
+    color: Colors.textPrimary,
+    fontSize: 15,
+    fontFamily: Typography.family.bold,
+    letterSpacing: -0.15,
+  },
+  snapshotLabel: {
+    marginTop: 2,
+    color: Colors.textMuted,
+    fontSize: 10,
+    fontFamily: Typography.family.medium,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
   },
 
   // Animated tab switcher

@@ -3,11 +3,7 @@ import { View, Text, StyleSheet, ScrollView, Dimensions, TextInput } from 'react
 import Reanimated, {
   useSharedValue,
   useAnimatedStyle,
-  withSpring,
-  withTiming,
   runOnJS,
-  interpolate,
-  Extrapolation
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
@@ -40,18 +36,16 @@ export function BottomSheetPicker({ visible, onClose, title, options, selectedVa
     if (visible) {
       setShouldRender(true);
       setSearchQuery('');
-      translateY.value = withSpring(height * 0.4, { damping: 22, stiffness: 220 });
+      translateY.value = height * 0.4;
     } else if (shouldRender) {
-      translateY.value = withTiming(height, { duration: 300 }, () => {
-        runOnJS(setShouldRender)(false);
-      });
+      translateY.value = height;
+      setShouldRender(false);
     }
   }, [shouldRender, visible]);
 
   const handleClose = () => {
-    translateY.value = withTiming(height, { duration: 300 }, () => {
-      runOnJS(onClose)();
-    });
+    translateY.value = height;
+    onClose();
   };
 
   const handleSelect = (val: string) => {
@@ -72,7 +66,7 @@ export function BottomSheetPicker({ visible, onClose, title, options, selectedVa
       } else if (translateY.value > height * 0.7) {
         runOnJS(handleClose)();
       } else {
-        translateY.value = withSpring(height * 0.4, { damping: 20, stiffness: 200 });
+        translateY.value = height * 0.4;
       }
     });
 
@@ -81,10 +75,9 @@ export function BottomSheetPicker({ visible, onClose, title, options, selectedVa
   }));
 
   const overlayStyle = useAnimatedStyle(() => {
-    const opacity = interpolate(translateY.value, [height * 0.4, height], [0.6, 0], Extrapolation.CLAMP);
     return {
-      opacity,
-      display: opacity === 0 && !visible ? 'none' : 'flex'
+      opacity: visible ? 0.6 : 0,
+      display: visible ? 'flex' : 'none',
     };
   });
 

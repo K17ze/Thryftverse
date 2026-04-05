@@ -131,7 +131,6 @@ export default function SettingsScreen({ navigation }: Props) {
     }
 
     setLanguage(nextLanguage);
-    show('Language preference saved. Some content may still appear in English.', 'info');
   };
 
   const handleToggleEmailNotifications = React.useCallback(() => {
@@ -176,6 +175,30 @@ export default function SettingsScreen({ navigation }: Props) {
     { icon: 'key-outline', title: 'Account Settings', subtitle: 'Email, password, security', color: '#FFD700', onPress: () => navigation.navigate('AccountSettings') },
     { icon: 'card-outline', title: 'Payments', subtitle: 'Cards and bank accounts', color: '#BB86FC', onPress: () => navigation.navigate('Payments') },
     { icon: 'cube-outline', title: 'Postage', subtitle: 'Default carrier and options', color: '#FF6B6B', onPress: () => navigation.navigate('Postage') },
+  ];
+
+  const profileHubItems: SettingItem[] = [
+    {
+      icon: 'person-circle-outline',
+      title: 'Account settings',
+      subtitle: 'Security and account access',
+      color: TEAL,
+      onPress: () => navigation.navigate('AccountSettings'),
+    },
+    {
+      icon: 'notifications-outline',
+      title: 'Notification controls',
+      subtitle: pushNotificationsSubtitle,
+      color: '#64B5F6',
+      onPress: () => navigation.navigate('PushNotifications'),
+    },
+    {
+      icon: 'color-palette-outline',
+      title: 'Theme and profile style',
+      subtitle: getThemePreferenceLabel(themePreference),
+      color: '#BB86FC',
+      onPress: () => navigation.navigate('Personalisation'),
+    },
   ];
 
   const notifItems: SettingItem[] = [
@@ -261,6 +284,15 @@ export default function SettingsScreen({ navigation }: Props) {
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+
+        {/* Profile Hub */}
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Profile Hub</Text>
+          <Text style={styles.sectionDesc}>Account, notifications, and profile style controls</Text>
+        </View>
+        <View style={styles.pillCard}>
+          {profileHubItems.map((item, i) => renderSettingRow(item, i === profileHubItems.length - 1))}
+        </View>
 
         {/* Account */}
         <View style={styles.sectionHeader}>

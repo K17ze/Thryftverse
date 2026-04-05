@@ -2,6 +2,7 @@ import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from 'node:cr
 import Fastify from 'fastify';
 import { z } from 'zod';
 import { config } from './config.js';
+import { ensureHeaderToken } from './lib/access.js';
 
 type KeyVersionState = {
   version: number;
@@ -113,13 +114,43 @@ function deriveKey(keyName: string, keyVersion: number): Buffer {
   return Buffer.isBuffer(derived) ? derived : Buffer.from(derived);
 }
 
-function ensureAdminToken(headerToken: string | undefined) {
-  if (!config.adminToken) {
-    return;
-  }
+function ensureAdminToken(headerToken: string | string[] | undefined) {
+  ensureHeaderToken(headerToken, config.adminToken, 'admin token');
+}
 
-  if (!headerToken || headerToken !== config.adminToken) {
-    throw new Error('Missing or invalid admin token');
+function ensureClientToken(headerToken: string | string[] | undefined) {
+  ensureHeaderToken(headerToken, config.clientToken, 'service token');
+}
+
+function requireClientToken(
+  request: { headers: Record<string, string | string[] | undefined> },
+  reply: { code: (statusCode: number) => unknown }
+): { ok: false; error: string } | null {
+  try {
+    ensureClientToken(request.headers['x-service-token']);
+    return null;
+  } catch (error) {
+    reply.code(401);
+    return {
+      ok: false,
+      error: (error as Error).message,
+    };
+  }
+}
+
+function requireAdminToken(
+  request: { headers: Record<string, string | string[] | undefined> },
+  reply: { code: (statusCode: number) => unknown }
+): { ok: false; error: string } | null {
+  try {
+    ensureAdminToken(request.headers['x-admin-token']);
+    return null;
+  } catch (error) {
+    reply.code(401);
+    return {
+      ok: false,
+      error: (error as Error).message,
+    };
   }
 }
 
@@ -154,6 +185,11 @@ app.get('/health', async () => {
 });
 
 app.post('/encrypt', async (request, reply) => {
+  const clientError = requireClientToken(request, reply);
+  if (clientError) {
+    return clientError;
+  }
+
   const payload = encryptSchema.parse(request.body);
 
   let state: KeyVersionState;
@@ -182,6 +218,11 @@ app.post('/encrypt', async (request, reply) => {
 });
 
 app.post('/decrypt', async (request, reply) => {
+  const clientError = requireClientToken(request, reply);
+  if (clientError) {
+    return clientError;
+  }
+
   const payload = decryptSchema.parse(request.body);
   let parsed: ParsedCiphertext;
 
@@ -223,7 +264,17 @@ app.post('/decrypt', async (request, reply) => {
 });
 
 app.post('/rewrap', async (request, reply) => {
+  const clientError = requireClientToken(request, reply);
+  if (clientError) {
+    return clientError;
+  }
+
   const payload = rewrapSchema.parse(request.body);
+
+  const adminError = requireAdminToken(request, reply);
+  if (adminError) {
+    return adminError;
+  }
 
   let parsed: ParsedCiphertext;
   try {
@@ -235,7 +286,6 @@ app.post('/rewrap', async (request, reply) => {
 
   let state: KeyVersionState;
   try {
-    ensureAdminToken(request.headers['x-admin-token'] as string | undefined);
     state = getStateForKey(parsed.keyName);
   } catch (error) {
     reply.code(400);
@@ -284,8 +334,17 @@ app.post('/keys/:keyName/rotate', async (request, reply) => {
 
   const { keyName } = schema.parse(request.params);
 
+  const clientError = requireClientToken(request, reply);
+  if (clientError) {
+    return clientError;
+  }
+
+  const adminError = requireAdminToken(request, reply);
+  if (adminError) {
+    return adminError;
+  }
+
   try {
-    ensureAdminToken(request.headers['x-admin-token'] as string | undefined);
     const state = getStateForKey(keyName);
     state.version += 1;
 

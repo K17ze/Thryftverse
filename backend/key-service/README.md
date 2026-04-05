@@ -11,10 +11,10 @@ This service isolates key custody and cryptographic operations from the API serv
 ## Endpoints
 
 - `GET /health`
-- `POST /encrypt`
-- `POST /decrypt`
-- `POST /rewrap` (admin token)
-- `POST /keys/:keyName/rotate` (optional admin token)
+- `POST /encrypt` (service token)
+- `POST /decrypt` (service token)
+- `POST /rewrap` (service token + admin token)
+- `POST /keys/:keyName/rotate` (service token + admin token)
 
 ## Environment
 
@@ -22,10 +22,12 @@ This service isolates key custody and cryptographic operations from the API serv
 - `KEY_SERVICE_MASTER_KEY_B64` (32-byte key in base64)
 - `KEY_SERVICE_ALLOWED_KEYS` (default: `profile,message,wallet`)
 - `KEY_SERVICE_DEFAULT_KEY_VERSION` (default: `1`)
-- `KEY_SERVICE_ADMIN_TOKEN` (optional)
+- `KEY_SERVICE_CLIENT_TOKEN` (required in production)
+- `KEY_SERVICE_ADMIN_TOKEN` (required in production)
 - `KEY_SERVICE_REGION`, `KEY_SERVICE_COUNTRY` (metadata for deployment and observability)
 
 ## Security notes
 
 - In production, `KEY_SERVICE_MASTER_KEY_B64` must be explicitly set.
+- Runtime crypto endpoints are restricted by `x-service-token` (`KEY_SERVICE_CLIENT_TOKEN`).
 - `POST /rewrap` and rotation should be restricted via `KEY_SERVICE_ADMIN_TOKEN`.

@@ -417,6 +417,26 @@ export default function SyndicateScreen() {
         <Text style={styles.heroSubtitle}>Tokenize. Split. Trade in 1ze.</Text>
       </View>
 
+      <View style={styles.heroQuickRow}>
+        <AnimatedPressable
+          style={styles.heroQuickChip}
+          activeOpacity={0.9}
+          onPress={() => navigation.navigate('AssetLeaderboard')}
+        >
+          <Ionicons name="trophy-outline" size={13} color={Colors.textSecondary} />
+          <Text style={styles.heroQuickText}>Leaderboard</Text>
+        </AnimatedPressable>
+
+        <AnimatedPressable
+          style={styles.heroQuickChip}
+          activeOpacity={0.9}
+          onPress={() => navigation.navigate('SyndicateOrderHistory')}
+        >
+          <Ionicons name="time-outline" size={13} color={Colors.textSecondary} />
+          <Text style={styles.heroQuickText}>Recent orders</Text>
+        </AnimatedPressable>
+      </View>
+
       <View style={styles.metricsRow}>
         <View style={styles.metricCard}>
           <Text style={styles.metricValue}>{marketAssets.length}</Text>
@@ -937,6 +957,31 @@ export default function SyndicateScreen() {
 const styles = StyleSheet.create({
   contentContainer: {
     paddingBottom: 130,
+  },
+  heroQuickRow: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+    flexDirection: 'row',
+    gap: 8,
+  },
+  heroQuickChip: {
+    flex: 1,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  heroQuickText: {
+    color: Colors.textSecondary,
+    fontSize: 11,
+    fontFamily: Typography.family.semibold,
+    letterSpacing: 0.2,
   },
   heroHeader: {
     paddingHorizontal: 16,

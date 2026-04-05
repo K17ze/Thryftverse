@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const AUTH_SESSION_STORAGE_KEY = 'thryftverse.auth.session.v1';
@@ -18,10 +19,43 @@ function normalizeBaseUrl(url: string) {
   return url.replace(/\/$/, '');
 }
 
+function extractHost(input: unknown) {
+  if (typeof input !== 'string' || input.trim().length === 0) {
+    return null;
+  }
+
+  const trimmed = input.trim();
+
+  const withoutScheme = trimmed.replace(/^[a-z]+:\/\//i, '');
+  const withoutPath = withoutScheme.split('/')[0];
+  const withoutPort = withoutPath.split(':')[0];
+
+  if (!withoutPort || withoutPort === 'localhost' || withoutPort === '127.0.0.1') {
+    return null;
+  }
+
+  return withoutPort;
+}
+
+function getExpoDevelopmentHost() {
+  const fromExpoConfig = (Constants.expoConfig as { hostUri?: string } | null)?.hostUri;
+  const fromManifest2 = (Constants as unknown as { manifest2?: { extra?: { expoClient?: { hostUri?: string } } } })
+    .manifest2?.extra?.expoClient?.hostUri;
+  const fromLegacyManifest = (Constants as unknown as { manifest?: { debuggerHost?: string } })
+    .manifest?.debuggerHost;
+
+  return extractHost(fromExpoConfig) ?? extractHost(fromManifest2) ?? extractHost(fromLegacyManifest);
+}
+
 export function getApiBaseUrl() {
   const configured = process.env.EXPO_PUBLIC_API_BASE_URL?.trim();
   if (configured) {
     return normalizeBaseUrl(configured);
+  }
+
+  const developmentHost = getExpoDevelopmentHost();
+  if (developmentHost) {
+    return `http://${developmentHost}:4000`;
   }
 
   if (Platform.OS === 'android') {

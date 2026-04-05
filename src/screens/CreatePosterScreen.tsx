@@ -113,7 +113,7 @@ export default function CreatePosterScreen() {
     setIsPickingImage(true);
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [4, 5],
         quality: 0.9,
@@ -123,6 +123,8 @@ export default function CreatePosterScreen() {
         setPosterImageUri(result.assets[0].uri);
         show('Poster image selected', 'success');
       }
+    } catch {
+      show('Unable to open gallery right now', 'error');
     } finally {
       setIsPickingImage(false);
     }
@@ -138,7 +140,7 @@ export default function CreatePosterScreen() {
     setIsPickingImage(true);
     try {
       const result = await ImagePicker.launchCameraAsync({
-        mediaTypes: ['images'],
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [4, 5],
         quality: 0.9,
@@ -148,6 +150,8 @@ export default function CreatePosterScreen() {
         setPosterImageUri(result.assets[0].uri);
         show('Poster image captured', 'success');
       }
+    } catch {
+      show('Unable to open camera right now', 'error');
     } finally {
       setIsPickingImage(false);
     }

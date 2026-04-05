@@ -1,12 +1,5 @@
 import React, { useEffect } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import Reanimated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withSpring,
-  withTiming,
-  runOnJS,
-} from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { useToast, ToastType } from '../context/ToastContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -27,28 +20,18 @@ interface ToastItemProps {
 
 function ToastItem({ id, message, type }: ToastItemProps) {
   const { dismiss } = useToast();
-  const translateY = useSharedValue(-80);
-  const opacity = useSharedValue(0);
   const config = TYPE_CONFIG[type];
 
   useEffect(() => {
-    translateY.value = withSpring(0, { damping: 18, stiffness: 200 });
-    opacity.value = withTiming(1, { duration: 200 });
-
     const timer = setTimeout(() => {
-      opacity.value = withTiming(0, { duration: 250 });
-      translateY.value = withSpring(-80, { damping: 15 }, () => runOnJS(dismiss)(id));
+      dismiss(id);
     }, 3200);
-    return () => clearTimeout(timer);
-  }, []);
 
-  const animStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: translateY.value }],
-    opacity: opacity.value,
-  }));
+    return () => clearTimeout(timer);
+  }, [dismiss, id]);
 
   return (
-    <Reanimated.View style={[styles.toast, { borderLeftColor: config.borderColor }, animStyle]}>
+    <View style={[styles.toast, { borderLeftColor: config.borderColor }]}>
       <Ionicons name={config.icon} size={20} color={config.iconColor} />
       <Text style={styles.message} numberOfLines={2}>{message}</Text>
       <AnimatedPressable
@@ -60,7 +43,7 @@ function ToastItem({ id, message, type }: ToastItemProps) {
       >
         <Ionicons name="close" size={16} color="#888" />
       </AnimatedPressable>
-    </Reanimated.View>
+    </View>
   );
 }
 

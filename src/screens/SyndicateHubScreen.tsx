@@ -36,6 +36,15 @@ export default function SyndicateHubScreen() {
   const [query, setQuery] = React.useState('');
   const [sortBy, setSortBy] = React.useState<HubSort>('value');
 
+  const handleBack = React.useCallback(() => {
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+
+    navigation.navigate('MainTabs');
+  }, [navigation]);
+
   const baseAssets = React.useMemo(() => getSyndicateMarket(customSyndicates), [customSyndicates]);
 
   const marketAssets = React.useMemo(
@@ -154,8 +163,24 @@ export default function SyndicateHubScreen() {
         keyExtractor={(item) => item.id}
         ListHeaderComponent={
           <View style={styles.headerBlock}>
+            <View style={styles.headerNavRow}>
+              <AnimatedPressable style={styles.backBtn} activeOpacity={0.84} onPress={handleBack}>
+                <Ionicons name="chevron-back" size={16} color={Colors.textPrimary} />
+                <Text style={styles.backBtnText}>Back</Text>
+              </AnimatedPressable>
+
+              <AnimatedPressable
+                style={styles.backBtn}
+                activeOpacity={0.84}
+                onPress={() => navigation.navigate('MarketLedger')}
+              >
+                <Ionicons name="pulse-outline" size={15} color={Colors.textPrimary} />
+                <Text style={styles.backBtnText}>Market Tape</Text>
+              </AnimatedPressable>
+            </View>
+
             <Text style={styles.headerLabel}>SYNDICATE MARKET</Text>
-            <Text style={styles.headerTitle}>Syndicate HUB</Text>
+            <Text style={styles.headerTitle}>Syndicate Hub</Text>
             <Text style={styles.headerSubtitle}>Tokenized fashion assets with live fractional trading.</Text>
 
             <View style={styles.searchWrap}>
@@ -254,6 +279,30 @@ const styles = StyleSheet.create({
   headerBlock: {
     paddingTop: 8,
     paddingBottom: 14,
+  },
+  headerNavRow: {
+    marginBottom: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
+  },
+  backBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#2d2d2d',
+    backgroundColor: '#161616',
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  backBtnText: {
+    color: Colors.textPrimary,
+    fontSize: 11,
+    fontFamily: 'Inter_700Bold',
+    letterSpacing: 0.3,
   },
   headerLabel: {
     color: '#e8dcc8',

@@ -7,7 +7,9 @@ import { View,
   TextInput,
   KeyboardAvoidingView,
   Platform,
-  StatusBar
+  StatusBar,
+  ScrollView,
+  Keyboard,
 } from 'react-native';
 import Reanimated, { useSharedValue, useAnimatedStyle, withSequence, withTiming, withSpring, FadeInUp, FadeOutUp, Layout } from 'react-native-reanimated';
 import { useNavigation } from '@react-navigation/native';
@@ -105,77 +107,97 @@ export default function LoginScreen() {
         )}
       </View>
 
-      <KeyboardAvoidingView 
-        style={styles.content} 
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      <KeyboardAvoidingView
+        style={styles.keyboardWrap}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
       >
-        <Text style={styles.title}>Welcome back</Text>
-        <Text style={styles.subtitle}>Log in to continue buying, selling, and trading.</Text>
-        
-        <View style={styles.form}>
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Email</Text>
-            <TextInput 
-              style={styles.input} 
-              placeholder="Enter your email" 
-              placeholderTextColor={Colors.textMuted}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              value={email}
-              onChangeText={setEmail}
-            />
+        <ScrollView
+          style={styles.content}
+          contentContainerStyle={styles.contentContainer}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          showsVerticalScrollIndicator={false}
+        >
+          <View>
+            <Text style={styles.title}>Welcome back</Text>
+            <Text style={styles.subtitle}>Log in to continue buying, selling, and trading.</Text>
+
+            <View style={styles.form}>
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Email</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter your email"
+                  placeholderTextColor={Colors.textMuted}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="next"
+                  value={email}
+                  onChangeText={setEmail}
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Password</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter your password"
+                  placeholderTextColor={Colors.textMuted}
+                  secureTextEntry
+                  returnKeyType="done"
+                  value={password}
+                  onChangeText={setPassword}
+                  onSubmitEditing={() => {
+                    Keyboard.dismiss();
+                    if (canSubmit) {
+                      void handleLogin();
+                    }
+                  }}
+                />
+              </View>
+
+              <AnimatedPressable
+                style={styles.forgotBtn}
+                onPress={() => navigation.navigate('ForgotPassword')}
+              >
+                <Text style={styles.forgotText}>Forgot password?</Text>
+              </AnimatedPressable>
+            </View>
           </View>
-          
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Password</Text>
-            <TextInput 
-              style={styles.input} 
-              placeholder="Enter your password" 
-              placeholderTextColor={Colors.textMuted}
-              secureTextEntry
-              value={password}
-              onChangeText={setPassword}
-            />
+
+          <View style={styles.footer}>
+            {!!errorMsg && (
+              <Reanimated.Text
+                entering={FadeInUp.springify().damping(20).duration(400)}
+                exiting={FadeOutUp}
+                layout={Layout.springify()}
+                style={styles.errorText}
+              >
+                {errorMsg}
+              </Reanimated.Text>
+            )}
+
+            <Reanimated.View style={shakeStyle} layout={Layout.springify()}>
+              <AnimatedPressable
+                style={[styles.primaryBtn, !canSubmit && styles.primaryBtnDisabled]}
+                onPress={handleLogin}
+                activeOpacity={0.9}
+                disabled={!canSubmit}
+              >
+                <Text style={styles.primaryText}>{isSubmitting ? 'Logging in...' : 'Log In'}</Text>
+              </AnimatedPressable>
+            </Reanimated.View>
+
+            <View style={styles.switchRow}>
+              <Text style={styles.switchText}>New to Thryftverse?</Text>
+              <AnimatedPressable onPress={() => navigation.navigate('SignUp')} activeOpacity={0.8}>
+                <Text style={styles.switchLink}>Create account</Text>
+              </AnimatedPressable>
+            </View>
           </View>
-
-          <AnimatedPressable 
-            style={styles.forgotBtn} 
-            onPress={() => navigation.navigate('ForgotPassword')}
-          >
-            <Text style={styles.forgotText}>Forgot password?</Text>
-          </AnimatedPressable>
-        </View>
-
-        <View style={styles.footer}>
-          {!!errorMsg && (
-            <Reanimated.Text 
-              entering={FadeInUp.springify().damping(20).duration(400)} 
-              exiting={FadeOutUp}
-              layout={Layout.springify()}
-              style={styles.errorText}
-            >
-              {errorMsg}
-            </Reanimated.Text>
-          )}
-
-          <Reanimated.View style={shakeStyle} layout={Layout.springify()}>
-            <AnimatedPressable
-              style={[styles.primaryBtn, !canSubmit && styles.primaryBtnDisabled]}
-              onPress={handleLogin}
-              activeOpacity={0.9}
-              disabled={!canSubmit}
-            >
-              <Text style={styles.primaryText}>{isSubmitting ? 'Logging in...' : 'Log In'}</Text>
-            </AnimatedPressable>
-          </Reanimated.View>
-
-          <View style={styles.switchRow}>
-            <Text style={styles.switchText}>New to Thryftverse?</Text>
-            <AnimatedPressable onPress={() => navigation.navigate('SignUp')} activeOpacity={0.8}>
-              <Text style={styles.switchLink}>Create account</Text>
-            </AnimatedPressable>
-          </View>
-        </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -187,7 +209,15 @@ const styles = StyleSheet.create({
   backBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: PANEL_BG, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: Colors.border },
   backBtnSpacer: { width: 44, height: 44 },
   
-  content: { flex: 1, paddingHorizontal: 24, paddingTop: 10 },
+  keyboardWrap: { flex: 1 },
+  content: { flex: 1 },
+  contentContainer: {
+    flexGrow: 1,
+    justifyContent: 'space-between',
+    paddingHorizontal: 24,
+    paddingTop: 10,
+    paddingBottom: 24,
+  },
   title: { fontSize: 34, fontFamily: Typography.family.bold, color: Colors.textPrimary, lineHeight: 38, letterSpacing: -0.7 },
   subtitle: { marginTop: 8, fontSize: 14, lineHeight: 20, color: Colors.textSecondary, fontFamily: Typography.family.regular, marginBottom: 24 },
   
@@ -209,7 +239,7 @@ const styles = StyleSheet.create({
   forgotBtn: { alignSelf: 'flex-start', marginTop: 8 },
   forgotText: { color: Colors.textSecondary, fontSize: 14, fontFamily: Typography.family.medium, textDecorationLine: 'underline' },
   
-  footer: { paddingBottom: 24, position: 'relative' },
+  footer: { paddingTop: 8, position: 'relative' },
   errorText: { color: Colors.danger, fontSize: 13, fontFamily: Typography.family.medium, textAlign: 'center', marginBottom: 12 },
   primaryBtn: { backgroundColor: Colors.textPrimary, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center' },
   primaryBtnDisabled: { opacity: 0.45 },

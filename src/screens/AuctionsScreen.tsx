@@ -451,6 +451,16 @@ export default function AuctionsScreen() {
 
   const renderHeader = () => (
     <View>
+      <View style={styles.heroCard}>
+        <View style={styles.heroTitleRow}>
+          <Ionicons name="flash-outline" size={16} color={BRAND} />
+          <Text style={styles.heroTitle}>Auctions Arena</Text>
+        </View>
+        <Text style={styles.heroSubtitle}>
+          Timed 6-hour drops with live bids, instant buyouts, and transparent market tape settlement.
+        </Text>
+      </View>
+
       <View style={styles.metricsRow}>
         <View style={styles.metricCard}>
           <Text style={styles.metricValue}>{liveAuctions.length}</Text>
@@ -698,6 +708,34 @@ export default function AuctionsScreen() {
 const styles = StyleSheet.create({
   contentContainer: {
     paddingBottom: 130,
+  },
+  heroCard: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: PANEL_BORDER_STRONG,
+    backgroundColor: PANEL_TINT_BG,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  heroTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  heroTitle: {
+    color: Colors.textPrimary,
+    fontSize: 14,
+    fontFamily: 'Inter_700Bold',
+    letterSpacing: 0.15,
+  },
+  heroSubtitle: {
+    marginTop: 6,
+    color: Colors.textSecondary,
+    fontSize: 12,
+    lineHeight: 17,
+    fontFamily: 'Inter_500Medium',
   },
   metricsRow: {
     flexDirection: 'row',

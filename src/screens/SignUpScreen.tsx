@@ -7,7 +7,9 @@ import { View,
   TextInput,
   KeyboardAvoidingView,
   Platform,
-  StatusBar
+  StatusBar,
+  ScrollView,
+  Keyboard,
 } from 'react-native';
 import Reanimated, { useSharedValue, useAnimatedStyle, withSequence, withTiming, withSpring, FadeInUp, FadeOutUp, Layout } from 'react-native-reanimated';
 import { useNavigation } from '@react-navigation/native';
@@ -105,78 +107,100 @@ export default function SignUpScreen() {
         </AnimatedPressable>
       </View>
 
-      <KeyboardAvoidingView 
-        style={styles.content} 
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      <KeyboardAvoidingView
+        style={styles.keyboardWrap}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
       >
-        <Text style={styles.title}>Join{'\n'}the movement.</Text>
-        
-        <View style={styles.form}>
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Username</Text>
-            <TextInput 
-              style={styles.input} 
-              placeholder="Pick a unique username" 
-              placeholderTextColor={Colors.textMuted}
-              autoCapitalize="none"
-              value={username}
-              onChangeText={setUsername}
-            />
+        <ScrollView
+          style={styles.content}
+          contentContainerStyle={styles.contentContainer}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
+          showsVerticalScrollIndicator={false}
+        >
+          <View>
+            <Text style={styles.title}>Join{'\n'}the movement.</Text>
+
+            <View style={styles.form}>
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Username</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Pick a unique username"
+                  placeholderTextColor={Colors.textMuted}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="next"
+                  value={username}
+                  onChangeText={setUsername}
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Email</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter your email"
+                  placeholderTextColor={Colors.textMuted}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="next"
+                  value={email}
+                  onChangeText={setEmail}
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.label}>Password</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Create a password"
+                  placeholderTextColor={Colors.textMuted}
+                  secureTextEntry
+                  returnKeyType="done"
+                  value={password}
+                  onChangeText={setPassword}
+                  onSubmitEditing={() => {
+                    Keyboard.dismiss();
+                    if (canSubmit) {
+                      void handleSignUp();
+                    }
+                  }}
+                />
+              </View>
+            </View>
           </View>
 
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Email</Text>
-            <TextInput 
-              style={styles.input} 
-              placeholder="Enter your email" 
-              placeholderTextColor={Colors.textMuted}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              value={email}
-              onChangeText={setEmail}
-            />
-          </View>
-          
-          <View style={styles.inputGroup}>
-            <Text style={styles.label}>Password</Text>
-            <TextInput 
-              style={styles.input} 
-              placeholder="Create a password" 
-              placeholderTextColor={Colors.textMuted}
-              secureTextEntry
-              value={password}
-              onChangeText={setPassword}
-            />
-          </View>
-        </View>
+          <View style={styles.footer}>
+            <Text style={styles.termsText}>
+              By signing up, you agree to our Terms of Service and Privacy Policy.
+            </Text>
 
-        <View style={styles.footer}>
-          <Text style={styles.termsText}>
-            By signing up, you agree to our Terms of Service and Privacy Policy.
-          </Text>
-          
-          {!!errorMsg && (
-            <Reanimated.Text 
-              entering={FadeInUp.springify().damping(20).duration(400)} 
-              exiting={FadeOutUp}
-              layout={Layout.springify()}
-              style={styles.errorText}
-            >
-              {errorMsg}
-            </Reanimated.Text>
-          )}
+            {!!errorMsg && (
+              <Reanimated.Text
+                entering={FadeInUp.springify().damping(20).duration(400)}
+                exiting={FadeOutUp}
+                layout={Layout.springify()}
+                style={styles.errorText}
+              >
+                {errorMsg}
+              </Reanimated.Text>
+            )}
 
-          <Reanimated.View style={shakeStyle} layout={Layout.springify()}>
-            <AnimatedPressable
-              style={[styles.primaryBtn, !canSubmit && styles.primaryBtnDisabled]}
-              onPress={handleSignUp}
-              activeOpacity={0.9}
-              disabled={!canSubmit}
-            >
-              <Text style={styles.primaryText}>{isSubmitting ? 'Creating account...' : 'Create Account'}</Text>
-            </AnimatedPressable>
-          </Reanimated.View>
-        </View>
+            <Reanimated.View style={shakeStyle} layout={Layout.springify()}>
+              <AnimatedPressable
+                style={[styles.primaryBtn, !canSubmit && styles.primaryBtnDisabled]}
+                onPress={handleSignUp}
+                activeOpacity={0.9}
+                disabled={!canSubmit}
+              >
+                <Text style={styles.primaryText}>{isSubmitting ? 'Creating account...' : 'Create Account'}</Text>
+              </AnimatedPressable>
+            </Reanimated.View>
+          </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -187,7 +211,15 @@ const styles = StyleSheet.create({
   header: { paddingHorizontal: 20, paddingTop: 10, paddingBottom: 20 },
   backBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#111', alignItems: 'center', justifyContent: 'center' },
   
-  content: { flex: 1, paddingHorizontal: 24, justifyContent: 'center' },
+  keyboardWrap: { flex: 1 },
+  content: { flex: 1 },
+  contentContainer: {
+    flexGrow: 1,
+    justifyContent: 'space-between',
+    paddingHorizontal: 24,
+    paddingTop: 10,
+    paddingBottom: 24,
+  },
   title: { fontSize: 44, fontFamily: 'Inter_700Bold', color: Colors.textPrimary, lineHeight: 48, letterSpacing: -1, marginBottom: 40 },
   
   form: { marginBottom: 30 },
@@ -202,7 +234,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_400Regular' 
   },
   
-  footer: { paddingBottom: 40, position: 'relative' },
+  footer: { paddingBottom: 8, position: 'relative' },
   termsText: { fontSize: 12, fontFamily: 'Inter_400Regular', color: Colors.textMuted, textAlign: 'center', marginBottom: 20, lineHeight: 18 },
   errorText: { color: Colors.danger, fontSize: 13, fontFamily: 'Inter_500Medium', textAlign: 'center', marginBottom: 12 },
   primaryBtn: { backgroundColor: Colors.textPrimary, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center' },

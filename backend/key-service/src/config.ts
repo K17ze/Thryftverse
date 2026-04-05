@@ -24,6 +24,20 @@ function parsePositiveInt(value: string | undefined, fallback: number): number {
 }
 
 const nodeEnv = process.env.NODE_ENV ?? 'development';
+
+function requiredSecret(name: string, developmentFallback: string): string {
+  const raw = process.env[name]?.trim();
+  if (raw) {
+    return raw;
+  }
+
+  if (nodeEnv !== 'production') {
+    return developmentFallback;
+  }
+
+  throw new Error(`Missing required secret environment variable: ${name}`);
+}
+
 const hasExplicitMasterKey = Boolean(process.env.KEY_SERVICE_MASTER_KEY_B64?.trim());
 
 if (nodeEnv === 'production' && !hasExplicitMasterKey) {
@@ -52,6 +66,7 @@ export const config = {
   allowedKeys,
   region: process.env.KEY_SERVICE_REGION ?? 'local-edge',
   country: process.env.KEY_SERVICE_COUNTRY ?? 'dev-local',
-  adminToken: process.env.KEY_SERVICE_ADMIN_TOKEN,
+  clientToken: requiredSecret('KEY_SERVICE_CLIENT_TOKEN', 'local-key-client-token'),
+  adminToken: requiredSecret('KEY_SERVICE_ADMIN_TOKEN', 'local-key-admin-token'),
   masterKey,
 };

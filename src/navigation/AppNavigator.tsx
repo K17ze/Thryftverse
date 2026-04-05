@@ -1,8 +1,7 @@
 import React from 'react';
-import { createStackNavigator, CardStyleInterpolators, TransitionPresets } from '@react-navigation/stack';
+import { createStackNavigator, CardStyleInterpolators } from '@react-navigation/stack';
 import { RootStackParamList } from './types';
 
-import SplashScreen from '../screens/SplashScreen';
 import AuthLandingScreen from '../screens/AuthLandingScreen';
 import LoginScreen from '../screens/LoginScreen';
 import SignUpScreen from '../screens/SignUpScreen';
@@ -78,8 +77,7 @@ const Stack = createStackNavigator<RootStackParamList>();
 
 export default function AppNavigator() {
   return (
-    <Stack.Navigator initialRouteName="Splash" screenOptions={{ headerShown: false, cardStyleInterpolator: CardStyleInterpolators.forHorizontalIOS, gestureEnabled: true, gestureDirection: 'horizontal' }}>
-      <Stack.Screen name="Splash" component={SplashScreen} />
+    <Stack.Navigator initialRouteName="AuthLanding" screenOptions={{ headerShown: false, cardStyleInterpolator: CardStyleInterpolators.forHorizontalIOS, gestureEnabled: true, gestureDirection: 'horizontal' }}>
       
       {/* Auth Flow */}
       <Stack.Screen name="AuthLanding" component={AuthLandingScreen} />

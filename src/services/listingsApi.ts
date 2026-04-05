@@ -42,7 +42,13 @@ function getFallbackImage(id: string) {
 function mapApiListingToApp(row: ApiListingRow, fallback?: Listing): Listing {
   const price = Number(row.price_gbp ?? fallback?.price ?? 0);
   const protectionFee = Number((price * 0.05 + 0.7).toFixed(2));
-  const image = row.image_url ?? fallback?.images?.[0] ?? getFallbackImage(row.id);
+  const fallbackImages = (fallback?.images ?? []).filter((uri) => typeof uri === 'string' && uri.length > 0);
+  const primaryImage = row.image_url?.trim();
+  const resolvedImages = primaryImage
+    ? [primaryImage, ...fallbackImages.filter((uri) => uri !== primaryImage)]
+    : fallbackImages.length > 0
+      ? fallbackImages
+      : [getFallbackImage(row.id)];
 
   return {
     id: row.id,
@@ -52,7 +58,7 @@ function mapApiListingToApp(row: ApiListingRow, fallback?: Listing): Listing {
     condition: fallback?.condition || 'Very good',
     price,
     priceWithProtection: Number((price + protectionFee).toFixed(2)),
-    images: [image],
+    images: resolvedImages,
     likes: fallback?.likes ?? 0,
     isBumped: fallback?.isBumped,
     isSold: fallback?.isSold,
@@ -82,8 +88,11 @@ export async function fetchListingsFromApiWithFallback(
     }
 
     const mapped = rows.map((row) => mapApiListingToApp(row, fallbackById.get(row.id)));
+    const mappedIds = new Set(mapped.map((listing) => listing.id));
+    const merged = [...mapped, ...fallbackListings.filter((listing) => !mappedIds.has(listing.id))];
+
     return {
-      listings: mapped,
+      listings: merged,
       source: 'api',
     };
   } catch (error) {

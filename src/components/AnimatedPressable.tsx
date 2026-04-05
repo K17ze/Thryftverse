@@ -35,7 +35,7 @@ export function AnimatedPressable({
   onPressOut,
   style,
   scaleValue = 1,
-  disableAnimation = false,
+  disableAnimation = true,
   disabled = false,
   activeOpacity,
   hapticFeedback = 'none',

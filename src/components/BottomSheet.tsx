@@ -11,11 +11,7 @@ import {
 import Reanimated, {
   useSharedValue,
   useAnimatedStyle,
-  withSpring,
-  withTiming,
   runOnJS,
-  interpolate,
-  Extrapolation,
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -26,7 +22,6 @@ const IS_LIGHT = ActiveTheme === 'light';
 const SHEET_BG = IS_LIGHT ? '#ffffff' : '#141414';
 const HANDLE_BG = IS_LIGHT ? '#c8c1b6' : '#444';
 const BACKDROP_COLOR = IS_LIGHT ? 'rgba(0,0,0,0.35)' : 'rgba(0,0,0,0.6)';
-const SPRING_CONFIG = { damping: 22, stiffness: 280, mass: 0.8 };
 
 interface BottomSheetProps {
   visible: boolean;
@@ -48,17 +43,14 @@ export function BottomSheet({
   const contextY = useSharedValue(0);
 
   const open = useCallback(() => {
-    translateY.value = withSpring(0, SPRING_CONFIG);
-    backdropOpacity.value = withTiming(1, { duration: 250 });
+    translateY.value = 0;
+    backdropOpacity.value = 1;
   }, [translateY, backdropOpacity]);
 
   const close = useCallback(() => {
-    translateY.value = withSpring(sheetHeight, SPRING_CONFIG, (finished) => {
-      if (finished) {
-        runOnJS(onDismiss)();
-      }
-    });
-    backdropOpacity.value = withTiming(0, { duration: 200 });
+    translateY.value = sheetHeight;
+    backdropOpacity.value = 0;
+    onDismiss();
   }, [translateY, backdropOpacity, sheetHeight, onDismiss]);
 
   useEffect(() => {
@@ -90,7 +82,7 @@ export function BottomSheet({
       if (translateY.value > sheetHeight * 0.35 || e.velocityY > 600) {
         runOnJS(close)();
       } else {
-        translateY.value = withSpring(0, SPRING_CONFIG);
+        translateY.value = 0;
       }
     });
 

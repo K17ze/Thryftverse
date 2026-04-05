@@ -74,6 +74,7 @@ services:
       KEY_SERVICE_REGION: ${KEY_SERVICE_REGION:-eu-west}
       KEY_SERVICE_COUNTRY: ${KEY_SERVICE_COUNTRY:-NL}
       KEY_SERVICE_MASTER_KEY_B64: ${KEY_SERVICE_MASTER_KEY_B64:-MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
+      KEY_SERVICE_CLIENT_TOKEN: ${KEY_SERVICE_CLIENT_TOKEN:-local-key-client-token}
       KEY_SERVICE_ADMIN_TOKEN: ${KEY_SERVICE_ADMIN_TOKEN:-local-key-admin-token}
     ports:
       - "4100:4100"
@@ -107,8 +108,10 @@ services:
       DATABASE_REPLICA_URL: ${DATABASE_REPLICA_URL:-}
       REDIS_URL: redis://redis:6379
       KEY_SERVICE_URL: http://key-service:4100
+      KEY_SERVICE_CLIENT_TOKEN: ${KEY_SERVICE_CLIENT_TOKEN:-local-key-client-token}
       KEY_SERVICE_ADMIN_TOKEN: ${KEY_SERVICE_ADMIN_TOKEN:-local-key-admin-token}
       API_SECURITY_ADMIN_TOKEN: ${API_SECURITY_ADMIN_TOKEN:-local-security-admin-token}
+      API_ENABLE_MOCK_WEBHOOKS: ${API_ENABLE_MOCK_WEBHOOKS:-true}
       S3_ENDPOINT: http://minio:9000
       S3_PUBLIC_ENDPOINT: http://localhost:9000
       S3_REGION: ${S3_REGION:-us-east-1}

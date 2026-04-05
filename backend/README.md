@@ -153,7 +153,10 @@ npm run docker:check
 
 Admin headers:
 - API maintenance routes: `x-security-admin-token`
+- API -> key-service runtime calls use `x-service-token` with `KEY_SERVICE_CLIENT_TOKEN`.
 - API -> key-service admin actions use `KEY_SERVICE_ADMIN_TOKEN` from API env.
+- `API_SECURITY_ADMIN_TOKEN` is required in production for API maintenance routes.
+- Mock webhook test routes (`/payments/webhooks/mock`, `/payouts/webhooks/mock`) require the same admin header and are controlled by `API_ENABLE_MOCK_WEBHOOKS`.
 
 Regulatory note:
 - Compliance tables include immutable hash-chained audit logs, KYC case tracking, AML alerts/SAR records, jurisdiction rules, legal document versioning, consent evidence, and GDPR request records.

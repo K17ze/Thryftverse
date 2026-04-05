@@ -15,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { ActiveTheme, Colors } from '../constants/colors';
+import { MOCK_LISTINGS } from '../data/mockData';
 import { RootStackParamList } from '../navigation/types';
 import { getFreshPosters } from '../data/posters';
 import { useStore } from '../store/useStore';
@@ -130,11 +131,16 @@ export default function PosterViewerScreen() {
         ? styles.storyOverlayCenter
         : styles.storyOverlayBottom;
 
+  const posterImageUri =
+    activePoster.image ||
+    MOCK_LISTINGS.find((listing) => listing.id === activePoster.listingId)?.images?.[0] ||
+    'https://picsum.photos/seed/poster-fallback-viewer/900/1400';
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor="#000" />
 
-      <CachedImage uri={activePoster.image} style={styles.posterImage} contentFit="cover" priority="high" containerStyle={StyleSheet.absoluteFillObject} />
+      <CachedImage uri={posterImageUri} style={styles.posterImage} contentFit="cover" priority="high" containerStyle={StyleSheet.absoluteFillObject} />
       <View style={styles.backdropOverlay} />
 
       <SafeAreaView style={styles.overlay} edges={['top', 'bottom']}>

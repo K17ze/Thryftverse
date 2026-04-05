@@ -17,7 +17,7 @@ import Reanimated, {
   Extrapolation,
   FadeInDown,
 } from 'react-native-reanimated';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { Typography } from '../constants/typography';
@@ -33,11 +33,14 @@ import { resolveAssetMarketState } from '../data/mockSyndicateData';
 import { AnimatedPressable } from '../components/AnimatedPressable';
 import { AnimatedCounter } from '../components/AnimatedCounter';
 import { CachedImage } from '../components/CachedImage';
+import { useToast } from '../context/ToastContext';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const COVER_HEIGHT = 170;
 const AVATAR_SIZE = 82;
+const HERO_MEDIA_GAP = 6;
+const HERO_MEDIA_TILE = (SCREEN_WIDTH - 40 - HERO_MEDIA_GAP * 2) / 3;
 const TEAL = '#e8dcc8';
 const IS_LIGHT = ActiveTheme === 'light';
 const BRAND = IS_LIGHT ? '#2f251b' : TEAL;
@@ -46,7 +49,7 @@ const PANEL_SOFT = IS_LIGHT ? '#f4efe7' : '#171717';
 const PANEL_ICON = IS_LIGHT ? '#ece5d9' : '#1a1a1a';
 const PANEL_BORDER = IS_LIGHT ? '#d8d1c6' : '#2a2a2a';
 
-const COVER_IMAGE = 'https://images.unsplash.com/photo-1558618666-fcd25c85f82e?w=800&q=80';
+const COVER_IMAGE = MY_USER.coverPhoto || 'https://picsum.photos/seed/profilecoverdefault/1200/800';
 
 interface QuickAccessItem {
   icon: string;
@@ -56,8 +59,13 @@ interface QuickAccessItem {
   color: string;
 }
 
+type ProfileMediaTab = 'All' | 'Media' | 'Tags';
+
 export default function MyProfileScreen() {
   const navigation = useNavigation<NavT>();
+  const insets = useSafeAreaInsets();
+  const { show } = useToast();
+  const [heroMediaTab, setHeroMediaTab] = React.useState<ProfileMediaTab>('All');
   const { formatFromFiat } = useFormattedPrice();
   const { listings } = useBackendData();
   const customSyndicates = useStore((state) => state.customSyndicates);
@@ -69,30 +77,67 @@ export default function MyProfileScreen() {
   const updateUserCover = useStore((state) => state.updateUserCover);
 
   const pickCover = async () => {
-    let result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [16, 9],
-      quality: 0.8,
-    });
-    if (!result.canceled) {
-      updateUserCover(result.assets[0].uri);
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      show('Allow photo library access to upload cover', 'error');
+      return;
+    }
+
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [16, 9],
+        quality: 0.86,
+      });
+
+      if (!result.canceled && result.assets?.[0]?.uri) {
+        updateUserCover(result.assets[0].uri);
+        show('Cover updated', 'success');
+      }
+    } catch {
+      show('Unable to open gallery right now', 'error');
     }
   };
 
   const pickAvatar = async () => {
-    let result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.8,
-    });
-    if (!result.canceled) {
-      updateUserAvatar(result.assets[0].uri);
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      show('Allow photo library access to upload avatar', 'error');
+      return;
+    }
+
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.86,
+      });
+
+      if (!result.canceled && result.assets?.[0]?.uri) {
+        updateUserAvatar(result.assets[0].uri);
+        show('Avatar updated', 'success');
+      }
+    } catch {
+      show('Unable to open gallery right now', 'error');
     }
   };
 
   const myListings = React.useMemo(() => listings.slice(0, 6), [listings]);
+
+  const heroMediaListings = React.useMemo(() => {
+    if (heroMediaTab === 'All') {
+      return myListings;
+    }
+
+    if (heroMediaTab === 'Media') {
+      return myListings.filter((item) => item.images.length > 0);
+    }
+
+    const tagged = myListings.filter((item, index) => item.isBumped || item.isSold || index % 2 === 0);
+    return tagged.length > 0 ? tagged : myListings;
+  }, [heroMediaTab, myListings]);
 
   const syndicateHoldings = React.useMemo(() => {
     const marketAssets = getSyndicateMarket(customSyndicates).map((asset) =>
@@ -130,6 +175,15 @@ export default function MyProfileScreen() {
     return { transform: [{ translateY }, { scale }] };
   });
 
+  const topUtilityStyle = useAnimatedStyle(() => {
+    const opacity = interpolate(scrollY.value, [0, 80], [1, 0], Extrapolation.CLAMP);
+    const translateY = interpolate(scrollY.value, [0, 80], [0, -8], Extrapolation.CLAMP);
+    return {
+      opacity,
+      transform: [{ translateY }],
+    };
+  });
+
   const handleShare = async () => {
     try {
       await Share.share({ message: `Check out @${MY_USER.username} on Thryftverse!` });
@@ -148,14 +202,13 @@ export default function MyProfileScreen() {
       },
       {
         icon: 'pie-chart-outline',
-        label: 'My Syndicate Holdings',
+        label: 'Syndicate',
         route: 'Portfolio',
         value: `${syndicateHoldings.length} assets`,
         color: IS_LIGHT ? '#5c4830' : '#ccb893',
       },
       { icon: 'bookmark-outline', label: 'Wishlist', route: 'Favourites', color: IS_LIGHT ? '#704b3b' : '#e6c8b4' },
       { icon: 'color-palette-outline', label: 'Style', route: 'Personalisation', color: IS_LIGHT ? '#6a5a45' : '#d6c6b4' },
-      { icon: 'people-outline', label: 'Invite', route: 'InviteFriends', color: BRAND },
       { icon: 'settings-outline', label: 'Settings', route: 'Settings', color: '#a0a0a0' },
     ],
     [formatFromFiat, syndicateHoldings.length]
@@ -169,14 +222,41 @@ export default function MyProfileScreen() {
 
       {/* Cover photo with parallax */}
       <Reanimated.View style={[styles.coverWrap, coverStyle]}>
-        <AnimatedPressable onPress={pickCover} style={{ flex: 1 }} activeOpacity={0.9}>
-          <CachedImage uri={userCover || COVER_IMAGE} style={styles.coverImage} contentFit="cover" priority="high" />
-          <View style={styles.coverGradient} />
-          <View style={styles.editCoverOverlay}>
-            <Ionicons name="camera" size={20} color="#fff" />
-          </View>
-        </AnimatedPressable>
+        <CachedImage uri={userCover || MY_USER.coverPhoto || COVER_IMAGE} style={styles.coverImage} contentFit="cover" priority="high" />
+        <View style={styles.coverGradient} />
       </Reanimated.View>
+
+      <View pointerEvents="box-none" style={styles.coverActionLayer}>
+        <Reanimated.View style={[styles.topUtilityRow, { top: Math.max(insets.top + 6, 14) }, topUtilityStyle]}>
+          <AnimatedPressable
+            style={styles.topUtilityIconBtn}
+            activeOpacity={0.9}
+            onPress={() => navigation.navigate('Personalisation')}
+          >
+            <Ionicons name="apps-outline" size={18} color="#fff" />
+          </AnimatedPressable>
+
+          <View style={styles.topUtilityRight}>
+            <AnimatedPressable
+              onPress={pickCover}
+              style={styles.topUtilityPillBtn}
+              activeOpacity={0.9}
+              hitSlop={8}
+            >
+              <Ionicons name="camera" size={16} color="#fff" />
+              <Text style={styles.topUtilityPillText}>Cover</Text>
+            </AnimatedPressable>
+
+            <AnimatedPressable
+              style={styles.topUtilityPillBtn}
+              activeOpacity={0.9}
+              onPress={() => navigation.navigate('EditProfile')}
+            >
+              <Text style={styles.topUtilityPillText}>Edit</Text>
+            </AnimatedPressable>
+          </View>
+        </Reanimated.View>
+      </View>
 
       <AnimatedScrollView
         showsVerticalScrollIndicator={false}
@@ -197,34 +277,50 @@ export default function MyProfileScreen() {
               <View style={styles.verifiedBadge}>
                 <Ionicons name="checkmark-circle" size={22} color={BRAND} />
               </View>
-              <View style={styles.editAvatarOverlay}>
+              <View style={styles.editAvatarChip}>
                 <Ionicons name="camera" size={16} color="#fff" />
               </View>
             </AnimatedPressable>
-            <View style={styles.heroActionRow}>
-              <AnimatedPressable style={styles.shareProfileBtn} onPress={handleShare} activeOpacity={0.8}>
-                <Ionicons name="share-outline" size={16} color={Colors.textPrimary} />
-              </AnimatedPressable>
-              <AnimatedPressable style={styles.settingsBtn} onPress={() => navigation.navigate('Settings')} activeOpacity={0.8}>
-                <Ionicons name="ellipsis-horizontal" size={20} color={Colors.textPrimary} />
-              </AnimatedPressable>
-            </View>
           </View>
 
-          <Text style={styles.heroName}>@{MY_USER.username}</Text>
+          <Text style={styles.heroName} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>{MY_USER.username.toUpperCase()}</Text>
+          <Text style={styles.heroHandle}>@{MY_USER.username}</Text>
           <Text style={styles.heroMeta}>
             {MY_USER.location} · {MY_USER.reviewCount} reviews · last seen {MY_USER.lastSeen.toLowerCase()}
           </Text>
 
-          <AnimatedPressable
-            activeOpacity={0.8}
-            style={styles.editProfileBtn}
-            onPress={() => navigation.navigate('EditProfile')}
-          >
-            <Text style={styles.editProfileText}>edit profile</Text>
-          </AnimatedPressable>
+          <View style={styles.profileActionRow}>
+            <AnimatedPressable
+              activeOpacity={0.85}
+              style={styles.profileActionPrimary}
+              onPress={() => navigation.navigate('EditProfile')}
+            >
+              <Text style={styles.profileActionPrimaryText}>Edit profile</Text>
+            </AnimatedPressable>
 
-          {/* Animated Stats row */}
+            <AnimatedPressable
+              activeOpacity={0.85}
+              style={styles.profileActionSecondary}
+              onPress={handleShare}
+            >
+              <Text style={styles.profileActionSecondaryText}>Share profile</Text>
+            </AnimatedPressable>
+
+            <AnimatedPressable
+              style={styles.profileActionIcon}
+              onPress={() => navigation.navigate('Settings')}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="settings-outline" size={18} color={Colors.textPrimary} />
+            </AnimatedPressable>
+          </View>
+
+          {/* Snapshot stays in the top hero band (replacing removed highlights row). */}
+          <View style={styles.statsHeaderRow}>
+            <Text style={styles.statsTitle}>Snapshot</Text>
+            <Text style={styles.statsHint}>live profile stats</Text>
+          </View>
+
           <Reanimated.View entering={FadeInDown.delay(200).duration(400)} style={styles.statsRow}>
             <AnimatedPressable
               style={styles.statItem}
@@ -250,23 +346,63 @@ export default function MyProfileScreen() {
               <Text style={styles.statLabel}>RATING</Text>
             </View>
           </Reanimated.View>
-        </View>
 
-        {/* ── Quick Access Grid ── */}
-        <View style={styles.quickAccessCard}>
-          <View style={styles.quickGrid}>
-            {quickAccess.map((item) => (
+          <View style={styles.quickAccessCard}>
+            <View style={styles.quickAccessHeaderRow}>
+              <Text style={styles.quickAccessTitle}>Shortcuts</Text>
+              <Text style={styles.quickAccessHint}>everything in one place</Text>
+            </View>
+
+            <View style={styles.quickGrid}>
+              {quickAccess.map((item, index) => (
+                <AnimatedPressable
+                  key={item.label}
+                  style={[styles.quickItem, (index + 1) % 3 === 0 && styles.quickItemLastInRow]}
+                  activeOpacity={0.8}
+                  onPress={() => navigation.navigate(item.route as any)}
+                >
+                  <View style={[styles.quickIconCircle, { borderColor: item.color + '40' }]}>
+                    <Ionicons name={item.icon as any} size={18} color={item.color} />
+                  </View>
+                  <Text style={styles.quickLabel}>{item.label}</Text>
+                  {item.value && <Text style={styles.quickValue}>{item.value}</Text>}
+                </AnimatedPressable>
+              ))}
+            </View>
+          </View>
+
+          <View style={styles.mediaTabsRow}>
+            {(['All', 'Media', 'Tags'] as ProfileMediaTab[]).map((tab) => (
               <AnimatedPressable
-                key={item.label}
-                style={styles.quickItem}
-                activeOpacity={0.8}
-                onPress={() => navigation.navigate(item.route as any)}
+                key={tab}
+                style={[styles.mediaTabBtn, heroMediaTab === tab && styles.mediaTabBtnActive]}
+                activeOpacity={0.85}
+                onPress={() => setHeroMediaTab(tab)}
               >
-                <View style={[styles.quickIconCircle, { borderColor: item.color + '40' }]}>
-                  <Ionicons name={item.icon as any} size={22} color={item.color} />
+                <Text style={[styles.mediaTabText, heroMediaTab === tab && styles.mediaTabTextActive]}>{tab}</Text>
+              </AnimatedPressable>
+            ))}
+          </View>
+
+          <View style={styles.mediaGrid}>
+            {heroMediaListings.slice(0, 6).map((item, index) => (
+              <AnimatedPressable
+                key={`hero_media_${item.id}_${index}`}
+                style={[styles.mediaTile, (index + 1) % 3 === 0 && styles.mediaTileLast]}
+                activeOpacity={0.9}
+                onPress={() => navigation.navigate('ItemDetail', { itemId: item.id })}
+              >
+                <CachedImage
+                  uri={item.images[0]}
+                  style={styles.mediaThumb}
+                  containerStyle={styles.mediaThumbWrap}
+                  contentFit="cover"
+                />
+                <View style={styles.mediaTilePricePill}>
+                  <Text style={styles.mediaTilePriceText}>
+                    {formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}
+                  </Text>
                 </View>
-                <Text style={styles.quickLabel}>{item.label}</Text>
-                {item.value && <Text style={styles.quickValue}>{item.value}</Text>}
               </AnimatedPressable>
             ))}
           </View>
@@ -401,13 +537,51 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     backgroundColor: IS_LIGHT ? 'rgba(236,234,230,0.25)' : 'rgba(9,9,9,0.4)',
   },
-  editCoverOverlay: {
+  coverActionLayer: {
     position: 'absolute',
-    right: 16,
-    bottom: 24,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    padding: 8,
+    top: 0,
+    left: 0,
+    right: 0,
+    height: COVER_HEIGHT,
+    zIndex: 8,
+  },
+  topUtilityRow: {
+    position: 'absolute',
+    left: 14,
+    right: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  topUtilityRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  topUtilityIconBtn: {
+    width: 40,
+    height: 40,
     borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  topUtilityPillBtn: {
+    backgroundColor: 'rgba(0,0,0,0.58)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  topUtilityPillText: {
+    color: '#fff',
+    fontSize: 12,
+    fontFamily: Typography.family.semibold,
+    letterSpacing: 0.2,
   },
 
   // Hero — enhanced from original
@@ -415,18 +589,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 20,
     paddingTop: 0,
-    paddingBottom: 28,
+    paddingBottom: 24,
     backgroundColor: Colors.background,
     borderTopLeftRadius: 22,
     borderTopRightRadius: 22,
   },
   heroTop: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'space-between',
-    width: '100%',
+    alignItems: 'center',
     marginTop: -(AVATAR_SIZE / 2),
-    marginBottom: 14,
+    marginBottom: 12,
   },
   avatarWrap: { position: 'relative' },
   heroAvatarContainer: {
@@ -435,6 +606,7 @@ const styles = StyleSheet.create({
     borderRadius: AVATAR_SIZE / 2,
     borderWidth: 3,
     borderColor: Colors.background,
+    overflow: 'hidden',
   },
   heroAvatar: {
     width: '100%',
@@ -449,95 +621,205 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 1,
   },
-  editAvatarOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.3)',
-    borderRadius: AVATAR_SIZE / 2,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 3,
-    borderColor: 'transparent',
-  },
-  heroActionRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 8,
-  },
-  shareProfileBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: PANEL_BG,
+  editAvatarChip: {
+    position: 'absolute',
+    right: -3,
+    bottom: 0,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#1c1c1c',
     borderWidth: 1,
-    borderColor: PANEL_BORDER,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  settingsBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: PANEL_BG,
-    borderWidth: 1,
-    borderColor: PANEL_BORDER,
+    borderColor: 'rgba(255,255,255,0.2)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   heroName: {
-    fontSize: 60,
-    lineHeight: 62,
+    fontSize: 36,
+    lineHeight: 40,
     fontFamily: Typography.family.extrabold,
     color: Colors.textPrimary,
     marginBottom: 2,
-    alignSelf: 'flex-start',
-    letterSpacing: -1.9,
+    alignSelf: 'center',
+    letterSpacing: -0.7,
+    maxWidth: '100%',
+    textAlign: 'center',
+  },
+  heroHandle: {
+    fontSize: 16,
+    lineHeight: 18,
+    fontFamily: Typography.family.semibold,
+    color: Colors.textSecondary,
+    marginBottom: 6,
+    letterSpacing: 0.12,
   },
   heroMeta: {
     fontSize: 11,
     fontFamily: Typography.family.light,
     color: Colors.textMuted,
-    alignSelf: 'flex-start',
-    marginBottom: 14,
+    alignSelf: 'center',
+    marginBottom: 12,
     letterSpacing: 0.24,
+    textAlign: 'center',
   },
-  editProfileBtn: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 24,
+  profileActionRow: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  profileActionPrimary: {
+    flex: 1,
+    paddingVertical: 11,
+    borderRadius: 14,
+    backgroundColor: Colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  profileActionPrimaryText: {
+    color: Colors.background,
+    fontSize: 13,
+    fontFamily: Typography.family.semibold,
+    letterSpacing: 0.15,
+  },
+  profileActionSecondary: {
+    flex: 1,
+    paddingVertical: 11,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: Colors.border,
     backgroundColor: PANEL_BG,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  editProfileText: {
+  profileActionSecondaryText: {
     color: Colors.textPrimary,
     fontSize: 13,
     fontFamily: Typography.family.semibold,
     letterSpacing: 0.18,
   },
+  profileActionIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: PANEL_BG,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mediaTabsRow: {
+    marginTop: 16,
+    width: '100%',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  mediaTabBtn: {
+    flex: 1,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+  },
+  mediaTabBtnActive: {
+    backgroundColor: Colors.accent,
+    borderColor: Colors.accent,
+  },
+  mediaTabText: {
+    color: Colors.textSecondary,
+    fontSize: 11,
+    fontFamily: Typography.family.semibold,
+    letterSpacing: 0.16,
+  },
+  mediaTabTextActive: {
+    color: Colors.background,
+  },
+  mediaGrid: {
+    marginTop: 8,
+    width: '100%',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  mediaTile: {
+    width: HERO_MEDIA_TILE,
+    marginRight: HERO_MEDIA_GAP,
+    marginBottom: HERO_MEDIA_GAP,
+    position: 'relative',
+  },
+  mediaTileLast: {
+    marginRight: 0,
+  },
+  mediaThumbWrap: {
+    width: HERO_MEDIA_TILE,
+    height: HERO_MEDIA_TILE * 1.15,
+    borderRadius: 10,
+  },
+  mediaThumb: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 10,
+  },
+  mediaTilePricePill: {
+    position: 'absolute',
+    right: 6,
+    bottom: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(0,0,0,0.62)',
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+  },
+  mediaTilePriceText: {
+    color: '#fff',
+    fontSize: 9,
+    fontFamily: Typography.family.semibold,
+    letterSpacing: 0.08,
+  },
+
+  statsHeaderRow: {
+    marginTop: 16,
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  statsTitle: {
+    color: Colors.textPrimary,
+    fontSize: 14,
+    fontFamily: Typography.family.semibold,
+    letterSpacing: 0.2,
+  },
+  statsHint: {
+    color: Colors.textMuted,
+    fontSize: 11,
+    fontFamily: Typography.family.medium,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
 
   // Stats — now with animated counters
   statsRow: {
     flexDirection: 'row',
-    alignItems: 'stretch',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    flexWrap: 'wrap',
     backgroundColor: PANEL_BG,
     borderRadius: 20,
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     paddingVertical: 10,
-    marginTop: 24,
+    marginTop: 10,
     width: '100%',
-    gap: 8,
     borderWidth: 1,
     borderColor: PANEL_BORDER,
   },
   statItem: {
-    width: '48%',
+    flex: 1,
     alignItems: 'center',
     borderRadius: 12,
     backgroundColor: PANEL_SOFT,
-    paddingVertical: 10,
+    paddingVertical: 9,
   },
   statNumber: {
     fontSize: 18,
@@ -552,54 +834,82 @@ const styles = StyleSheet.create({
     letterSpacing: 0.55,
   },
   statDivider: {
-    display: 'none',
+    width: 6,
   },
 
   // Quick Access (original layout preserved)
   quickAccessCard: {
-    marginHorizontal: 20,
+    width: '100%',
+    marginTop: 12,
     backgroundColor: PANEL_BG,
-    borderRadius: 24,
-    padding: 20,
-    marginBottom: 24,
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
     borderWidth: 1,
     borderColor: PANEL_BORDER,
+  },
+  quickAccessHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+    paddingHorizontal: 2,
+  },
+  quickAccessTitle: {
+    fontSize: 13,
+    fontFamily: Typography.family.semibold,
+    color: Colors.textPrimary,
+  },
+  quickAccessHint: {
+    fontSize: 9,
+    fontFamily: Typography.family.medium,
+    color: Colors.textMuted,
+    letterSpacing: 0.35,
+    textTransform: 'uppercase',
   },
   quickGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
   },
   quickItem: {
-    width: '47%',
+    width: '31.2%',
     alignItems: 'center',
-    marginBottom: 20,
-    minHeight: 90,
+    marginRight: '3.2%',
+    marginBottom: 6,
+    minHeight: 70,
+    borderRadius: 10,
+    backgroundColor: PANEL_SOFT,
+    paddingHorizontal: 6,
+    paddingVertical: 7,
+  },
+  quickItemLastInRow: {
+    marginRight: 0,
   },
   quickIconCircle: {
-    width: 52,
-    height: 52,
-    borderRadius: 16,
+    width: 32,
+    height: 32,
+    borderRadius: 10,
     backgroundColor: PANEL_ICON,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 8,
+    marginBottom: 4,
     borderWidth: 1,
   },
   quickLabel: {
-    fontSize: 12,
+    fontSize: 9,
     fontFamily: Typography.family.medium,
     color: Colors.textSecondary,
     textAlign: 'center',
-    lineHeight: 16,
-    letterSpacing: 0.1,
+    lineHeight: 12,
+    letterSpacing: 0.08,
   },
   quickValue: {
-    fontSize: 11,
+    fontSize: 8,
     fontFamily: Typography.family.semibold,
     color: BRAND,
-    marginTop: 2,
-    letterSpacing: 0.08,
+    marginTop: 1,
+    letterSpacing: 0.06,
   },
 
   // Portfolio Summary (original layout preserved)

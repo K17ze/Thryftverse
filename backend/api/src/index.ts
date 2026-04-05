@@ -125,13 +125,39 @@ async function ensureUserExists(userId: string) {
 }
 
 function ensureSecurityAdmin(headerToken: string | undefined) {
-  if (!config.apiSecurityAdminToken) {
-    return;
-  }
-
   if (!headerToken || headerToken !== config.apiSecurityAdminToken) {
     throw new Error('Missing or invalid security admin token');
   }
+}
+
+function ensureSecurityAdminAccess(
+  request: {
+    headers: Record<string, string | string[] | undefined>;
+    authUser?: AuthenticatedUser;
+  },
+  reply: {
+    code: (statusCode: number) => unknown;
+  }
+): { ok: false; error: string } | null {
+  try {
+    ensureSecurityAdmin(request.headers['x-security-admin-token'] as string | undefined);
+  } catch (error) {
+    reply.code(401);
+    return {
+      ok: false,
+      error: (error as Error).message,
+    };
+  }
+
+  if (request.authUser && request.authUser.role !== 'admin') {
+    reply.code(403);
+    return {
+      ok: false,
+      error: 'Forbidden: admin role required',
+    };
+  }
+
+  return null;
 }
 
 function roundTo(value: number, decimals: number): number {
@@ -281,6 +307,10 @@ function getRoutePath(url: string) {
   return url.split('?')[0] || '/';
 }
 
+function isSecurityMaintenanceRoute(method: string, path: string) {
+  return method === 'POST' && /^\/security\/keys\/[^/]+\/rotate$/.test(path);
+}
+
 function stripV1Prefix(url: string): { url: string; apiVersion: 'legacy' | 'v1' } {
   const path = getRoutePath(url);
   if (path === '/v1' || path.startsWith('/v1/')) {
@@ -326,7 +356,7 @@ function isPublicRoute(method: string, path: string) {
     return true;
   }
 
-  if (path.startsWith('/security/')) {
+  if (isSecurityMaintenanceRoute(method, path)) {
     return true;
   }
 
@@ -2700,14 +2730,9 @@ app.get('/metrics', async (_request, reply) => {
 });
 
 app.post('/ops/auctions/sweep', async (request, reply) => {
-  try {
-    ensureSecurityAdmin(request.headers['x-security-admin-token'] as string | undefined);
-  } catch (error) {
-    reply.code(401);
-    return {
-      ok: false,
-      error: (error as Error).message,
-    };
+  const securityAdminError = ensureSecurityAdminAccess(request, reply);
+  if (securityAdminError) {
+    return securityAdminError;
   }
 
   await enqueueAuctionSweepJob('manual');
@@ -2834,14 +2859,9 @@ app.post('/security/keys/:keyName/rotate', async (request, reply) => {
   const { keyName } = paramsSchema.parse(request.params);
   const payload = bodySchema.parse(request.body ?? {});
 
-  try {
-    ensureSecurityAdmin(request.headers['x-security-admin-token'] as string | undefined);
-  } catch (error) {
-    reply.code(401);
-    return {
-      ok: false,
-      error: (error as Error).message,
-    };
+  const securityAdminError = ensureSecurityAdminAccess(request, reply);
+  if (securityAdminError) {
+    return securityAdminError;
   }
 
   try {
@@ -3580,14 +3600,9 @@ app.post('/compliance/kyc/sessions', async (request, reply) => {
 });
 
 app.post('/compliance/kyc/webhook', async (request, reply) => {
-  try {
-    ensureSecurityAdmin(request.headers['x-security-admin-token'] as string | undefined);
-  } catch (error) {
-    reply.code(401);
-    return {
-      ok: false,
-      error: (error as Error).message,
-    };
+  const securityAdminError = ensureSecurityAdminAccess(request, reply);
+  if (securityAdminError) {
+    return securityAdminError;
   }
 
   const bodySchema = z.object({
@@ -4054,14 +4069,9 @@ app.get('/compliance/aml/alerts', async (request) => {
 });
 
 app.post('/compliance/aml/alerts/:alertId/review', async (request, reply) => {
-  try {
-    ensureSecurityAdmin(request.headers['x-security-admin-token'] as string | undefined);
-  } catch (error) {
-    reply.code(401);
-    return {
-      ok: false,
-      error: (error as Error).message,
-    };
+  const securityAdminError = ensureSecurityAdminAccess(request, reply);
+  if (securityAdminError) {
+    return securityAdminError;
   }
 
   const paramsSchema = z.object({ alertId: z.string().min(4) });
@@ -4262,14 +4272,9 @@ app.get('/compliance/jurisdiction/rules', async (request) => {
 });
 
 app.post('/compliance/jurisdiction/rules', async (request, reply) => {
-  try {
-    ensureSecurityAdmin(request.headers['x-security-admin-token'] as string | undefined);
-  } catch (error) {
-    reply.code(401);
-    return {
-      ok: false,
-      error: (error as Error).message,
-    };
+  const securityAdminError = ensureSecurityAdminAccess(request, reply);
+  if (securityAdminError) {
+    return securityAdminError;
   }
 
   const bodySchema = z.object({
@@ -4441,14 +4446,9 @@ app.get('/compliance/consents/documents', async (request) => {
 });
 
 app.post('/compliance/consents/documents', async (request, reply) => {
-  try {
-    ensureSecurityAdmin(request.headers['x-security-admin-token'] as string | undefined);
-  } catch (error) {
-    reply.code(401);
-    return {
-      ok: false,
-      error: (error as Error).message,
-    };
+  const securityAdminError = ensureSecurityAdminAccess(request, reply);
+  if (securityAdminError) {
+    return securityAdminError;
   }
 
   const bodySchema = z.object({
@@ -4678,14 +4678,9 @@ app.get('/compliance/consents/:userId', async (request) => {
 });
 
 app.get('/compliance/audit/logs', async (request, reply) => {
-  try {
-    ensureSecurityAdmin(request.headers['x-security-admin-token'] as string | undefined);
-  } catch (error) {
-    reply.code(401);
-    return {
-      ok: false,
-      error: (error as Error).message,
-    };
+  const securityAdminError = ensureSecurityAdminAccess(request, reply);
+  if (securityAdminError) {
+    return securityAdminError;
   }
 
   const querySchema = z.object({
@@ -8252,6 +8247,19 @@ app.post('/payments/webhooks/mock', async (request, reply) => {
 
   const payload = bodySchema.parse(request.body);
 
+  if (!config.apiEnableMockWebhooks) {
+    reply.code(404);
+    return {
+      ok: false,
+      error: 'Mock payment webhook endpoint is disabled',
+    };
+  }
+
+  const securityAdminError = ensureSecurityAdminAccess(request, reply);
+  if (securityAdminError) {
+    return securityAdminError;
+  }
+
   if (!(await paymentTablesAvailable(db))) {
     reply.code(503);
     return {
@@ -8384,6 +8392,19 @@ app.post('/payouts/webhooks/mock', async (request, reply) => {
   });
 
   const payload = bodySchema.parse(request.body);
+
+  if (!config.apiEnableMockWebhooks) {
+    reply.code(404);
+    return {
+      ok: false,
+      error: 'Mock payout webhook endpoint is disabled',
+    };
+  }
+
+  const securityAdminError = ensureSecurityAdminAccess(request, reply);
+  if (securityAdminError) {
+    return securityAdminError;
+  }
 
   if (!(await paymentTablesAvailable(db))) {
     reply.code(503);

@@ -7,6 +7,7 @@ import {
   ScrollView,
   FlatList,
   Dimensions,
+  LayoutChangeEvent,
   RefreshControl,
   Modal,
   Pressable,
@@ -15,6 +16,7 @@ import {
   StyleProp,
   ViewStyle,
   AppState,
+  useWindowDimensions,
 } from 'react-native';
 import Reanimated, {
   useSharedValue,
@@ -23,19 +25,14 @@ import Reanimated, {
   useAnimatedStyle,
   withSpring,
   withTiming,
-  withSequence,
-  runOnJS,
-  FadeInDown,
   interpolate,
   Extrapolation,
 } from 'react-native-reanimated';
-import { GestureDetector, Gesture } from 'react-native-gesture-handler';
-import * as haptic from 'expo-haptics';
 import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Video, ResizeMode } from 'expo-av';
 import { ImageContentFit } from 'expo-image';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { Typography } from '../constants/typography';
@@ -45,34 +42,32 @@ import { useNavigation, useScrollToTop } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
 import { useStore } from '../store/useStore';
-import { RefreshIndicator } from '../components/RefreshIndicator';
 import { useTabScroll } from '../context/TabScrollContext';
 import { AnimatedBadge } from '../components/AnimatedBadge';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useBackendData } from '../context/BackendDataContext';
 import { AnimatedPressable } from '../components/AnimatedPressable';
 import { CachedImage } from '../components/CachedImage';
-import { SharedTransitionImage } from '../components/SharedTransitionImage';
 import { SyncStatusPill } from '../components/SyncStatusPill';
 import { SyncRetryBanner } from '../components/SyncRetryBanner';
-import { SkeletonLoader, StoriesRowSkeleton } from '../components/SkeletonLoader';
+import { SkeletonLoader } from '../components/SkeletonLoader';
 import { ThryftCartIcon } from '../components/icons/ThryftCartIcon';
 import { getBackendSyncStatus } from '../utils/syncStatus';
-import { DEFAULT_FEED_LOOKS, FeedLook, fetchFeedLooksWithFallback } from '../services/feedLooksApi';
 
 type NavT = StackNavigationProp<RootStackParamList>;
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-const HEADER_EXPANDED = 116;
-const HEADER_COLLAPSED = 68;
+const HEADER_EXPANDED = 80;
+const HEADER_COLLAPSED = 56;
 const GRID_GAP = 6;
-const GRID_TILE_WIDTH = (SCREEN_WIDTH - GRID_GAP * 3) / 2;
+const TAB_BAR_BASE_HEIGHT = 62;
+const GRID_MIN_HEIGHT = 136;
+const GRID_MAX_HEIGHT = 250;
+const SCREEN_WIDTH = Dimensions.get('window').width;
 
 const TEAL = '#e8dcc8';
 const IS_LIGHT = ActiveTheme === 'light';
 const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111';
 const SOCIAL_RING = IS_LIGHT ? '#2f251b' : '#e8dcc8';
-const STAGGERED_RATIOS = [0.9, 1.2, 1.4, 1.0] as const;
 const VIDEO_EXT_RE = /\.(mp4|mov|m4v|webm)(\?.*)?$/i;
 
 function isVideoUri(uri: string) {
@@ -89,7 +84,6 @@ interface MediaPreviewProps {
   muted?: boolean;
   loop?: boolean;
   isVisible?: boolean;
-  sharedTransitionTag?: string;
 }
 
 function MediaPreview({
@@ -102,15 +96,7 @@ function MediaPreview({
   muted = true,
   loop = true,
   isVisible = true,
-  sharedTransitionTag,
 }: MediaPreviewProps) {
-  const resizeMode =
-    contentFit === 'contain' || contentFit === 'scale-down' || contentFit === 'none'
-      ? 'contain'
-      : contentFit === 'fill'
-        ? 'stretch'
-        : 'cover';
-
   if (isVideoUri(uri)) {
     return (
       <Video
@@ -123,19 +109,6 @@ function MediaPreview({
         usePoster={!!posterUri}
         posterSource={posterUri ? { uri: posterUri } : undefined}
       />
-    );
-  }
-
-  if (sharedTransitionTag) {
-    return (
-      <View style={containerStyle}>
-        <SharedTransitionImage
-          source={{ uri }}
-          style={style}
-          resizeMode={resizeMode}
-          sharedTransitionTag={sharedTransitionTag}
-        />
-      </View>
     );
   }
 
@@ -185,7 +158,7 @@ const TREND_CLIPS = [
 
 type ExploreTile = {
   id: string;
-  type: 'look' | 'listing' | 'clip';
+  type: 'listing' | 'clip';
   mediaType: 'image' | 'video';
   mediaUri: string;
   posterUri?: string;
@@ -195,19 +168,6 @@ type ExploreTile = {
   caption: string;
   aspectRatio: number;
 };
-
-type ExploreRow =
-  | {
-      id: string;
-      type: 'pair';
-      left: ExploreTile;
-      right?: ExploreTile;
-    }
-  | {
-      id: string;
-      type: 'look';
-      look: ExploreTile;
-    };
 
 type StoryBubble = {
   id: string;
@@ -221,6 +181,8 @@ type StoryBubble = {
 
 export default function HomeScreen() {
   const navigation = useNavigation<NavT>();
+  const insets = useSafeAreaInsets();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const notificationCount = useStore((state) => state.notificationCount);
   const hasSeenPoster = useStore((state) => state.hasSeenPoster);
   const customPosters = useStore((state) => state.customPosters);
@@ -228,17 +190,20 @@ export default function HomeScreen() {
   const { listings, source, isSyncing, lastError, refreshListings } = useBackendData();
 
   const [refreshing, setRefreshing] = React.useState(false);
-  const [feedLooks, setFeedLooks] = React.useState<FeedLook[]>(DEFAULT_FEED_LOOKS);
   const [peekItem, setPeekItem] = React.useState<ExploreTile | null>(null);
   const [visibleTileIds, setVisibleTileIds] = React.useState<Set<string>>(() => new Set());
   const [newListingIds, setNewListingIds] = React.useState<Set<string>>(() => new Set());
+  const [listHeaderHeight, setListHeaderHeight] = React.useState(0);
 
   const scrollY = useSharedValue(0);
   const lastScrollY = useSharedValue(0);
   const { tabBarVisible } = useTabScroll();
-  const scrollRef = useAnimatedRef<FlatList<ExploreRow>>();
+  const scrollRef = useAnimatedRef<FlatList<ExploreTile>>();
   const knownListingIdsRef = React.useRef<Set<string>>(new Set());
   const seededKnownListingIdsRef = React.useRef(false);
+
+  const headerExpandedHeight = React.useMemo(() => HEADER_EXPANDED + insets.top, [insets.top]);
+  const headerCollapsedHeight = React.useMemo(() => HEADER_COLLAPSED + insets.top, [insets.top]);
 
   useScrollToTop(scrollRef);
 
@@ -260,7 +225,7 @@ export default function HomeScreen() {
     const height = interpolate(
       scrollY.value,
       [0, 120],
-      [HEADER_EXPANDED, HEADER_COLLAPSED],
+      [headerExpandedHeight, headerCollapsedHeight],
       Extrapolation.CLAMP,
     );
 
@@ -275,15 +240,6 @@ export default function HomeScreen() {
       transform: [{ translateY }],
     };
   });
-
-  const syncFeedLooks = React.useCallback(async () => {
-    const result = await fetchFeedLooksWithFallback();
-    setFeedLooks(result.looks);
-  }, []);
-
-  React.useEffect(() => {
-    void syncFeedLooks();
-  }, [syncFeedLooks]);
 
   React.useEffect(() => {
     if (!seededKnownListingIdsRef.current) {
@@ -360,7 +316,7 @@ export default function HomeScreen() {
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    await Promise.all([refreshListings(), syncFeedLooks()]);
+    await refreshListings();
     acknowledgeNewListings();
     setTimeout(() => setRefreshing(false), 380);
   };
@@ -382,58 +338,22 @@ export default function HomeScreen() {
 
   const showFeedLoadingSkeleton = isSyncing && source === 'mock' && !lastError;
 
-  const storyBubbles = React.useMemo<StoryBubble[]>(() => {
-    const statusCycle: StoryStatus[] = ['new-listing', 'live-auction', 'syndicate-launching', 'sold-recently'];
-
-    const fromPosters = freshPosters.map((poster, index) => ({
-      id: `poster_${poster.id}`,
-      userId: poster.uploaderId,
-      username: poster.uploader?.username ?? `style_${index + 1}`,
-      avatar: poster.uploader?.avatar ?? `https://picsum.photos/seed/story_${index}/120/120`,
-      posterId: poster.id,
-      isNew: !hasSeenPoster(poster.id),
-      status: statusCycle[index % statusCycle.length],
-    }));
-
-    const fallbackUsers = MOCK_USERS.map((user, index) => ({
-      id: `fallback_${user.id}`,
-      userId: user.id,
-      username: user.username,
-      avatar: user.avatar,
-      isNew: index % 2 === 0,
-      status: statusCycle[(index + fromPosters.length) % statusCycle.length],
-    }));
-
-    const merged = [...fromPosters, ...fallbackUsers];
-    const seen = new Set<string>();
-
-    return merged.filter((entry) => {
-      if (seen.has(entry.userId)) {
-        return false;
-      }
-
-      seen.add(entry.userId);
-      return true;
-    }).slice(0, 10);
-  }, [freshPosters, hasSeenPoster]);
-
-  const listingById = React.useMemo(
-    () => new Map(listings.map((listing) => [listing.id, listing])),
-    [listings],
+  const gridTileWidth = React.useMemo(
+    () => (windowWidth - GRID_GAP * 4) / 3,
+    [windowWidth],
   );
 
-  const fallbackListingId = listings[0]?.id;
+  const gridTileHeight = React.useMemo(() => {
+    const tabBarHeight = TAB_BAR_BASE_HEIGHT + Math.max(insets.bottom, 8);
+    const rawViewportHeight =
+      windowHeight - (headerCollapsedHeight + 2) - listHeaderHeight - tabBarHeight - 10;
+    const boundedViewportHeight = Math.max(rawViewportHeight, GRID_MIN_HEIGHT * 2 + GRID_GAP);
+    const rawTileHeight = (boundedViewportHeight - GRID_GAP) / 2;
+    return Math.max(GRID_MIN_HEIGHT, Math.min(GRID_MAX_HEIGHT, Math.round(rawTileHeight)));
+  }, [headerCollapsedHeight, insets.bottom, listHeaderHeight, windowHeight]);
 
   const exploreData = React.useMemo<ExploreTile[]>(() => {
-    let ratioCursor = 0;
-
-    const nextRatio = () => {
-      const ratio = STAGGERED_RATIOS[ratioCursor % STAGGERED_RATIOS.length];
-      ratioCursor += 1;
-      return ratio;
-    };
-
-    const listingTiles = listings.map((item): ExploreTile => ({
+    return listings.map((item): ExploreTile => ({
       id: `item_${item.id}`,
       type: 'listing',
       mediaType: 'image',
@@ -442,112 +362,12 @@ export default function HomeScreen() {
       price: item.price,
       routeId: item.id,
       caption: item.title,
-      aspectRatio: nextRatio(),
+      // Fixed tile geometry keeps feed density near strict 3x2 in the viewport.
+      aspectRatio: 1,
     }));
+  }, [listings]);
 
-    const clipTiles = TREND_CLIPS.map((clip, index): ExploreTile => ({
-      id: `clip_${clip.id}`,
-      type: 'clip',
-      mediaType: 'video',
-      mediaUri: clip.videoUri,
-      posterUri: clip.posterUri,
-      likes: clip.likes,
-      routeId: listings[index % Math.max(1, listings.length)]?.id ?? fallbackListingId,
-      caption: clip.title,
-      aspectRatio: nextRatio(),
-    }));
-
-    const editorialTiles = feedLooks.map((look): ExploreTile => ({
-      id: `look_${look.id}`,
-      type: 'look',
-      mediaType: 'image',
-      mediaUri: look.coverImage,
-      likes: look.likes,
-      routeId: look.items.find((entry) => listingById.has(entry.id))?.id ?? fallbackListingId,
-      caption: look.title,
-      aspectRatio: 3 / 4,
-    }));
-
-    const baseTiles: ExploreTile[] = [];
-    const maxLen = Math.max(listingTiles.length, clipTiles.length);
-
-    for (let index = 0; index < maxLen; index += 1) {
-      if (index < listingTiles.length) {
-        baseTiles.push(listingTiles[index]);
-      }
-
-      if (index < clipTiles.length) {
-        baseTiles.push(clipTiles[index]);
-      }
-    }
-
-    const sequence: ExploreTile[] = [];
-    let editorialIndex = 0;
-
-    baseTiles.forEach((tile, index) => {
-      sequence.push(tile);
-      if ((index + 1) % 4 === 0 && editorialIndex < editorialTiles.length) {
-        sequence.push(editorialTiles[editorialIndex]);
-        editorialIndex += 1;
-      }
-    });
-
-    while (editorialIndex < editorialTiles.length) {
-      sequence.push(editorialTiles[editorialIndex]);
-      editorialIndex += 1;
-    }
-
-    return sequence;
-  }, [fallbackListingId, feedLooks, listingById, listings]);
-
-  const exploreRows = React.useMemo<ExploreRow[]>(() => {
-    const rows: ExploreRow[] = [];
-    let pending: ExploreTile[] = [];
-
-    exploreData.forEach((tile) => {
-      if (tile.type === 'look') {
-        if (pending.length > 0) {
-          rows.push({
-            id: `row_${pending[0].id}_${pending[1]?.id ?? 'solo'}`,
-            type: 'pair',
-            left: pending[0],
-            right: pending[1],
-          });
-          pending = [];
-        }
-
-        rows.push({
-          id: `row_${tile.id}`,
-          type: 'look',
-          look: tile,
-        });
-        return;
-      }
-
-      pending.push(tile);
-      if (pending.length === 2) {
-        rows.push({
-          id: `row_${pending[0].id}_${pending[1].id}`,
-          type: 'pair',
-          left: pending[0],
-          right: pending[1],
-        });
-        pending = [];
-      }
-    });
-
-    if (pending.length > 0) {
-      rows.push({
-        id: `row_${pending[0].id}_solo`,
-        type: 'pair',
-        left: pending[0],
-      });
-    }
-
-    return rows;
-  }, [exploreData]);
-
-  const feedGridData = showFeedLoadingSkeleton ? [] : exploreRows;
+  const feedGridData = showFeedLoadingSkeleton ? [] : exploreData;
 
   const viewabilityConfig = React.useRef({
     itemVisiblePercentThreshold: 70,
@@ -559,17 +379,9 @@ export default function HomeScreen() {
       const nextVisible = new Set<string>();
 
       viewableItems.forEach((token) => {
-        const row = token.item as ExploreRow | undefined;
-        if (token.isViewable && row) {
-          if (row.type === 'look') {
-            nextVisible.add(row.look.id);
-            return;
-          }
-
-          nextVisible.add(row.left.id);
-          if (row.right) {
-            nextVisible.add(row.right.id);
-          }
+        const tile = token.item as ExploreTile | undefined;
+        if (token.isViewable && tile) {
+          nextVisible.add(tile.id);
         }
       });
 
@@ -581,130 +393,10 @@ export default function HomeScreen() {
     setPeekItem(null);
   }, []);
 
-  const renderStoriesRow = () => (
-    <View style={styles.storiesSection}>
-      <View style={styles.sectionRow}>
-        <Text style={styles.sectionTitle}>Pulse</Text>
-        <Text style={styles.sectionHint}>who is active now</Text>
-      </View>
-
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.storiesScroll}
-      >
-        <AnimatedPressable
-          style={styles.storyCreateWrap}
-          activeOpacity={0.85}
-          onPress={() => navigation.navigate('CreatePoster')}
-        >
-          <View style={styles.storyCreateRing}>
-            <Ionicons name="add" size={20} color={Colors.textInverse} />
-          </View>
-          <Text style={styles.storyName}>Create</Text>
-        </AnimatedPressable>
-
-        {storyBubbles.map((story) => (
-          <AnimatedPressable
-            key={story.id}
-            style={styles.storyItem}
-            activeOpacity={0.85}
-            onPress={() => {
-              if (story.posterId) {
-                navigation.navigate('PosterViewer', { posterId: story.posterId });
-                return;
-              }
-
-              navigation.navigate('UserProfile', { userId: story.userId, isMe: false });
-            }}
-          >
-              <LinearGradient
-                colors={STORY_STATUS_GRADIENT[story.status]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={[styles.storyRingGradient, !story.isNew && styles.storyRingGradientMuted]}
-              >
-                <View style={styles.storyRingInner}>
-                  <CachedImage
-                    uri={story.avatar}
-                    style={styles.storyAvatar}
-                    containerStyle={styles.storyAvatarWrap}
-                    contentFit="cover"
-                  />
-                </View>
-                {story.isNew ? <View style={styles.storyPulseDot} /> : null}
-              </LinearGradient>
-            <Text style={styles.storyName} numberOfLines={1}>@{story.username}</Text>
-              <Text style={styles.storyStatus} numberOfLines={1}>{STORY_STATUS_LABEL[story.status]}</Text>
-          </AnimatedPressable>
-        ))}
-      </ScrollView>
-    </View>
-  );
-
-  const renderLooksRail = () => (
-    <View style={styles.looksSection}>
-      <View style={styles.sectionRow}>
-        <Text style={styles.sectionTitle}>Looks</Text>
-        <Text style={styles.sectionHint}>swipe for editorial picks</Text>
-      </View>
-
-      <ScrollView
-        horizontal
-        pagingEnabled
-        decelerationRate="fast"
-        snapToInterval={SCREEN_WIDTH * 0.86}
-        snapToAlignment="start"
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.looksRail}
-      >
-        {feedLooks.map((look) => (
-          <AnimatedPressable
-            key={look.id}
-            style={styles.lookCard}
-            activeOpacity={0.92}
-            onPress={() => navigation.navigate('ItemDetail', { itemId: look.items[0]?.id ?? fallbackListingId })}
-          >
-            <CachedImage
-              uri={look.coverImage}
-              style={styles.lookImage}
-              containerStyle={styles.lookImageWrap}
-              contentFit="cover"
-            />
-            <View style={styles.lookOverlay}>
-              <View style={styles.lookOwnerRow}>
-                <CachedImage
-                  uri={look.creator.avatar}
-                  style={styles.lookOwnerAvatar}
-                  containerStyle={styles.lookOwnerAvatarWrap}
-                  contentFit="cover"
-                />
-                <Text style={styles.lookOwnerName}>@{look.creator.name}</Text>
-                {look.creator.isVerified ? (
-                  <Ionicons name="checkmark-circle" size={14} color={SOCIAL_RING} />
-                ) : null}
-              </View>
-
-              <Text style={styles.lookTitle}>{look.title}</Text>
-              <Text style={styles.lookDescription} numberOfLines={1}>{look.description}</Text>
-
-              <View style={styles.lookMetaRow}>
-                <View style={styles.lookMetaPill}>
-                  <Ionicons name="heart" size={12} color="#fff" />
-                  <Text style={styles.lookMetaText}>{look.likes}</Text>
-                </View>
-                <View style={styles.lookMetaPill}>
-                  <Ionicons name="chatbubble-outline" size={12} color="#fff" />
-                  <Text style={styles.lookMetaText}>{look.comments}</Text>
-                </View>
-                <Text style={styles.lookTime}>{look.timeAgo}</Text>
-              </View>
-            </View>
-          </AnimatedPressable>
-        ))}
-      </ScrollView>
-    </View>
-  );
+  const handleListHeaderLayout = React.useCallback((event: LayoutChangeEvent) => {
+    const measuredHeight = Math.round(event.nativeEvent.layout.height);
+    setListHeaderHeight((previous) => (Math.abs(previous - measuredHeight) > 1 ? measuredHeight : previous));
+  }, []);
 
   const renderPosters = () => (
     <View style={styles.postersSection}>
@@ -739,7 +431,15 @@ export default function HomeScreen() {
             onPress={() => navigation.navigate('PosterViewer', { posterId: poster.id })}
           >
             <View style={[styles.posterTile, hasSeenPoster(poster.id) ? styles.posterTileSeen : styles.posterTileUnseen]}>
-              <CachedImage uri={poster.image} style={styles.posterImage} contentFit="cover" />
+              <CachedImage
+                uri={
+                  poster.image ||
+                  listings.find((listing) => listing.id === poster.listingId)?.images?.[0] ||
+                  'https://picsum.photos/seed/poster-fallback-home/400/500'
+                }
+                style={styles.posterImage}
+                contentFit="cover"
+              />
               <View style={styles.posterShade} />
 
               <View style={styles.posterTopRow}>
@@ -809,223 +509,59 @@ export default function HomeScreen() {
   };
 
   const renderExploreLoadingState = () => (
-    <View>
-      <View style={styles.exploreLoadingGrid}>
-        {Array.from({ length: 4 }).map((_, index) => (
-          <View key={`feed_pair_loading_${index}`} style={styles.exploreLoadingItem}>
-            <SkeletonLoader width="100%" height={index % 2 === 0 ? 258 : 214} borderRadius={14} />
-          </View>
-        ))}
-      </View>
-
-      <View style={styles.lookFeedRow}>
-        <SkeletonLoader width="100%" height={328} borderRadius={18} />
-      </View>
-
-      <View style={styles.exploreLoadingGrid}>
-        {Array.from({ length: 4 }).map((_, index) => (
-          <View key={`feed_pair_loading_tail_${index}`} style={styles.exploreLoadingItem}>
-            <SkeletonLoader width="100%" height={index % 2 === 0 ? 222 : 274} borderRadius={14} />
-          </View>
-        ))}
-      </View>
-      <View style={styles.lookFeedRow}>
-        <SkeletonLoader width="100%" height={288} borderRadius={18} />
-      </View>
-      <View style={styles.exploreLoadingGrid}>
-        {Array.from({ length: 2 }).map((_, index) => (
-          <View key={`feed_pair_loading_final_${index}`} style={styles.exploreLoadingItem}>
-            <SkeletonLoader width="100%" height={index % 2 === 0 ? 246 : 206} borderRadius={14} />
-          </View>
-        ))}
-      </View>
+    <View style={styles.exploreLoadingGrid}>
+      {Array.from({ length: 8 }).map((_, index) => (
+        <View key={`feed_pair_loading_${index}`} style={[styles.exploreLoadingItem, { width: gridTileWidth }]}>
+          <SkeletonLoader width="100%" height={gridTileHeight} borderRadius={14} />
+        </View>
+      ))}
     </View>
   );
 
-  const ExploreGridItem = ({ item, index, isVisible }: { item: ExploreTile; index: number; isVisible: boolean }) => {
-    const bigHeartOpacity = useSharedValue(0);
-    const bigHeartScale = useSharedValue(0);
-    const [localLikes, setLocalLikes] = React.useState(item.likes);
-
-    const onDoubleTap = () => {
-      haptic.impactAsync(haptic.ImpactFeedbackStyle.Medium);
-      setLocalLikes((prev) => prev + 1);
-
-      bigHeartOpacity.value = withSequence(
-        withTiming(1, { duration: 120 }),
-        withTiming(1, { duration: 320 }),
-        withTiming(0, { duration: 260 }),
-      );
-      bigHeartScale.value = withSequence(
-        withTiming(1.3, { duration: 220 }),
-        withTiming(1, { duration: 220 }),
-        withTiming(0, { duration: 260 }),
-      );
-    };
-
-    const onOpenPeek = () => {
-      setPeekItem(item);
-    };
-
-    const doubleTap = Gesture.Tap()
-      .numberOfTaps(2)
-      .onEnd(() => {
-        runOnJS(onDoubleTap)();
-      });
-
-    const singleTap = Gesture.Tap().onEnd(() => {
-      if (item.routeId) {
-        runOnJS(navigation.navigate as any)('ItemDetail', { itemId: item.routeId });
-      }
-    });
-
-    const longPress = Gesture.LongPress()
-      .minDuration(280)
-      .onStart(() => {
-        runOnJS(onOpenPeek)();
-      });
-
-    const combinedGesture = Gesture.Exclusive(doubleTap, longPress, singleTap);
-
-    const bigHeartStyle = useAnimatedStyle(() => ({
-      opacity: bigHeartOpacity.value,
-      transform: [{ scale: bigHeartScale.value }],
-    }));
-
-    return (
-      <Reanimated.View
-        entering={FadeInDown.delay(Math.min(index, 12) * 36).duration(360)}
-        style={[styles.exploreItemBox, { aspectRatio: item.aspectRatio }]}
-      >
-        <GestureDetector gesture={combinedGesture}>
-          <View style={styles.exploreMediaWrap}>
-            <MediaPreview
-              uri={item.mediaUri}
-              posterUri={item.posterUri}
-              style={styles.exploreImage}
-              autoPlay={isVisible && !peekItem}
-              loop
-              muted
-              contentFit="cover"
-              isVisible={isVisible}
-              sharedTransitionTag={item.type === 'listing' && item.routeId ? `image-${item.routeId}-0` : undefined}
-            />
-
-            <View style={styles.exploreOverlay}>
-              {item.type === 'listing' ? (
-                <View style={styles.exploreTag}>
-                  <ThryftCartIcon size={12} color="#fff" />
-                  <Text style={styles.exploreTagText}>{formatFromFiat(item.price ?? 0, 'GBP', { displayMode: 'fiat' })}</Text>
-                </View>
-              ) : (
-                <View style={styles.exploreTag}>
-                  <Ionicons name="heart" size={12} color="#fff" />
-                  <Text style={styles.exploreTagText}>{localLikes}</Text>
-                </View>
-              )}
-            </View>
-
-            {item.mediaType === 'video' ? (
-              <View style={styles.videoBadge}>
-                <Ionicons name="play" size={12} color="#fff" />
-              </View>
-            ) : null}
-
-            <Reanimated.View style={[StyleSheet.absoluteFill, styles.bigHeartLayer, bigHeartStyle]}>
-              <Ionicons
-                name="heart"
-                size={100}
-                color="#fff"
-                style={{ shadowColor: '#000', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.34, shadowRadius: 12 }}
-              />
-            </Reanimated.View>
-          </View>
-        </GestureDetector>
-      </Reanimated.View>
-    );
-  };
-
-  const renderExploreItem = ({ item, index }: { item: ExploreTile; index: number }) => {
-    const isVisible = visibleTileIds.has(item.id);
-    return <ExploreGridItem item={item} index={index} isVisible={isVisible} />;
-  };
-
-  const renderEditorialLookRow = (look: ExploreTile) => {
-    const lookSource = feedLooks.find((entry) => `look_${entry.id}` === look.id);
-
-    return (
+  const ExploreGridItem = ({ item, isVisible }: { item: ExploreTile; isVisible: boolean }) => (
+    <View style={[styles.exploreItemBox, { width: gridTileWidth, height: gridTileHeight }]}>
       <AnimatedPressable
-        style={styles.lookFeedCard}
+        style={styles.exploreMediaWrap}
         activeOpacity={0.92}
         onPress={() => {
-          if (look.routeId) {
-            navigation.navigate('ItemDetail', { itemId: look.routeId });
+          if (!item.routeId) {
+            return;
           }
+
+          navigation.navigate('ItemDetail', { itemId: item.routeId });
         }}
+        onLongPress={() => setPeekItem(item)}
       >
-        <CachedImage
-          uri={look.mediaUri}
-          style={styles.lookImage}
-          containerStyle={styles.lookFeedImageWrap}
+        <MediaPreview
+          uri={item.mediaUri}
+          posterUri={item.posterUri}
+          style={styles.exploreImage}
+          autoPlay={isVisible && !peekItem}
+          loop
+          muted
           contentFit="cover"
+          isVisible={isVisible}
         />
 
-        <View style={styles.lookOverlay}>
-          {lookSource ? (
-            <>
-              <View style={styles.lookOwnerRow}>
-                <CachedImage
-                  uri={lookSource.creator.avatar}
-                  style={styles.lookOwnerAvatar}
-                  containerStyle={styles.lookOwnerAvatarWrap}
-                  contentFit="cover"
-                />
-                <Text style={styles.lookOwnerName}>@{lookSource.creator.name}</Text>
-                {lookSource.creator.isVerified ? <Ionicons name="checkmark-circle" size={14} color={SOCIAL_RING} /> : null}
-              </View>
-              <Text style={styles.lookTitle}>{lookSource.title}</Text>
-              <Text style={styles.lookDescription} numberOfLines={1}>{lookSource.description}</Text>
-              <View style={styles.lookMetaRow}>
-                <View style={styles.lookMetaPill}>
-                  <Ionicons name="heart" size={12} color="#fff" />
-                  <Text style={styles.lookMetaText}>{lookSource.likes}</Text>
-                </View>
-                <View style={styles.lookMetaPill}>
-                  <Ionicons name="chatbubble-outline" size={12} color="#fff" />
-                  <Text style={styles.lookMetaText}>{lookSource.comments}</Text>
-                </View>
-                <Text style={styles.lookTime}>{lookSource.timeAgo}</Text>
-              </View>
-            </>
-          ) : (
-            <Text style={styles.lookTitle}>{look.caption}</Text>
-          )}
+        <View style={styles.exploreOverlay}>
+          <View style={styles.exploreTag}>
+            <ThryftCartIcon size={11} color="#fff" />
+            <Text style={styles.exploreTagText}>{formatFromFiat(item.price ?? 0, 'GBP', { displayMode: 'fiat' })}</Text>
+          </View>
         </View>
       </AnimatedPressable>
-    );
+    </View>
+  );
+
+  const renderExploreItem = ({ item }: { item: ExploreTile }) => {
+    const isVisible = visibleTileIds.has(item.id);
+    return <ExploreGridItem item={item} isVisible={isVisible} />;
   };
 
-  const renderExploreRow = ({ item, index }: { item: ExploreRow; index: number }) => {
-    if (item.type === 'look') {
-      return (
-        <View style={styles.lookFeedRow}>
-          {renderEditorialLookRow(item.look)}
-        </View>
-      );
-    }
-
-    return (
-      <View style={styles.gridRow}>
-        {renderExploreItem({ item: item.left, index: index * 2 })}
-        {item.right ? renderExploreItem({ item: item.right, index: index * 2 + 1 }) : <View style={styles.gridSpacer} />}
-      </View>
-    );
-  };
-
-  const AnimatedFlatList = Reanimated.createAnimatedComponent(FlatList<ExploreRow>);
+  const AnimatedFlatList = Reanimated.createAnimatedComponent(FlatList<ExploreTile>);
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
+    <SafeAreaView style={styles.container} edges={['left', 'right']}>
       <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
       <Reanimated.View style={[styles.floatingHeaderShell, headerHeightStyle]}>
@@ -1035,9 +571,9 @@ export default function HomeScreen() {
           style={StyleSheet.absoluteFill}
         />
 
-        <View style={styles.headerForeground}>
-          <Reanimated.View style={headerTitleStyle}>
-            <Text style={styles.brandTitle}>Thryftverse</Text>
+        <View style={[styles.headerForeground, { paddingTop: insets.top + 2, paddingBottom: 8 }]}>
+          <Reanimated.View style={[headerTitleStyle, styles.headerTitleWrap]}>
+            <Text style={styles.brandTitle} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.8}>Thryftverse</Text>
             <Text style={styles.brandSubtitle}>Looks first. Listings second.</Text>
           </Reanimated.View>
 
@@ -1053,28 +589,30 @@ export default function HomeScreen() {
         </View>
       </Reanimated.View>
 
-      <RefreshIndicator scrollY={scrollY} isRefreshing={refreshing} topInset={HEADER_EXPANDED - 14} />
-
       <AnimatedFlatList
         ref={scrollRef}
         key="explore-roi-feed"
         data={feedGridData}
         keyExtractor={(item) => item.id}
+        numColumns={3}
+        columnWrapperStyle={styles.gridRow}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.feedContent}
+        contentContainerStyle={[styles.feedContent, { paddingTop: headerCollapsedHeight + 2 }]}
         ListHeaderComponent={
-          <View>
-            {showFeedLoadingSkeleton ? <StoriesRowSkeleton count={6} /> : renderStoriesRow()}
+          <View onLayout={handleListHeaderLayout}>
             {renderPosters()}
             {renderNewListingsBanner()}
           </View>
         }
         ListEmptyComponent={showFeedLoadingSkeleton ? renderExploreLoadingState : null}
-        renderItem={renderExploreRow}
+        renderItem={renderExploreItem}
         onScroll={scrollHandler}
         scrollEventThrottle={16}
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={viewabilityConfig}
+        initialNumToRender={6}
+        maxToRenderPerBatch={6}
+        windowSize={5}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -1165,18 +703,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+  headerTitleWrap: {
+    flex: 1,
+    paddingRight: 10,
+  },
   brandTitle: {
-    fontSize: 52,
+    fontSize: 30,
     fontFamily: Typography.family.extrabold,
-    letterSpacing: -1.5,
+    letterSpacing: -0.6,
     color: Colors.textPrimary,
-    lineHeight: 54,
+    lineHeight: 32,
   },
   brandSubtitle: {
-    marginTop: 2,
-    fontSize: 12,
+    marginTop: 1,
+    fontSize: 10,
     fontFamily: Typography.family.light,
-    letterSpacing: 0.3,
+    letterSpacing: 0.25,
     color: Colors.textMuted,
   },
   headerRight: {
@@ -1194,7 +736,6 @@ const styles = StyleSheet.create({
     borderColor: Colors.border,
   },
   feedContent: {
-    paddingTop: HEADER_EXPANDED + 8,
     paddingBottom: 120,
   },
   newListingsBannerWrap: {
@@ -1229,7 +770,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 10,
+    marginBottom: 8,
     paddingHorizontal: 16,
   },
   sectionTitle: {
@@ -1443,14 +984,14 @@ const styles = StyleSheet.create({
   },
 
   postersSection: {
-    marginTop: 4,
-    paddingBottom: 14,
+    marginTop: 0,
+    paddingBottom: 8,
     borderBottomWidth: 1,
     borderBottomColor: Colors.border,
   },
   postersScroll: {
     paddingHorizontal: 16,
-    gap: 12,
+    gap: 9,
   },
   feedStatusBanner: {
     marginTop: 10,
@@ -1458,14 +999,14 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   posterCard: {
-    width: 126,
+    width: 108,
   },
   posterTile: {
-    width: 126,
-    height: 150,
-    borderRadius: 14,
+    width: 108,
+    height: 128,
+    borderRadius: 12,
     overflow: 'hidden',
-    marginBottom: 6,
+    marginBottom: 5,
     position: 'relative',
     backgroundColor: Colors.surface,
   },
@@ -1486,34 +1027,34 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.2)',
   },
   posterCreateTile: {
-    width: 126,
-    height: 150,
-    borderRadius: 14,
-    marginBottom: 6,
+    width: 108,
+    height: 128,
+    borderRadius: 12,
+    marginBottom: 5,
     backgroundColor: Colors.textPrimary,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 10,
+    gap: 8,
   },
   posterCreateIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     backgroundColor: 'rgba(255,255,255,0.16)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   posterCreateLabel: {
     color: Colors.textInverse,
-    fontSize: 11,
+    fontSize: 10,
     fontFamily: Typography.family.semibold,
     textAlign: 'center',
   },
   posterTopRow: {
     position: 'absolute',
-    top: 6,
-    left: 6,
-    right: 6,
+    top: 5,
+    left: 5,
+    right: 5,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -1530,18 +1071,18 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   posterOwnerAvatarWrap: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
   },
   posterOwnerAvatar: {
     width: '100%',
     height: '100%',
-    borderRadius: 8,
+    borderRadius: 7,
   },
   posterOwnerName: {
     color: '#fff',
-    fontSize: 9,
+    fontSize: 8,
     fontFamily: Typography.family.medium,
     flex: 1,
   },
@@ -1556,7 +1097,7 @@ const styles = StyleSheet.create({
   },
   posterExpiryText: {
     color: '#fff',
-    fontSize: 10,
+    fontSize: 9,
     fontFamily: Typography.family.bold,
   },
   posterBottomOverlay: {
@@ -1570,8 +1111,8 @@ const styles = StyleSheet.create({
   },
   posterCaption: {
     color: '#fff',
-    fontSize: 10,
-    lineHeight: 14,
+    fontSize: 9,
+    lineHeight: 12,
     fontFamily: Typography.family.medium,
   },
   posterCardMetaRow: {
@@ -1580,17 +1121,17 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   posterUserName: {
-    fontSize: 11,
+    fontSize: 10,
     fontFamily: Typography.family.semibold,
     color: Colors.textPrimary,
   },
   posterFreshMeta: {
-    fontSize: 10,
+    fontSize: 9,
     fontFamily: Typography.family.bold,
     color: SOCIAL_RING,
   },
   posterSeenMeta: {
-    fontSize: 10,
+    fontSize: 9,
     fontFamily: Typography.family.medium,
     color: Colors.textMuted,
   },
@@ -1608,11 +1149,7 @@ const styles = StyleSheet.create({
     marginBottom: GRID_GAP,
     justifyContent: 'space-between',
   },
-  gridSpacer: {
-    width: GRID_TILE_WIDTH,
-  },
   exploreItemBox: {
-    width: GRID_TILE_WIDTH,
     borderRadius: 14,
     overflow: 'hidden',
     backgroundColor: PANEL_BG,
@@ -1671,7 +1208,6 @@ const styles = StyleSheet.create({
     gap: GRID_GAP,
   },
   exploreLoadingItem: {
-    width: GRID_TILE_WIDTH,
     marginBottom: GRID_GAP,
   },
 

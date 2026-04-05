@@ -51,6 +51,7 @@ async function postKeyService<T>(path: string, body: object): Promise<T> {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
+      'x-service-token': config.keyServiceClientToken,
     },
     body: JSON.stringify(body),
   });
@@ -65,11 +66,10 @@ async function postKeyService<T>(path: string, body: object): Promise<T> {
 async function postKeyServiceWithAdmin<T>(path: string, body: object): Promise<T> {
   const headers: Record<string, string> = {
     'content-type': 'application/json',
+    'x-service-token': config.keyServiceClientToken,
   };
 
-  if (config.keyServiceAdminToken) {
-    headers['x-admin-token'] = config.keyServiceAdminToken;
-  }
+  headers['x-admin-token'] = config.keyServiceAdminToken;
 
   const response = await fetch(`${config.keyServiceUrl}${path}`, {
     method: 'POST',
