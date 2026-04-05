@@ -359,7 +359,7 @@ export default function CreateSyndicateScreen() {
             keyboardType="number-pad"
             placeholder="20"
             placeholderTextColor={Colors.textMuted}
-            selectionColor={Colors.accent}
+            selectionColor={Colors.accentGold}
           />
           <Text style={styles.inputHint}>Maximum 20 units per asset</Text>
 
@@ -371,7 +371,7 @@ export default function CreateSyndicateScreen() {
             keyboardType="decimal-pad"
             placeholder="0.00"
             placeholderTextColor={Colors.textMuted}
-            selectionColor={Colors.accent}
+            selectionColor={Colors.accentGold}
           />
 
           <Text style={styles.inputLabel}>Unit Price ({STABLE_COIN})</Text>
@@ -382,7 +382,7 @@ export default function CreateSyndicateScreen() {
             keyboardType="decimal-pad"
             placeholder="0.00"
             placeholderTextColor={Colors.textMuted}
-            selectionColor={Colors.accent}
+            selectionColor={Colors.accentGold}
           />
         </View>
 
@@ -445,7 +445,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   issueBtn: {
-    backgroundColor: Colors.accent,
+    backgroundColor: Colors.accentGold,
     borderRadius: 16,
     paddingHorizontal: 12,
     paddingVertical: 8,
@@ -665,6 +665,6 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: Colors.accent,
+    backgroundColor: Colors.accentGold,
   },
 });

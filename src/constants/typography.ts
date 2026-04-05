@@ -2,10 +2,12 @@ import { TextStyle } from 'react-native';
 
 export const Typography = {
   family: {
+    light: 'Inter_300Light',
     regular: 'Inter_400Regular',
     medium: 'Inter_500Medium',
     semibold: 'Inter_600SemiBold',
     bold: 'Inter_700Bold',
+    extrabold: 'Inter_800ExtraBold',
   },
   size: {
     micro: 10,
@@ -15,6 +17,8 @@ export const Typography = {
     title: 21,
     heading: 30,
     display: 40,
+    hero: 56,
+    giant: 72,
   },
   tracking: {
     tight: -0.42,
@@ -26,10 +30,28 @@ export const Typography = {
 
 export const TypeStyles: { [key: string]: TextStyle } = {
   display: {
-    fontFamily: Typography.family.bold,
+    fontFamily: Typography.family.extrabold,
     fontSize: Typography.size.display,
     letterSpacing: Typography.tracking.tight,
     lineHeight: 46,
+  },
+  hero: {
+    fontFamily: Typography.family.extrabold,
+    fontSize: Typography.size.hero,
+    letterSpacing: -1.1,
+    lineHeight: 60,
+  },
+  heroDisplay: {
+    fontFamily: Typography.family.extrabold,
+    fontSize: Typography.size.hero,
+    letterSpacing: -1.4,
+    lineHeight: 60,
+  },
+  giantDisplay: {
+    fontFamily: Typography.family.extrabold,
+    fontSize: Typography.size.giant,
+    letterSpacing: -2,
+    lineHeight: 74,
   },
   heading: {
     fontFamily: Typography.family.bold,
@@ -50,9 +72,15 @@ export const TypeStyles: { [key: string]: TextStyle } = {
     lineHeight: 22,
   },
   caption: {
-    fontFamily: Typography.family.regular,
+    fontFamily: Typography.family.light,
     fontSize: Typography.size.caption,
     letterSpacing: Typography.tracking.wide,
+    lineHeight: 18,
+  },
+  metadata: {
+    fontFamily: Typography.family.light,
+    fontSize: Typography.size.caption,
+    letterSpacing: 0.4,
     lineHeight: 18,
   },
   overline: {

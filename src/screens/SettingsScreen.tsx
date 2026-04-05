@@ -14,6 +14,7 @@ import { ActiveTheme, Colors } from '../constants/colors';
 import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
 import { useStore } from '../store/useStore';
+import { logoutFromSession } from '../services/authApi';
 import { CURRENCIES, SupportedCurrencyCode } from '../constants/currencies';
 import { useCurrencyPref } from '../hooks/useCurrencyPref';
 import { BottomSheetPicker } from '../components/BottomSheetPicker';
@@ -301,7 +302,8 @@ export default function SettingsScreen({ navigation }: Props) {
         <AnimatedPressable 
           style={styles.logoutPill} 
           activeOpacity={0.8}
-          onPress={() => {
+          onPress={async () => {
+            await logoutFromSession();
             logout();
             navigation.replace('AuthLanding');
           }}

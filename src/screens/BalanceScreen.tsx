@@ -13,11 +13,15 @@ import { StackScreenProps } from '@react-navigation/stack';
 import { AnimatedPressable } from '../components/AnimatedPressable';
 import { RootStackParamList } from '../navigation/types';
 import { ActiveTheme, Colors } from '../constants/colors';
+import { Typography } from '../constants/typography';
 import { useCurrencyContext } from '../context/CurrencyContext';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useToast } from '../context/ToastContext';
 import { formatIzeAmount, toIze } from '../utils/currency';
 import { convertDisplayToGbpAmount } from '../utils/currencyAuthoringFlows';
+import { OnezeCoinIcon } from '../components/icons/OnezeCoinIcon';
+import { useStore } from '../store/useStore';
+import { mintIze } from '../services/walletApi';
 
 type Props = StackScreenProps<RootStackParamList, 'Balance' | 'Wallet'>;
 type TxFilter = 'all' | 'sale' | 'purchase' | 'withdrawal';
@@ -39,6 +43,7 @@ export default function BalanceScreen({ navigation }: Props) {
   const { currencyCode, goldRates } = useCurrencyContext();
   const { formatFromFiat, formatFromIze } = useFormattedPrice();
   const { show } = useToast();
+  const currentUser = useStore((state) => state.currentUser);
 
   const pendingBalance = 45;
 
@@ -69,7 +74,7 @@ export default function BalanceScreen({ navigation }: Props) {
     show('Enter an amount to convert into 1ze.', 'info');
   };
 
-  const handleLoadIze = () => {
+  const handleLoadIze = async () => {
     if (!Number.isFinite(loadFiatValue) || loadFiatValue <= 0) {
       show('Enter a valid amount to convert into 1ze.', 'error');
       return;
@@ -82,9 +87,27 @@ export default function BalanceScreen({ navigation }: Props) {
     }
 
     const netCreditGbp = Number((loadAmountGbp * (1 - LOAD_IZE_FEE_RATE)).toFixed(2));
-    setAvailableBalance((prev) => Number((prev + netCreditGbp).toFixed(2)));
-    setLoadFiatInput('');
-    show(`Loaded ${formatIzeAmount(loadNetIze)} into your wallet.`, 'success');
+    const actingUserId = currentUser?.id ?? 'u1';
+
+    try {
+      await mintIze({
+        userId: actingUserId,
+        fiatAmount: netCreditGbp,
+        fiatCurrency: 'GBP',
+        metadata: {
+          source: 'balance_screen_load',
+          displayCurrency: currencyCode,
+          enteredDisplayAmount: loadFiatValue,
+          uiFeeRate: LOAD_IZE_FEE_RATE,
+        },
+      });
+
+      setAvailableBalance((prev) => Number((prev + netCreditGbp).toFixed(2)));
+      setLoadFiatInput('');
+      show(`Loaded ${formatIzeAmount(loadNetIze)} into your wallet.`, 'success');
+    } catch {
+      show('Unable to load 1ze right now. Please try again shortly.', 'error');
+    }
   };
 
   return (
@@ -95,54 +118,54 @@ export default function BalanceScreen({ navigation }: Props) {
         <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
         </AnimatedPressable>
-        <Text style={styles.hugeTitle}>Wallet</Text>
+        <Text style={styles.hugeTitle}>1ze wallet</Text>
       </View>
 
       <ScrollView ref={scrollRef} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.pegInfoCard}>
-          <Ionicons name="sparkles-outline" size={15} color={TINT_TEXT} />
+          <OnezeCoinIcon size={18} />
           <Text style={styles.pegInfoText}>
             1 1ze = 1 gram of gold. Live local value: {formatFromIze(1, { displayMode: 'fiat' })} per 1ze.
           </Text>
         </View>
 
         <View style={styles.heroGroup}>
-          <View style={styles.pendingCard}>
-            <View>
-              <Text style={styles.pendingTitle}>Pending balance</Text>
-            </View>
-            <View style={styles.pendingAmountCol}>
-              <Text style={styles.pendingAmount}>{formatFromFiat(pendingBalance, 'GBP', { displayMode: 'fiat' })}</Text>
-              <Text style={styles.pendingIze}>{formatIzeAmount(pendingIze)}</Text>
-            </View>
-          </View>
-
           <View style={styles.balanceHero}>
             <Text style={styles.balanceAmount}>{formatFromFiat(availableBalance, 'GBP', { displayMode: 'fiat' })}</Text>
             <Text style={styles.balanceIze}>{formatIzeAmount(availableIze)}</Text>
-            <Text style={styles.balanceLabel}>Available balance</Text>
+            <Text style={styles.balanceLabel}>available balance</Text>
 
             <View style={styles.balanceActions}>
               <AnimatedPressable style={styles.actionBtn} activeOpacity={0.85} onPress={() => navigation.navigate('Withdraw')}>
                 <View style={styles.actionCircle}>
                   <Ionicons name="library-outline" size={22} color={Colors.textPrimary} />
                 </View>
-                <Text style={styles.actionText}>Withdraw</Text>
+                <Text style={styles.actionText}>withdraw</Text>
               </AnimatedPressable>
 
               <AnimatedPressable style={styles.actionBtn} activeOpacity={0.85} onPress={handleConvertPress}>
                 <View style={styles.actionCircle}>
                   <Ionicons name="swap-horizontal-outline" size={22} color={Colors.textPrimary} />
                 </View>
-                <Text style={styles.actionText}>Convert</Text>
+                <Text style={styles.actionText}>convert</Text>
               </AnimatedPressable>
 
               <AnimatedPressable style={styles.actionBtn} activeOpacity={0.85} onPress={() => navigation.navigate('MainTabs')}>
                 <View style={styles.actionCircle}>
                   <Ionicons name="cart-outline" size={22} color={Colors.textPrimary} />
                 </View>
-                <Text style={styles.actionText}>Shop</Text>
+                <Text style={styles.actionText}>shop</Text>
               </AnimatedPressable>
+            </View>
+          </View>
+
+          <View style={styles.pendingCard}>
+            <View>
+              <Text style={styles.pendingTitle}>pending balance</Text>
+            </View>
+            <View style={styles.pendingAmountCol}>
+              <Text style={styles.pendingAmount}>{formatFromFiat(pendingBalance, 'GBP', { displayMode: 'fiat' })}</Text>
+              <Text style={styles.pendingIze}>{formatIzeAmount(pendingIze)}</Text>
             </View>
           </View>
         </View>
@@ -245,7 +268,13 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingTop: 10, paddingBottom: 16, gap: 12 },
   backBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.card, alignItems: 'center', justifyContent: 'center' },
-  hugeTitle: { fontSize: 30, fontFamily: 'Inter_700Bold', color: Colors.textPrimary, letterSpacing: -0.3 },
+  hugeTitle: {
+    fontSize: 32,
+    lineHeight: 36,
+    fontFamily: Typography.family.bold,
+    color: Colors.textPrimary,
+    letterSpacing: -0.42,
+  },
   content: { paddingHorizontal: 20, paddingBottom: 34 },
 
   pegInfoCard: {
@@ -268,15 +297,29 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_600SemiBold',
   },
 
-  heroGroup: { marginBottom: 22, gap: 14 },
-  balanceHero: { backgroundColor: Colors.card, borderRadius: 28, borderWidth: 1, borderColor: Colors.border, paddingVertical: 34, alignItems: 'center' },
-  balanceLabel: { fontSize: 12, fontFamily: 'Inter_600SemiBold', color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 18 },
-  balanceAmount: { fontSize: 40, fontFamily: 'Inter_700Bold', color: Colors.textPrimary, letterSpacing: -0.8 },
-  balanceIze: { fontSize: 14, fontFamily: 'Inter_500Medium', color: Colors.textSecondary, marginTop: 6, marginBottom: 10 },
-  balanceActions: { flexDirection: 'row', gap: 18, marginTop: 8 },
+  heroGroup: { marginBottom: 22, gap: 12 },
+  balanceHero: { backgroundColor: Colors.card, borderRadius: 28, borderWidth: 1, borderColor: Colors.border, paddingTop: 22, paddingBottom: 18, alignItems: 'center' },
+  balanceLabel: { fontSize: 10, fontFamily: 'Inter_300Light', color: Colors.textMuted, letterSpacing: 0.92, marginBottom: 12, textTransform: 'uppercase' },
+  balanceAmount: {
+    fontSize: 96,
+    lineHeight: 98,
+    fontFamily: Typography.family.light,
+    color: Colors.accentGold,
+    letterSpacing: -3.4,
+    fontVariant: ['tabular-nums'],
+  },
+  balanceIze: {
+    fontSize: 12,
+    fontFamily: Typography.family.medium,
+    color: Colors.textSecondary,
+    marginTop: 6,
+    marginBottom: 8,
+    fontVariant: ['tabular-nums'],
+  },
+  balanceActions: { flexDirection: 'row', gap: 14, marginTop: 4 },
   actionBtn: { alignItems: 'center', gap: 8 },
-  actionCircle: { width: 54, height: 54, borderRadius: 27, backgroundColor: Colors.cardAlt, alignItems: 'center', justifyContent: 'center' },
-  actionText: { fontSize: 13, fontFamily: 'Inter_500Medium', color: Colors.textPrimary },
+  actionCircle: { width: 48, height: 48, borderRadius: 24, backgroundColor: Colors.cardAlt, alignItems: 'center', justifyContent: 'center' },
+  actionText: { fontSize: 11, fontFamily: 'Inter_500Medium', color: Colors.textSecondary },
 
   pendingCard: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: Colors.card, borderRadius: 20, borderWidth: 1, borderColor: Colors.border, padding: 18 },
   pendingTitle: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: Colors.textSecondary },
@@ -309,7 +352,7 @@ const styles = StyleSheet.create({
   loadBtn: {
     marginTop: 12,
     borderRadius: 999,
-    backgroundColor: Colors.accent,
+    backgroundColor: Colors.accentGold,
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 12,
@@ -325,7 +368,7 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 13, fontFamily: 'Inter_600SemiBold', color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 1.2, marginLeft: 6, marginBottom: 12 },
   filterRow: { flexDirection: 'row', gap: 8, marginBottom: 10, paddingHorizontal: 6 },
   filterChip: { borderRadius: 999, borderWidth: 1, borderColor: Colors.border, backgroundColor: Colors.cardAlt, paddingHorizontal: 10, paddingVertical: 6 },
-  filterChipActive: { borderColor: Colors.accent, backgroundColor: Colors.accent },
+  filterChipActive: { borderColor: Colors.accentGold, backgroundColor: Colors.accentGold },
   filterChipText: { color: Colors.textSecondary, fontSize: 11, fontFamily: 'Inter_700Bold', letterSpacing: 0.4 },
   filterChipTextActive: { color: Colors.textInverse },
 
@@ -335,7 +378,7 @@ const styles = StyleSheet.create({
   iconCircle: { width: 40, height: 40, borderRadius: 20, backgroundColor: Colors.cardAlt, alignItems: 'center', justifyContent: 'center', marginRight: 14 },
   txTitle: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary, marginBottom: 4, lineHeight: 18 },
   txDate: { fontSize: 12, color: Colors.textSecondary, fontFamily: 'Inter_400Regular', textTransform: 'capitalize', lineHeight: 16 },
-  txStatusPending: { color: Colors.accent },
+  txStatusPending: { color: Colors.accentGold },
   txStatusCompleted: { color: Colors.textSecondary },
   txAmount: { fontSize: 15, fontFamily: 'Inter_700Bold', color: Colors.textPrimary },
 });

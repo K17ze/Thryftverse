@@ -30,6 +30,7 @@ import {
   sanitizeTradeQuantityInput,
   TradeSide,
 } from '../utils/tradeFlow';
+import { parseApiError } from '../lib/apiClient';
 import { placeSyndicateOrder } from '../services/marketApi';
 
 type NavT = StackNavigationProp<RootStackParamList>;
@@ -43,6 +44,24 @@ const PANEL_TINT_BG = IS_LIGHT ? '#ece4d8' : '#2f291f';
 const PANEL_TINT_BORDER = IS_LIGHT ? '#d0c3af' : '#4f4638';
 const ALERT_BG = IS_LIGHT ? '#f4e0e0' : '#221515';
 const ALERT_BORDER = IS_LIGHT ? '#d9b5b5' : '#4a2d2d';
+
+const COMPLIANCE_BLOCK_CODES = new Set([
+  'KYC_REQUIRED',
+  'KYC_LEVEL_INSUFFICIENT',
+  'JURISDICTION_BLOCKED',
+  'JURISDICTION_RULE_MISSING',
+  'SANCTIONS_BLOCKED',
+  'SANCTIONS_REVIEW_REQUIRED',
+  'TRADING_DISABLED',
+  'MAX_ORDER_NOTIONAL_EXCEEDED',
+  'MAX_DAILY_NOTIONAL_EXCEEDED',
+  'MAX_OPEN_ORDERS_EXCEEDED',
+  'AML_BLOCKED',
+]);
+
+function isComplianceBlocked(code: string | null) {
+  return !!code && COMPLIANCE_BLOCK_CODES.has(code);
+}
 
 export default function TradeScreen() {
   const navigation = useNavigation<NavT>();
@@ -114,11 +133,7 @@ export default function TradeScreen() {
       return;
     }
 
-    if (decision.kind === 'queue') {
-      show(decision.message, 'info');
-      navigation.goBack();
-      return;
-    }
+    const expectedQueue = decision.kind === 'queue';
 
     if (!asset) {
       show('Asset not found', 'error');
@@ -129,29 +144,73 @@ export default function TradeScreen() {
 
     try {
       const actingUserId = currentUser?.id ?? 'u1';
-      let backendSynced = false;
+      let remoteOrder: Awaited<ReturnType<typeof placeSyndicateOrder>> | null = null;
+      let canFallbackLocal = false;
 
       try {
-        await placeSyndicateOrder(asset.id, {
+        remoteOrder = await placeSyndicateOrder(asset.id, {
           userId: actingUserId,
           side,
           units: quote.quantity,
+          orderType: orderMode,
+          limitPriceGbp: orderMode === 'limit' && quote.hasLimitPrice ? quote.limitPrice : undefined,
         });
-        backendSynced = true;
-      } catch {
-        backendSynced = false;
+      } catch (error) {
+        const parsedError = parseApiError(error, 'Unable to submit order');
+        if (!parsedError.isNetworkError) {
+          if (isComplianceBlocked(parsedError.code)) {
+            show(parsedError.message, 'error');
+            return;
+          }
+
+          show(parsedError.message, parsedError.status && parsedError.status >= 500 ? 'error' : 'info');
+          return;
+        }
+
+        canFallbackLocal = true;
+      }
+
+      if (remoteOrder) {
+        if (remoteOrder.order.status === 'rejected') {
+          show('Order rejected by matching engine.', 'error');
+          return;
+        }
+
+        if (remoteOrder.order.status === 'open' || remoteOrder.order.status === 'partially_filled' || expectedQueue) {
+          show('Offer placed on the server order book.', 'info');
+        } else {
+          show('Order executed on SYNDICATE engine.', 'success');
+        }
+
+        if (remoteOrder.aml?.alertId) {
+          show('Trade is flagged for AML review.', 'info');
+        }
+
+        navigation.goBack();
+        return;
+      }
+
+      if (!canFallbackLocal) {
+        show('Unable to submit order', 'error');
+        return;
+      }
+
+      if (expectedQueue) {
+        show(decision.message, 'info');
+        navigation.goBack();
+        return;
       }
 
       const result = side === 'buy'
         ? buySyndicateUnits(asset, actingUserId, quote.quantity)
         : sellSyndicateUnits(asset, actingUserId, quote.quantity);
 
-      if (!backendSynced && !result.ok) {
+      if (!result.ok) {
         show(result.message ?? 'Order failed', 'error');
         return;
       }
 
-      show(result.message ?? 'Order filled', backendSynced ? 'success' : 'info');
+      show(`${result.message ?? 'Order filled'}. Backend sync unavailable.`, 'info');
 
       if (result.deliveryTriggered && result.deliveryListingId) {
         navigation.navigate('Checkout', { itemId: result.deliveryListingId });
@@ -467,7 +526,7 @@ const styles = StyleSheet.create({
   submitBtn: {
     marginTop: 14,
     borderRadius: 12,
-    backgroundColor: Colors.accent,
+    backgroundColor: Colors.accentGold,
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 12,

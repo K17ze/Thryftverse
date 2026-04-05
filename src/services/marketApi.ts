@@ -34,6 +34,10 @@ export interface MarketAuctionBidResult {
     currentBidGbp: number;
     bidCount: number;
   };
+  aml?: {
+    alertId: string;
+    status: string;
+  } | null;
 }
 
 export type SyndicateSettlementMode = 'GBP' | 'TVUSD' | 'HYBRID';
@@ -65,12 +69,30 @@ export interface MarketSyndicateOrder {
   assetId: string;
   userId: string;
   side: SyndicateOrderSide;
+  orderType?: 'market' | 'limit';
+  limitPriceGbp?: number | null;
   units: number;
+  remainingUnits?: number;
+  filledUnits?: number;
   unitPriceGbp: number;
   feeGbp: number;
   totalGbp: number;
-  status: 'filled' | 'rejected';
+  status: 'open' | 'partially_filled' | 'filled' | 'cancelled' | 'rejected';
   createdAt: string;
+  updatedAt?: string;
+}
+
+export interface MarketSyndicateBuyoutOffer {
+  id: string;
+  assetId: string;
+  bidderUserId: string;
+  offerPriceGbp: number;
+  targetUnits: number;
+  acceptedUnits: number;
+  status: string;
+  expiresAt: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type MarketHistoryChannel = 'auction' | 'syndicate';
@@ -85,7 +107,7 @@ export interface MarketHistoryItem {
   units: number | null;
   unitPriceGbp: number | null;
   feeGbp: number | null;
-  status: 'filled' | 'rejected' | null;
+  status: 'open' | 'partially_filled' | 'filled' | 'cancelled' | 'rejected' | null;
   note: string | null;
   timestamp: string;
 }
@@ -112,6 +134,10 @@ interface PlaceAuctionBidResponse {
   ok: true;
   bid: MarketAuctionBid;
   auction: MarketAuctionBidResult['auction'];
+  aml?: {
+    alertId: string;
+    status: string;
+  } | null;
 }
 
 interface ListAuctionBidsResponse {
@@ -134,6 +160,19 @@ interface PlaceSyndicateOrderResponse {
     volume24hGbp: number;
     updatedAt: string;
   };
+  aml?: {
+    alertId: string;
+    status: string;
+  } | null;
+}
+
+interface CreateSyndicateBuyoutOfferResponse {
+  ok: true;
+  offer: MarketSyndicateBuyoutOffer;
+  aml?: {
+    alertId: string;
+    status: string;
+  } | null;
 }
 
 interface ListSyndicateOrdersResponse {
@@ -184,6 +223,16 @@ interface PlaceSyndicateOrderInput {
   userId: string;
   side: SyndicateOrderSide;
   units: number;
+  orderType?: 'market' | 'limit';
+  limitPriceGbp?: number;
+}
+
+interface CreateSyndicateBuyoutOfferInput {
+  bidderUserId: string;
+  offerPriceGbp: number;
+  targetUnits?: number;
+  expiresInHours?: number;
+  metadata?: Record<string, unknown>;
 }
 
 function toQuery(params: Record<string, string | number | boolean | undefined>) {
@@ -226,6 +275,7 @@ export async function placeAuctionBid(
   return {
     bid: payload.bid,
     auction: payload.auction,
+    aml: payload.aml ?? null,
   };
 }
 
@@ -261,6 +311,20 @@ export async function placeSyndicateOrder(
 ): Promise<PlaceSyndicateOrderResponse> {
   return fetchJson<PlaceSyndicateOrderResponse>(
     `/syndicate/assets/${encodeURIComponent(assetId)}/orders`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    }
+  );
+}
+
+export async function createSyndicateBuyoutOffer(
+  assetId: string,
+  input: CreateSyndicateBuyoutOfferInput
+): Promise<CreateSyndicateBuyoutOfferResponse> {
+  return fetchJson<CreateSyndicateBuyoutOfferResponse>(
+    `/syndicate/assets/${encodeURIComponent(assetId)}/buyout-offers`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

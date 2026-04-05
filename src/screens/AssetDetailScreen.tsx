@@ -589,7 +589,7 @@ const styles = StyleSheet.create({
     gap: 5,
   },
   ctaBuy: {
-    backgroundColor: Colors.accent,
+    backgroundColor: Colors.accentGold,
   },
   ctaSell: {
     backgroundColor: PANEL_SOFT_BG,

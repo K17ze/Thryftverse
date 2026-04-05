@@ -33,6 +33,7 @@ import { useCurrencyContext } from '../context/CurrencyContext';
 import { SkeletonLoader } from '../components/SkeletonLoader';
 import { SyncStatusPill } from '../components/SyncStatusPill';
 import { SyncRetryBanner } from '../components/SyncRetryBanner';
+import { parseApiError } from '../lib/apiClient';
 import {
   convertDisplayToGbpAmount,
   getSuggestedBidDisplayAmount,
@@ -278,19 +279,31 @@ export default function AuctionsScreen() {
 
     try {
       try {
-        await placeAuctionBidRemote(selectedBidAuction.id, {
+        const remoteResult = await placeAuctionBidRemote(selectedBidAuction.id, {
           bidderId: actingUserId,
           amountGbp: roundedAmount,
         });
+
         await syncAuctions();
         setNowTs(Date.now());
         show(
           `Bid placed on ${selectedBidAuction.title} at ${formatFromFiat(roundedAmount, 'GBP', { displayMode: 'fiat' })}`,
           'success'
         );
+
+        if (remoteResult.aml?.alertId) {
+          show('Bid is flagged for AML review.', 'info');
+        }
+
         closeBidComposer();
         return;
-      } catch {
+      } catch (error) {
+        const parsedError = parseApiError(error, 'Unable to place bid');
+        if (!parsedError.isNetworkError) {
+          show(parsedError.message, 'error');
+          return;
+        }
+
         const result = placeAuctionBidLocal(selectedBidAuction, actingUserId, roundedAmount);
         if (!result.ok) {
           show(result.message ?? 'Unable to place bid', 'error');
@@ -317,15 +330,24 @@ export default function AuctionsScreen() {
 
     try {
       let backendSynced = false;
+      let backendAmlAlerted = false;
 
       try {
-        await placeAuctionBidRemote(auction.id, {
+        const remoteResult = await placeAuctionBidRemote(auction.id, {
           bidderId: actingUserId,
           amountGbp: Number(auction.buyNowPrice.toFixed(2)),
         });
+
         backendSynced = true;
+        backendAmlAlerted = !!remoteResult.aml?.alertId;
         await syncAuctions();
-      } catch {
+      } catch (error) {
+        const parsedError = parseApiError(error, 'Unable to complete buy now');
+        if (!parsedError.isNetworkError) {
+          show(parsedError.message, 'error');
+          return;
+        }
+
         backendSynced = false;
       }
 
@@ -339,6 +361,11 @@ export default function AuctionsScreen() {
         backendSynced ? `You won ${auction.title}` : `You won ${auction.title}. Backend sync unavailable.`,
         backendSynced ? 'success' : 'info'
       );
+
+      if (backendAmlAlerted) {
+        show('Buy now is flagged for AML review.', 'info');
+      }
+
       navigation.navigate('Checkout', { itemId: auction.listingId });
     } finally {
       setBuyNowAuctionId(null);

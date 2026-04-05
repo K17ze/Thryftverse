@@ -1,9 +1,40 @@
+import { shutdownTelemetry } from './telemetry.js';
 import Fastify from 'fastify';
+import * as Sentry from '@sentry/node';
 import type { PoolClient } from 'pg';
+import rateLimit from '@fastify/rate-limit';
+import websocket from '@fastify/websocket';
+import fastifyRawBody from 'fastify-raw-body';
+import Razorpay from 'razorpay';
+import Stripe from 'stripe';
 import { z } from 'zod';
 import { config } from './config.js';
-import { db, closeDb } from './db/pool.js';
+import { db, closeDb, readDb, replicaConfigured } from './db/pool.js';
 import { redis, closeRedis } from './lib/redis.js';
+import type { AuthRole, AuthenticatedUser } from './lib/auth.js';
+import {
+  createPublicToken,
+  hashOpaqueValue,
+  hashPassword,
+  issueAuthSession,
+  revokeAllUserSessions,
+  revokeSessionByRefreshToken,
+  rotateRefreshSession,
+  verifyAccessToken,
+  verifyPassword,
+} from './lib/auth.js';
+import {
+  assertGoldOperatorToken,
+  createGoldReserveAttestation,
+  resolveGoldRate,
+  setGoldRateOverride,
+} from './lib/goldOracle.js';
+import {
+  expectedGatewayIdForProvider,
+  resolveProviderFromPathSegment,
+  type ProviderPaymentStatus,
+  verifyAndNormalizeWebhook,
+} from './lib/paymentProviders.js';
 import {
   assertKeyServiceConnectivity,
   decryptJsonPayload,
@@ -11,23 +42,86 @@ import {
   rewrapCiphertext,
   rotateKeyVersion,
 } from './lib/keyService.js';
+import {
+  closeBackgroundQueues,
+  enqueueAuctionSweepJob,
+  enqueuePushNotificationJob,
+  startBackgroundWorkers,
+} from './lib/queues.js';
+import {
+  closeRealtimeConnections,
+  parseRealtimeTopics,
+  publishRealtimeEvent,
+  registerSseClient,
+  registerWsClient,
+} from './lib/realtime.js';
 import { assertS3BucketConnectivity, createUploadUrl } from './lib/s3.js';
+import {
+  metricsContentType,
+  observeHttpRequest,
+  recordAuctionSettlement,
+  recordPaymentTransition,
+  recordPushDelivery,
+  renderMetrics,
+} from './lib/metrics.js';
+import {
+  appendComplianceAuditEvent,
+  createAmlAlert,
+  createComplianceId,
+  evaluateAmlRisk,
+  evaluateMarketEligibility,
+  getOrCreateComplianceProfile,
+  normalizeCountryCode,
+  resolveClientIp,
+  resolveJurisdictionRule,
+} from './lib/compliance.js';
 
 const app = Fastify({ logger: true });
+
+if (config.sentryDsn) {
+  Sentry.init({
+    dsn: config.sentryDsn,
+    environment: config.nodeEnv,
+    tracesSampleRate: config.sentryTracesSampleRate,
+  });
+}
+
+void app.register(websocket);
+
+void app.register(fastifyRawBody, {
+  field: 'rawBody',
+  global: false,
+  routes: ['/webhooks/*'],
+  encoding: 'utf8',
+  runFirst: true,
+});
+
+void app.register(rateLimit, {
+  global: true,
+  max: config.apiRateLimitMax,
+  timeWindow: config.apiRateLimitWindow,
+});
 
 function toJsonString(value: unknown): string {
   return JSON.stringify(value);
 }
 
 async function ensureUserExists(userId: string) {
-  await db.query(
+  const result = await db.query<{ id: string }>(
     `
-      INSERT INTO users (id, username)
-      VALUES ($1, $2)
-      ON CONFLICT (id) DO NOTHING
+      SELECT id
+      FROM users
+      WHERE id = $1
+      LIMIT 1
     `,
-    [userId, `user_${userId.slice(0, 40)}`]
+    [userId]
   );
+
+  if (!result.rowCount) {
+    throw createApiError('USER_NOT_FOUND', 'User account does not exist', {
+      userId,
+    });
+  }
 }
 
 function ensureSecurityAdmin(headerToken: string | undefined) {
@@ -79,6 +173,64 @@ function parseQueryBoolean(value: unknown, fallback = false): boolean {
   return fallback;
 }
 
+function resolveHeaderString(value: string | string[] | undefined): string | null {
+  if (Array.isArray(value)) {
+    const first = value.find((entry) => typeof entry === 'string' && entry.trim().length > 0);
+    return first?.trim() ?? null;
+  }
+
+  if (typeof value === 'string' && value.trim().length > 0) {
+    return value.trim();
+  }
+
+  return null;
+}
+
+function resolveRequestIpAddress(request: { ip: string; headers: Record<string, string | string[] | undefined> }): string {
+  return resolveClientIp(request.ip, request.headers['x-forwarded-for']);
+}
+
+function resolveRequestUserAgent(request: { headers: Record<string, string | string[] | undefined> }): string | null {
+  return resolveHeaderString(request.headers['user-agent']);
+}
+
+async function appendComplianceAuditSafe(
+  request: {
+    id: string;
+    ip: string;
+    headers: Record<string, string | string[] | undefined>;
+    authUser?: AuthenticatedUser;
+    log: { error: (payload: unknown, message: string) => void };
+  },
+  input: {
+    eventType: string;
+    actorUserId?: string | null;
+    subjectUserId?: string | null;
+    payload?: Record<string, unknown>;
+  }
+) {
+  try {
+    await appendComplianceAuditEvent(db, {
+      eventType: input.eventType,
+      actorUserId: input.actorUserId ?? request.authUser?.userId ?? null,
+      subjectUserId: input.subjectUserId ?? request.authUser?.userId ?? null,
+      requestId: request.id,
+      ipAddress: resolveRequestIpAddress(request),
+      userAgent: resolveRequestUserAgent(request),
+      payload: input.payload ?? {},
+    });
+  } catch (error) {
+    request.log.error(
+      {
+        err: error,
+        eventType: input.eventType,
+        requestId: request.id,
+      },
+      'Failed to append compliance audit event'
+    );
+  }
+}
+
 interface ApiError extends Error {
   code: string;
   details?: Record<string, unknown>;
@@ -105,6 +257,252 @@ function getApiError(error: unknown): ApiError | null {
   return null;
 }
 
+declare module 'fastify' {
+  interface FastifyRequest {
+    authUser?: AuthenticatedUser;
+    rawBody?: string | Buffer;
+    apiVersion?: 'legacy' | 'v1';
+    metricsStartNs?: bigint;
+  }
+}
+
+const BODY_ACTOR_KEYS = [
+  'userId',
+  'buyerId',
+  'sellerId',
+  'bidderId',
+  'bidderUserId',
+  'holderUserId',
+  'issuerId',
+  'senderId',
+] as const;
+
+function getRoutePath(url: string) {
+  return url.split('?')[0] || '/';
+}
+
+function stripV1Prefix(url: string): { url: string; apiVersion: 'legacy' | 'v1' } {
+  const path = getRoutePath(url);
+  if (path === '/v1' || path.startsWith('/v1/')) {
+    const suffix = url.slice(path.length);
+    const normalizedPath = path === '/v1' ? '/' : path.slice(3);
+    return {
+      url: `${normalizedPath}${suffix}`,
+      apiVersion: 'v1',
+    };
+  }
+
+  return {
+    url,
+    apiVersion: 'legacy',
+  };
+}
+
+function isPublicRoute(method: string, path: string) {
+  if (method === 'OPTIONS') {
+    return true;
+  }
+
+  if (method === 'POST' && path.startsWith('/webhooks/')) {
+    return true;
+  }
+
+  const signature = `${method} ${path}`;
+  const fixedPublicRoutes = new Set<string>([
+    'GET /health',
+    'GET /metrics',
+    'GET /listings',
+    'GET /search/listings',
+    'GET /feed/looks',
+    'GET /oracle/gold/latest',
+    'POST /auth/signup',
+    'POST /auth/login',
+    'POST /auth/refresh',
+    'POST /auth/password-reset/request',
+    'POST /auth/password-reset/confirm',
+  ]);
+
+  if (fixedPublicRoutes.has(signature)) {
+    return true;
+  }
+
+  if (path.startsWith('/security/')) {
+    return true;
+  }
+
+  if (method === 'GET' && (path === '/auctions' || path.startsWith('/auctions/'))) {
+    return true;
+  }
+
+  if (method === 'GET' && (path === '/syndicate/assets' || path.startsWith('/syndicate/assets/'))) {
+    return true;
+  }
+
+  return false;
+}
+
+function getBearerToken(authHeader: string | undefined) {
+  if (!authHeader) {
+    return null;
+  }
+
+  const [scheme, token] = authHeader.split(' ');
+  if (!scheme || !token || scheme.toLowerCase() !== 'bearer') {
+    return null;
+  }
+
+  return token.trim();
+}
+
+async function authenticateRequest(requestPath: string, authHeader: string | undefined) {
+  const token = getBearerToken(authHeader);
+  if (!token) {
+    return null;
+  }
+
+  const authUser = await verifyAccessToken(token);
+  if (!authUser) {
+    app.log.warn({ requestPath }, 'Rejected request with invalid access token');
+  }
+
+  return authUser;
+}
+
+function resolveActorUserId(requestPath: string, request: { params?: unknown; body?: unknown }) {
+  const params = request.params as Record<string, unknown> | undefined;
+  if (params && typeof params.userId === 'string') {
+    return params.userId;
+  }
+
+  const userPathMatch = requestPath.match(/^\/users\/([^/]+)/);
+  if (userPathMatch?.[1]) {
+    return decodeURIComponent(userPathMatch[1]);
+  }
+
+  const body = request.body;
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return null;
+  }
+
+  const bodyRecord = body as Record<string, unknown>;
+  for (const key of BODY_ACTOR_KEYS) {
+    const value = bodyRecord[key];
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+app.addHook('onRequest', async (request) => {
+  request.metricsStartNs = process.hrtime.bigint();
+
+  const rawUrl = request.raw.url ?? request.url;
+  const normalized = stripV1Prefix(rawUrl);
+  request.apiVersion = normalized.apiVersion;
+
+  if (normalized.url !== rawUrl) {
+    request.raw.url = normalized.url;
+  }
+});
+
+app.addHook('onSend', async (request, reply, payload) => {
+  reply.header('x-api-version', 'v1');
+  reply.header('x-request-id', request.id);
+
+  if (request.apiVersion === 'legacy') {
+    reply.header('x-api-deprecation', 'Legacy unversioned endpoint; prefer /v1/*');
+  }
+
+  return payload;
+});
+
+app.addHook('onResponse', async (request, reply) => {
+  if (!request.metricsStartNs) {
+    return;
+  }
+
+  const elapsedNs = process.hrtime.bigint() - request.metricsStartNs;
+  const routeTemplate =
+    request.routeOptions.url
+    ?? getRoutePath(request.raw.url ?? request.url);
+
+  observeHttpRequest({
+    method: request.method,
+    route: routeTemplate,
+    statusCode: reply.statusCode,
+    durationSeconds: Number(elapsedNs) / 1_000_000_000,
+  });
+});
+
+app.addHook('preHandler', async (request, reply) => {
+  const requestPath = getRoutePath(request.raw.url ?? request.url);
+
+  if (isPublicRoute(request.method, requestPath)) {
+    return;
+  }
+
+  const authUser = await authenticateRequest(requestPath, request.headers.authorization);
+  if (!authUser) {
+    reply.code(401);
+    return {
+      ok: false,
+      error: 'Unauthorized',
+    };
+  }
+
+  request.authUser = authUser;
+
+  const actorUserId = resolveActorUserId(requestPath, request);
+  if (actorUserId && authUser.role !== 'admin' && actorUserId !== authUser.userId) {
+    reply.code(403);
+    return {
+      ok: false,
+      error: 'Forbidden: user context mismatch',
+    };
+  }
+});
+
+app.setErrorHandler((error, request, reply) => {
+  if (config.sentryDsn) {
+    Sentry.captureException(error, {
+      tags: {
+        method: request.method,
+        route: request.routeOptions.url,
+      },
+      extra: {
+        requestId: request.id,
+      },
+    });
+  }
+
+  request.log.error(
+    {
+      err: error,
+      method: request.method,
+      path: request.raw.url,
+      requestId: request.id,
+    },
+    'Unhandled request failure'
+  );
+
+  if (reply.sent) {
+    return;
+  }
+
+  const statusCode =
+    typeof (error as { statusCode?: unknown }).statusCode === 'number'
+      ? (error as { statusCode: number }).statusCode
+      : 500;
+
+  reply.code(statusCode >= 400 ? statusCode : 500);
+  reply.send({
+    ok: false,
+    error: statusCode >= 500 ? 'Internal server error' : error.message,
+  });
+});
+
 type DbQueryable = Pick<PoolClient, 'query'>;
 type LedgerOwnerType = 'platform' | 'user';
 type LedgerAccountCode =
@@ -113,7 +511,11 @@ type LedgerAccountCode =
   | 'seller_payable'
   | 'buyer_spend'
   | 'withdrawal_pending'
-  | 'withdrawable_balance';
+  | 'withdrawable_balance'
+  | 'ize_wallet'
+  | 'ize_pending_redemption'
+  | 'ize_outstanding'
+  | 'gold_reserve_grams';
 type PaymentIntentStatus =
   | 'requires_payment_method'
   | 'requires_confirmation'
@@ -137,6 +539,10 @@ interface PaymentIntentRow {
   status: PaymentIntentStatus;
   provider_intent_ref: string | null;
   client_secret: string | null;
+  provider_status: string | null;
+  next_action_url: string | null;
+  sca_expires_at: string | null;
+  settled_at: string | null;
   failure_code: string | null;
   failure_message: string | null;
   created_at: string;
@@ -177,6 +583,10 @@ function toPaymentIntentPayload(row: PaymentIntentRow) {
     status: row.status,
     providerIntentRef: row.provider_intent_ref,
     clientSecret: row.client_secret,
+    providerStatus: row.provider_status,
+    nextActionUrl: row.next_action_url,
+    scaExpiresAt: row.sca_expires_at,
+    settledAt: row.settled_at,
     failureCode: row.failure_code,
     failureMessage: row.failure_message,
     createdAt: row.created_at,
@@ -227,6 +637,8 @@ async function paymentTablesAvailable(client: DbQueryable): Promise<boolean> {
         AND to_regclass('public.payment_intents') IS NOT NULL
         AND to_regclass('public.payment_attempts') IS NOT NULL
         AND to_regclass('public.payment_webhook_events') IS NOT NULL
+        AND to_regclass('public.payment_refunds') IS NOT NULL
+        AND to_regclass('public.payment_disputes') IS NOT NULL
         AND to_regclass('public.payout_accounts') IS NOT NULL
         AND to_regclass('public.payout_requests') IS NOT NULL AS exists
     `
@@ -241,6 +653,23 @@ async function ledgerTablesAvailable(client: DbQueryable): Promise<boolean> {
       SELECT
         to_regclass('public.ledger_accounts') IS NOT NULL
         AND to_regclass('public.ledger_entries') IS NOT NULL AS exists
+    `
+  );
+
+  return Boolean(result.rows[0]?.exists);
+}
+
+async function onezeTablesAvailable(client: DbQueryable): Promise<boolean> {
+  const result = await client.query<{ exists: boolean }>(
+    `
+      SELECT
+        to_regclass('public.ledger_accounts') IS NOT NULL
+        AND to_regclass('public.ledger_entries') IS NOT NULL
+        AND to_regclass('public.payment_intents') IS NOT NULL
+        AND to_regclass('public.wallet_ize_operations') IS NOT NULL
+        AND to_regclass('public.gold_rate_quotes') IS NOT NULL
+        AND to_regclass('public.gold_rate_overrides') IS NOT NULL
+        AND to_regclass('public.gold_reserve_attestations') IS NOT NULL AS exists
     `
   );
 
@@ -274,13 +703,38 @@ async function appendLedgerEntry(
     accountId: number;
     counterpartyAccountId: number;
     direction: 'debit' | 'credit';
-    amountGbp: number;
-    sourceType: 'order_payment' | 'payout' | 'refund' | 'adjustment';
+    amountGbp?: number;
+    amount?: number;
+    currency?: string;
+    sourceType:
+      | 'order_payment'
+      | 'payout'
+      | 'refund'
+      | 'adjustment'
+      | 'mint'
+      | 'burn'
+      | 'syndicate_trade'
+      | 'buyout'
+      | 'reserve_reconcile';
     sourceId: string;
     lineType: string;
     metadata?: Record<string, unknown>;
   }
 ): Promise<void> {
+  const normalizedCurrency = (input.currency ?? 'GBP').toUpperCase();
+  const normalizedAmount =
+    input.amount !== undefined
+      ? input.amount
+      : input.amountGbp !== undefined
+        ? input.amountGbp
+        : 0;
+  const normalizedAmountGbp =
+    input.amountGbp !== undefined
+      ? input.amountGbp
+      : normalizedCurrency === 'GBP'
+        ? normalizedAmount
+        : null;
+
   await client.query(
     `
       INSERT INTO ledger_entries (
@@ -288,19 +742,22 @@ async function appendLedgerEntry(
         counterparty_account_id,
         direction,
         amount_gbp,
+        amount,
         currency,
         source_type,
         source_id,
         line_type,
         metadata
       )
-      VALUES ($1, $2, $3, $4, 'GBP', $5, $6, $7, $8::jsonb)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
     `,
     [
       input.accountId,
       input.counterpartyAccountId,
       input.direction,
-      input.amountGbp,
+      normalizedAmountGbp,
+      normalizedAmount,
+      normalizedCurrency,
       input.sourceType,
       input.sourceId,
       input.lineType,
@@ -313,7 +770,8 @@ async function getLedgerAccountBalance(
   client: DbQueryable,
   ownerType: LedgerOwnerType,
   ownerId: string,
-  accountCode: LedgerAccountCode
+  accountCode: LedgerAccountCode,
+  currency = 'GBP'
 ): Promise<number> {
   const result = await client.query<{ balance: string }>(
     `
@@ -321,8 +779,8 @@ async function getLedgerAccountBalance(
         COALESCE(
           SUM(
             CASE
-              WHEN le.direction = 'credit' THEN le.amount_gbp
-              ELSE -le.amount_gbp
+              WHEN le.direction = 'credit' THEN le.amount
+              ELSE -le.amount
             END
           ),
           0
@@ -333,9 +791,9 @@ async function getLedgerAccountBalance(
       WHERE la.owner_type = $1
         AND la.owner_id = $2
         AND la.account_code = $3
-        AND la.currency = 'GBP'
+        AND la.currency = $4
     `,
-    [ownerType, ownerId, accountCode]
+    [ownerType, ownerId, accountCode, currency.toUpperCase()]
   );
 
   return Number(result.rows[0]?.balance ?? '0');
@@ -360,6 +818,242 @@ async function getUserCumulativeWithdrawnGbp(client: DbQueryable, userId: string
   );
 
   return Number(result.rows[0]?.total ?? '0');
+}
+
+async function getPlatformIzeReserveSnapshot(client: DbQueryable): Promise<{
+  outstandingIze: number;
+  reserveGrams: number;
+}> {
+  const [outstandingIze, reserveGrams] = await Promise.all([
+    getLedgerAccountBalance(client, 'platform', 'platform', 'ize_outstanding', 'IZE'),
+    getLedgerAccountBalance(client, 'platform', 'platform', 'gold_reserve_grams', 'XAU'),
+  ]);
+
+  return {
+    outstandingIze,
+    reserveGrams,
+  };
+}
+
+async function recordIzeMint(
+  client: PoolClient,
+  input: {
+    operationId: string;
+    userId: string;
+    fiatAmount: number;
+    fiatCurrency: string;
+    izeAmount: number;
+    ratePerGram: number;
+    paymentIntentId?: string;
+    metadata?: Record<string, unknown>;
+  }
+): Promise<void> {
+  const userWalletAccountId = await ensureLedgerAccount(client, 'user', input.userId, 'ize_wallet', 'IZE');
+  const platformOutstandingAccountId = await ensureLedgerAccount(
+    client,
+    'platform',
+    'platform',
+    'ize_outstanding',
+    'IZE'
+  );
+  const reserveAccountId = await ensureLedgerAccount(
+    client,
+    'platform',
+    'platform',
+    'gold_reserve_grams',
+    'XAU'
+  );
+
+  await appendLedgerEntry(client, {
+    accountId: userWalletAccountId,
+    counterpartyAccountId: platformOutstandingAccountId,
+    direction: 'credit',
+    amount: input.izeAmount,
+    currency: 'IZE',
+    sourceType: 'mint',
+    sourceId: input.operationId,
+    lineType: 'mint_user_credit',
+    metadata: {
+      userId: input.userId,
+      ratePerGram: input.ratePerGram,
+      fiatAmount: input.fiatAmount,
+      fiatCurrency: input.fiatCurrency,
+      ...(input.metadata ?? {}),
+    },
+  });
+
+  await appendLedgerEntry(client, {
+    accountId: platformOutstandingAccountId,
+    counterpartyAccountId: userWalletAccountId,
+    direction: 'credit',
+    amount: input.izeAmount,
+    currency: 'IZE',
+    sourceType: 'mint',
+    sourceId: input.operationId,
+    lineType: 'mint_outstanding_credit',
+    metadata: {
+      userId: input.userId,
+      ...(input.metadata ?? {}),
+    },
+  });
+
+  await appendLedgerEntry(client, {
+    accountId: reserveAccountId,
+    counterpartyAccountId: reserveAccountId,
+    direction: 'credit',
+    amount: input.izeAmount,
+    currency: 'XAU',
+    sourceType: 'mint',
+    sourceId: input.operationId,
+    lineType: 'mint_reserve_credit',
+    metadata: {
+      userId: input.userId,
+      ...(input.metadata ?? {}),
+    },
+  });
+
+  await client.query(
+    `
+      INSERT INTO wallet_ize_operations (
+        id,
+        user_id,
+        operation_type,
+        fiat_amount,
+        fiat_currency,
+        ize_amount,
+        rate_per_gram,
+        status,
+        payment_intent_id,
+        metadata,
+        committed_at
+      )
+      VALUES ($1, $2, 'mint', $3, $4, $5, $6, 'committed', $7, $8::jsonb, NOW())
+    `,
+    [
+      input.operationId,
+      input.userId,
+      input.fiatAmount,
+      input.fiatCurrency,
+      input.izeAmount,
+      input.ratePerGram,
+      input.paymentIntentId ?? null,
+      toJsonString(input.metadata ?? {}),
+    ]
+  );
+}
+
+async function recordIzeBurn(
+  client: PoolClient,
+  input: {
+    operationId: string;
+    userId: string;
+    fiatAmount: number;
+    fiatCurrency: string;
+    izeAmount: number;
+    ratePerGram: number;
+    payoutRequestId?: string;
+    metadata?: Record<string, unknown>;
+  }
+): Promise<void> {
+  const availableIze = await getLedgerAccountBalance(client, 'user', input.userId, 'ize_wallet', 'IZE');
+  if (input.izeAmount > availableIze + 1e-8) {
+    throw createApiError('IZE_INSUFFICIENT_BALANCE', 'Insufficient 1ze balance for burn', {
+      availableIze,
+      requestedIze: input.izeAmount,
+    });
+  }
+
+  const userWalletAccountId = await ensureLedgerAccount(client, 'user', input.userId, 'ize_wallet', 'IZE');
+  const platformOutstandingAccountId = await ensureLedgerAccount(
+    client,
+    'platform',
+    'platform',
+    'ize_outstanding',
+    'IZE'
+  );
+  const reserveAccountId = await ensureLedgerAccount(
+    client,
+    'platform',
+    'platform',
+    'gold_reserve_grams',
+    'XAU'
+  );
+
+  await appendLedgerEntry(client, {
+    accountId: userWalletAccountId,
+    counterpartyAccountId: platformOutstandingAccountId,
+    direction: 'debit',
+    amount: input.izeAmount,
+    currency: 'IZE',
+    sourceType: 'burn',
+    sourceId: input.operationId,
+    lineType: 'burn_user_debit',
+    metadata: {
+      userId: input.userId,
+      fiatAmount: input.fiatAmount,
+      fiatCurrency: input.fiatCurrency,
+      ...(input.metadata ?? {}),
+    },
+  });
+
+  await appendLedgerEntry(client, {
+    accountId: platformOutstandingAccountId,
+    counterpartyAccountId: userWalletAccountId,
+    direction: 'debit',
+    amount: input.izeAmount,
+    currency: 'IZE',
+    sourceType: 'burn',
+    sourceId: input.operationId,
+    lineType: 'burn_outstanding_debit',
+    metadata: {
+      userId: input.userId,
+      ...(input.metadata ?? {}),
+    },
+  });
+
+  await appendLedgerEntry(client, {
+    accountId: reserveAccountId,
+    counterpartyAccountId: reserveAccountId,
+    direction: 'debit',
+    amount: input.izeAmount,
+    currency: 'XAU',
+    sourceType: 'burn',
+    sourceId: input.operationId,
+    lineType: 'burn_reserve_debit',
+    metadata: {
+      userId: input.userId,
+      ...(input.metadata ?? {}),
+    },
+  });
+
+  await client.query(
+    `
+      INSERT INTO wallet_ize_operations (
+        id,
+        user_id,
+        operation_type,
+        fiat_amount,
+        fiat_currency,
+        ize_amount,
+        rate_per_gram,
+        status,
+        payout_request_id,
+        metadata,
+        committed_at
+      )
+      VALUES ($1, $2, 'burn', $3, $4, $5, $6, 'committed', $7, $8::jsonb, NOW())
+    `,
+    [
+      input.operationId,
+      input.userId,
+      input.fiatAmount,
+      input.fiatCurrency,
+      input.izeAmount,
+      input.ratePerGram,
+      input.payoutRequestId ?? null,
+      toJsonString(input.metadata ?? {}),
+    ]
+  );
 }
 
 async function postCommerceOrderLedgerEntries(
@@ -491,6 +1185,267 @@ async function postCommerceOrderLedgerEntries(
   }
 }
 
+function toStripeMetadata(metadata: Record<string, unknown>): Record<string, string> {
+  const next: Record<string, string> = {};
+  for (const [key, value] of Object.entries(metadata)) {
+    if (value === undefined || value === null) {
+      continue;
+    }
+
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+      next[key] = String(value);
+      continue;
+    }
+
+    next[key] = toJsonString(value);
+  }
+
+  return next;
+}
+
+function mapStripePaymentIntentStatus(status: Stripe.PaymentIntent.Status): PaymentIntentStatus {
+  switch (status) {
+    case 'requires_payment_method':
+      return 'requires_payment_method';
+    case 'requires_confirmation':
+      return 'requires_confirmation';
+    case 'requires_action':
+      return 'requires_confirmation';
+    case 'processing':
+      return 'processing';
+    case 'succeeded':
+      return 'succeeded';
+    case 'canceled':
+      return 'cancelled';
+    default:
+      return 'processing';
+  }
+}
+
+function mapMolliePaymentStatus(status?: string): PaymentIntentStatus {
+  if (!status) {
+    return 'requires_confirmation';
+  }
+
+  if (status === 'paid') {
+    return 'succeeded';
+  }
+
+  if (status === 'failed' || status === 'expired') {
+    return 'failed';
+  }
+
+  if (status === 'canceled') {
+    return 'cancelled';
+  }
+
+  if (status === 'open' || status === 'pending') {
+    return 'processing';
+  }
+
+  return 'requires_confirmation';
+}
+
+function resolveDefaultGatewayForChannel(channel: PaymentIntentChannel): string {
+  if (channel === 'syndicate') {
+    return 'stripe_americas';
+  }
+
+  if (channel === 'wallet_topup' || channel === 'wallet_withdrawal') {
+    return 'stripe_americas';
+  }
+
+  return 'stripe_americas';
+}
+
+async function createGatewayPaymentIntent(input: {
+  gatewayId: string;
+  intentId: string;
+  channel: PaymentIntentChannel;
+  amountGbp: number;
+  amountCurrency: string;
+  metadata: Record<string, unknown>;
+  returnUrl?: string;
+  webhookUrl?: string;
+}): Promise<{
+  providerIntentRef: string;
+  clientSecret: string | null;
+  initialStatus: PaymentIntentStatus;
+  providerStatus?: string | null;
+  nextActionUrl?: string | null;
+  scaExpiresAt?: string | null;
+}> {
+  const normalizedCurrency = input.amountCurrency.toUpperCase();
+  const baseMetadata = {
+    ...input.metadata,
+    intentId: input.intentId,
+    channel: input.channel,
+  };
+
+  if (input.gatewayId === 'stripe_americas' && config.stripeSecretKey) {
+    const stripe = new Stripe(config.stripeSecretKey, {
+      apiVersion: '2024-06-20',
+    });
+
+    const created = await stripe.paymentIntents.create({
+      amount: Math.max(1, Math.round(input.amountGbp * 100)),
+      currency: normalizedCurrency.toLowerCase(),
+      automatic_payment_methods: { enabled: true },
+      confirmation_method: 'manual',
+      metadata: toStripeMetadata(baseMetadata),
+    });
+
+    return {
+      providerIntentRef: created.id,
+      clientSecret: created.client_secret,
+      initialStatus: mapStripePaymentIntentStatus(created.status),
+      providerStatus: created.status,
+      nextActionUrl:
+        created.next_action && created.next_action.type === 'redirect_to_url'
+          ? created.next_action.redirect_to_url?.url ?? null
+          : null,
+      scaExpiresAt:
+        created.next_action && created.next_action.type === 'redirect_to_url'
+          ? new Date(Date.now() + 15 * 60 * 1000).toISOString()
+          : null,
+    };
+  }
+
+  if (input.gatewayId === 'razorpay_in' && config.razorpayKeyId && config.razorpayKeySecret) {
+    const razorpay = new Razorpay({
+      key_id: config.razorpayKeyId,
+      key_secret: config.razorpayKeySecret,
+    });
+
+    const order = await razorpay.orders.create({
+      amount: Math.max(1, Math.round(input.amountGbp * 100)),
+      currency: normalizedCurrency,
+      receipt: input.intentId.slice(0, 40),
+      notes: toStripeMetadata(baseMetadata),
+    });
+
+    return {
+      providerIntentRef: String((order as { id?: unknown }).id ?? createRuntimeId('rzp')),
+      clientSecret: null,
+      initialStatus: 'requires_confirmation',
+      providerStatus: String((order as { status?: unknown }).status ?? 'created'),
+      nextActionUrl: null,
+      scaExpiresAt: null,
+    };
+  }
+
+  if (input.gatewayId === 'mollie_eu' && config.mollieApiKey) {
+    const { createMollieClient } = await import('@mollie/api-client');
+    const mollie = createMollieClient({ apiKey: config.mollieApiKey });
+    const created = await mollie.payments.create({
+      amount: {
+        currency: normalizedCurrency,
+        value: input.amountGbp.toFixed(2),
+      },
+      description: `Thryftverse ${input.channel} ${input.intentId}`,
+      redirectUrl: input.returnUrl ?? 'https://thryftverse.app/payments/return',
+      webhookUrl: input.webhookUrl ?? 'https://thryftverse.app/webhooks/mollie',
+      metadata: toStripeMetadata(baseMetadata),
+    });
+
+    const checkoutUrl =
+      typeof (created as unknown as { getCheckoutUrl?: unknown }).getCheckoutUrl === 'function'
+        ? (created as unknown as { getCheckoutUrl: () => string }).getCheckoutUrl()
+        : null;
+
+    return {
+      providerIntentRef: created.id,
+      clientSecret: null,
+      initialStatus: mapMolliePaymentStatus(created.status),
+      providerStatus: created.status,
+      nextActionUrl: checkoutUrl,
+      scaExpiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+    };
+  }
+
+  if (input.gatewayId === 'flutterwave_africa' && config.flutterwaveSecretKey) {
+    const txRef = `${input.intentId}`;
+    const response = await fetch('https://api.flutterwave.com/v3/payments', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.flutterwaveSecretKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: toJsonString({
+        tx_ref: txRef,
+        amount: Number(input.amountGbp.toFixed(2)),
+        currency: normalizedCurrency,
+        redirect_url: input.returnUrl ?? 'https://thryftverse.app/payments/return',
+        customer: {
+          email: 'payments@thryftverse.app',
+        },
+        customizations: {
+          title: 'Thryftverse Payment',
+        },
+        meta: toStripeMetadata(baseMetadata),
+      }),
+    });
+
+    const payload = response.ok ? ((await response.json()) as Record<string, unknown>) : {};
+    const data = (payload.data ?? {}) as Record<string, unknown>;
+    const checkoutUrl = typeof data.link === 'string' ? data.link : null;
+
+    return {
+      providerIntentRef: txRef,
+      clientSecret: null,
+      initialStatus: 'requires_confirmation',
+      providerStatus: response.ok ? 'created' : 'fallback_created',
+      nextActionUrl: checkoutUrl,
+      scaExpiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+    };
+  }
+
+  if (input.gatewayId === 'tap_gulf' && config.tapSecretKey) {
+    const response = await fetch('https://api.tap.company/v2/charges', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${config.tapSecretKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: toJsonString({
+        amount: Number(input.amountGbp.toFixed(2)),
+        currency: normalizedCurrency,
+        source: {
+          id: 'src_all',
+        },
+        redirect: {
+          url: input.returnUrl ?? 'https://thryftverse.app/payments/return',
+        },
+        metadata: toStripeMetadata(baseMetadata),
+      }),
+    });
+
+    const payload = response.ok ? ((await response.json()) as Record<string, unknown>) : {};
+    const chargeId = typeof payload.id === 'string' ? payload.id : createRuntimeId('tap_charge');
+    const transaction = (payload.transaction ?? {}) as Record<string, unknown>;
+    const checkoutUrl = typeof transaction.url === 'string' ? transaction.url : null;
+
+    return {
+      providerIntentRef: chargeId,
+      clientSecret: null,
+      initialStatus: 'requires_confirmation',
+      providerStatus: response.ok ? String(payload.status ?? 'initiated') : 'fallback_created',
+      nextActionUrl: checkoutUrl,
+      scaExpiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+    };
+  }
+
+  const fallbackRef = createRuntimeId(`intent_${input.gatewayId}`);
+  return {
+    providerIntentRef: fallbackRef,
+    clientSecret: createRuntimeId('secret'),
+    initialStatus: 'requires_confirmation',
+    providerStatus: 'mock_created',
+    nextActionUrl: null,
+    scaExpiresAt: null,
+  };
+}
+
 async function settlePaymentIntent(
   client: PoolClient,
   input: {
@@ -527,6 +1482,10 @@ async function settlePaymentIntent(
         status,
         provider_intent_ref,
         client_secret,
+        provider_status,
+        next_action_url,
+        sca_expires_at,
+        settled_at,
         failure_code,
         failure_message,
         created_at,
@@ -606,6 +1565,10 @@ async function settlePaymentIntent(
         status,
         provider_intent_ref,
         client_secret,
+        provider_status,
+        next_action_url,
+        sca_expires_at,
+        settled_at,
         failure_code,
         failure_message,
         created_at,
@@ -623,6 +1586,13 @@ async function settlePaymentIntent(
   if (!updatedIntent) {
     throw new Error('PAYMENT_INTENT_UPDATE_FAILED');
   }
+
+  recordPaymentTransition({
+    from: currentIntent.status,
+    to: nextStatus,
+    gateway: currentIntent.gateway_id,
+    channel: currentIntent.channel,
+  });
 
   let orderSettlement:
     | {
@@ -684,6 +1654,301 @@ async function settlePaymentIntent(
     alreadyFinal: false,
     orderSettlement,
   };
+}
+
+async function transitionPaymentIntentStatus(
+  client: PoolClient,
+  input: {
+    intentId: string;
+    nextStatus: PaymentIntentStatus;
+    providerStatus?: string | null;
+    nextActionUrl?: string | null;
+    scaExpiresAt?: string | null;
+    failureCode?: string | null;
+    failureMessage?: string | null;
+    metadataPatch?: Record<string, unknown>;
+  }
+): Promise<{
+  intent: ReturnType<typeof toPaymentIntentPayload>;
+  fromStatus: PaymentIntentStatus;
+  idempotent: boolean;
+}> {
+  const result = await client.query<PaymentIntentRow>(
+    `
+      SELECT
+        id,
+        user_id,
+        gateway_id,
+        channel,
+        order_id,
+        syndicate_order_id,
+        instrument_id,
+        amount_gbp,
+        amount_currency,
+        status,
+        provider_intent_ref,
+        client_secret,
+        provider_status,
+        next_action_url,
+        sca_expires_at,
+        settled_at,
+        failure_code,
+        failure_message,
+        created_at,
+        updated_at
+      FROM payment_intents
+      WHERE id = $1
+      LIMIT 1
+      FOR UPDATE
+    `,
+    [input.intentId]
+  );
+
+  const row = result.rows[0];
+  if (!row) {
+    throw new Error('PAYMENT_INTENT_NOT_FOUND');
+  }
+
+  const fromStatus = row.status;
+  if (fromStatus === input.nextStatus) {
+    return {
+      intent: toPaymentIntentPayload(row),
+      fromStatus,
+      idempotent: true,
+    };
+  }
+
+  const terminalStates: PaymentIntentStatus[] = ['succeeded', 'failed', 'cancelled'];
+  if (terminalStates.includes(fromStatus)) {
+    return {
+      intent: toPaymentIntentPayload(row),
+      fromStatus,
+      idempotent: true,
+    };
+  }
+
+  const allowedTransitions: Record<PaymentIntentStatus, PaymentIntentStatus[]> = {
+    requires_payment_method: ['requires_confirmation', 'cancelled'],
+    requires_confirmation: ['processing', 'succeeded', 'failed', 'cancelled'],
+    processing: ['succeeded', 'failed', 'cancelled'],
+    succeeded: [],
+    failed: [],
+    cancelled: [],
+  };
+
+  if (!allowedTransitions[fromStatus].includes(input.nextStatus)) {
+    throw createApiError(
+      'PAYMENT_INTENT_INVALID_TRANSITION',
+      `Payment intent cannot transition from '${fromStatus}' to '${input.nextStatus}'`
+    );
+  }
+
+  const updated = await client.query<PaymentIntentRow>(
+    `
+      UPDATE payment_intents
+      SET
+        status = $2,
+        provider_status = COALESCE($3, provider_status),
+        next_action_url = $4,
+        sca_expires_at = $5,
+        failure_code = $6,
+        failure_message = $7,
+        settled_at = CASE
+          WHEN $2 IN ('succeeded', 'failed', 'cancelled') THEN NOW()
+          ELSE settled_at
+        END,
+        metadata = COALESCE(metadata, '{}'::jsonb) || $8::jsonb,
+        updated_at = NOW()
+      WHERE id = $1
+      RETURNING
+        id,
+        user_id,
+        gateway_id,
+        channel,
+        order_id,
+        syndicate_order_id,
+        instrument_id,
+        amount_gbp,
+        amount_currency,
+        status,
+        provider_intent_ref,
+        client_secret,
+        provider_status,
+        next_action_url,
+        sca_expires_at,
+        settled_at,
+        failure_code,
+        failure_message,
+        created_at,
+        updated_at
+    `,
+    [
+      input.intentId,
+      input.nextStatus,
+      input.providerStatus ?? null,
+      input.nextActionUrl ?? null,
+      input.scaExpiresAt ?? null,
+      input.failureCode ?? null,
+      input.failureMessage ?? null,
+      toJsonString(input.metadataPatch ?? {}),
+    ]
+  );
+
+  recordPaymentTransition({
+    from: fromStatus,
+    to: input.nextStatus,
+    gateway: row.gateway_id,
+    channel: row.channel,
+  });
+
+  return {
+    intent: toPaymentIntentPayload(updated.rows[0]),
+    fromStatus,
+    idempotent: false,
+  };
+}
+
+async function findPaymentIntentByProviderRef(
+  client: PoolClient,
+  gatewayId: string,
+  providerIntentRef: string
+): Promise<PaymentIntentRow | null> {
+  const result = await client.query<PaymentIntentRow>(
+    `
+      SELECT
+        id,
+        user_id,
+        gateway_id,
+        channel,
+        order_id,
+        syndicate_order_id,
+        instrument_id,
+        amount_gbp,
+        amount_currency,
+        status,
+        provider_intent_ref,
+        client_secret,
+        provider_status,
+        next_action_url,
+        sca_expires_at,
+        settled_at,
+        failure_code,
+        failure_message,
+        created_at,
+        updated_at
+      FROM payment_intents
+      WHERE gateway_id = $1
+        AND provider_intent_ref = $2
+      LIMIT 1
+    `,
+    [gatewayId, providerIntentRef]
+  );
+
+  return result.rows[0] ?? null;
+}
+
+async function upsertPaymentRefund(
+  client: PoolClient,
+  input: {
+    intentId: string;
+    gatewayId: string;
+    providerRefundRef: string;
+    status: 'pending' | 'succeeded' | 'failed' | 'cancelled';
+    amount?: number;
+    currency?: string;
+    reason?: string;
+    metadata?: Record<string, unknown>;
+  }
+): Promise<void> {
+  const id = `rf_${input.gatewayId}_${input.providerRefundRef}`;
+  await client.query(
+    `
+      INSERT INTO payment_refunds (
+        id,
+        intent_id,
+        gateway_id,
+        amount,
+        currency,
+        status,
+        provider_refund_ref,
+        reason,
+        metadata,
+        updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, NOW())
+      ON CONFLICT (gateway_id, provider_refund_ref)
+      DO UPDATE
+        SET
+          status = EXCLUDED.status,
+          reason = EXCLUDED.reason,
+          metadata = payment_refunds.metadata || EXCLUDED.metadata,
+          updated_at = NOW()
+    `,
+    [
+      id,
+      input.intentId,
+      input.gatewayId,
+      input.amount ?? 0,
+      (input.currency ?? 'GBP').toUpperCase(),
+      input.status,
+      input.providerRefundRef,
+      input.reason ?? null,
+      toJsonString(input.metadata ?? {}),
+    ]
+  );
+}
+
+async function upsertPaymentDispute(
+  client: PoolClient,
+  input: {
+    intentId?: string;
+    gatewayId: string;
+    providerDisputeRef: string;
+    status: 'open' | 'warning' | 'needs_response' | 'won' | 'lost' | 'closed';
+    amount?: number;
+    currency?: string;
+    reason?: string;
+    metadata?: Record<string, unknown>;
+  }
+): Promise<void> {
+  const id = `dp_${input.gatewayId}_${input.providerDisputeRef}`;
+  await client.query(
+    `
+      INSERT INTO payment_disputes (
+        id,
+        intent_id,
+        gateway_id,
+        provider_dispute_ref,
+        status,
+        amount,
+        currency,
+        reason,
+        metadata,
+        updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, NOW())
+      ON CONFLICT (gateway_id, provider_dispute_ref)
+      DO UPDATE
+        SET
+          status = EXCLUDED.status,
+          amount = EXCLUDED.amount,
+          currency = EXCLUDED.currency,
+          reason = EXCLUDED.reason,
+          metadata = payment_disputes.metadata || EXCLUDED.metadata,
+          updated_at = NOW()
+    `,
+    [
+      id,
+      input.intentId ?? null,
+      input.gatewayId,
+      input.providerDisputeRef,
+      input.status,
+      input.amount ?? 0,
+      (input.currency ?? 'GBP').toUpperCase(),
+      input.reason ?? null,
+      toJsonString(input.metadata ?? {}),
+    ]
+  );
 }
 
 async function settlePayoutRequest(
@@ -1079,6 +2344,344 @@ const recommendationPayloadSchema = z.object({
   ),
 });
 
+async function queueUserNotification(input: {
+  userId: string;
+  title: string;
+  body: string;
+  payload?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+}): Promise<string> {
+  const eventId = createRuntimeId('notif');
+
+  await db.query(
+    `
+      INSERT INTO notification_events (
+        id,
+        user_id,
+        channel,
+        title,
+        body,
+        payload,
+        status,
+        metadata
+      )
+      VALUES ($1, $2, 'push', $3, $4, $5::jsonb, 'queued', $6::jsonb)
+    `,
+    [
+      eventId,
+      input.userId,
+      input.title,
+      input.body,
+      toJsonString(input.payload ?? {}),
+      toJsonString(input.metadata ?? {}),
+    ]
+  );
+
+  await enqueuePushNotificationJob({
+    eventId,
+    userId: input.userId,
+    title: input.title,
+    body: input.body,
+    payload: input.payload,
+  });
+
+  recordPushDelivery({
+    provider: 'expo',
+    status: 'queued',
+  });
+
+  publishRealtimeEvent({
+    topic: `notifications.user:${input.userId}`,
+    type: 'notification.queued',
+    userId: input.userId,
+    payload: {
+      id: eventId,
+      title: input.title,
+      body: input.body,
+      ...input.payload,
+    },
+  });
+
+  return eventId;
+}
+
+async function processPushQueueJob(job: {
+  eventId: string;
+  userId: string;
+  title: string;
+  body: string;
+  payload?: Record<string, unknown>;
+}): Promise<void> {
+  const devicesResult = await db.query<{
+    token: string;
+    provider: string;
+    platform: string;
+  }>(
+    `
+      SELECT token, provider, platform
+      FROM notification_devices
+      WHERE user_id = $1
+        AND is_active = TRUE
+      ORDER BY last_seen_at DESC
+    `,
+    [job.userId]
+  );
+
+  if (!devicesResult.rowCount) {
+    await db.query(
+      `
+        UPDATE notification_events
+        SET
+          status = 'failed',
+          provider_error = $2,
+          metadata = metadata || $3::jsonb
+        WHERE id = $1
+      `,
+      [job.eventId, 'no_active_device', toJsonString({ reason: 'No active device token' })]
+    );
+
+    recordPushDelivery({ provider: 'expo', status: 'failed' });
+    return;
+  }
+
+  const expoResponses: Array<Record<string, unknown>> = [];
+  let deliveredCount = 0;
+
+  for (const device of devicesResult.rows) {
+    try {
+      const response = await fetch(config.expoPushApiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: toJsonString({
+          to: device.token,
+          title: job.title,
+          body: job.body,
+          channelId: config.pushDefaultChannel,
+          data: {
+            ...(job.payload ?? {}),
+            eventId: job.eventId,
+          },
+        }),
+      });
+
+      const payload = response.ok
+        ? (await response.json() as Record<string, unknown>)
+        : { error: `http_${response.status}` };
+
+      expoResponses.push({
+        token: device.token,
+        provider: device.provider,
+        platform: device.platform,
+        response: payload,
+        ok: response.ok,
+      });
+
+      if (response.ok) {
+        deliveredCount += 1;
+      }
+    } catch (error) {
+      expoResponses.push({
+        token: device.token,
+        provider: device.provider,
+        platform: device.platform,
+        ok: false,
+        error: (error as Error).message,
+      });
+    }
+  }
+
+  const status = deliveredCount > 0 ? 'sent' : 'failed';
+
+  await db.query(
+    `
+      UPDATE notification_events
+      SET
+        status = $2,
+        sent_at = CASE WHEN $2 = 'sent' THEN NOW() ELSE sent_at END,
+        provider_message_id = COALESCE(provider_message_id, $3),
+        provider_error = CASE WHEN $2 = 'failed' THEN $4 ELSE NULL END,
+        metadata = metadata || $5::jsonb
+      WHERE id = $1
+    `,
+    [
+      job.eventId,
+      status,
+      deliveredCount > 0 ? `expo:${job.eventId}` : null,
+      deliveredCount > 0 ? null : 'delivery_failed',
+      toJsonString({
+        providerResponses: expoResponses,
+      }),
+    ]
+  );
+
+  recordPushDelivery({
+    provider: 'expo',
+    status: deliveredCount > 0 ? 'sent' : 'failed',
+  });
+
+  publishRealtimeEvent({
+    topic: `notifications.user:${job.userId}`,
+    type: deliveredCount > 0 ? 'notification.sent' : 'notification.failed',
+    userId: job.userId,
+    payload: {
+      id: job.eventId,
+      title: job.title,
+      body: job.body,
+      deliveredCount,
+    },
+  });
+}
+
+async function sweepExpiredAuctions(reason: 'interval' | 'manual'): Promise<number> {
+  const client = await db.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const expiring = await client.query<{
+      id: string;
+      listing_id: string;
+      seller_id: string;
+      title: string;
+    }>(
+      `
+        SELECT a.id, a.listing_id, a.seller_id, l.title
+        FROM auctions a
+        INNER JOIN listings l ON l.id = a.listing_id
+        WHERE a.ends_at <= NOW()
+          AND (a.status <> 'ended' OR a.settled_at IS NULL)
+        ORDER BY a.ends_at ASC
+        FOR UPDATE SKIP LOCKED
+      `
+    );
+
+    if (!expiring.rowCount) {
+      await client.query('COMMIT');
+      recordAuctionSettlement('no_action');
+      return 0;
+    }
+
+    for (const auction of expiring.rows) {
+      const winner = await client.query<{
+        id: number;
+        bidder_id: string;
+        amount_gbp: string;
+      }>(
+        `
+          SELECT id, bidder_id, amount_gbp::text
+          FROM auction_bids
+          WHERE auction_id = $1
+          ORDER BY amount_gbp DESC, created_at ASC, id ASC
+          LIMIT 1
+        `,
+        [auction.id]
+      );
+
+      const topBid = winner.rows[0];
+
+      await client.query(
+        `
+          UPDATE auctions
+          SET
+            status = 'ended',
+            settled_at = NOW(),
+            winner_bid_id = $2,
+            winner_bidder_id = $3,
+            updated_at = NOW()
+          WHERE id = $1
+        `,
+        [auction.id, topBid?.id ?? null, topBid?.bidder_id ?? null]
+      );
+
+      publishRealtimeEvent({
+        topic: `auction:${auction.id}`,
+        type: 'auction.settled',
+        payload: {
+          auctionId: auction.id,
+          listingId: auction.listing_id,
+          winnerBidderId: topBid?.bidder_id ?? null,
+          winnerAmountGbp: topBid ? Number(topBid.amount_gbp) : null,
+          reason,
+        },
+      });
+
+      if (topBid?.bidder_id) {
+        await queueUserNotification({
+          userId: topBid.bidder_id,
+          title: 'Auction won',
+          body: `You won ${auction.title}`,
+          payload: {
+            auctionId: auction.id,
+            listingId: auction.listing_id,
+            event: 'auction_won',
+          },
+          metadata: { reason },
+        });
+      }
+
+      await queueUserNotification({
+        userId: auction.seller_id,
+        title: 'Auction settled',
+        body: topBid?.bidder_id
+          ? `${auction.title} settled with a winning bid.`
+          : `${auction.title} ended without bids.`,
+        payload: {
+          auctionId: auction.id,
+          listingId: auction.listing_id,
+          event: topBid?.bidder_id ? 'auction_sold' : 'auction_no_sale',
+        },
+        metadata: { reason },
+      });
+    }
+
+    await client.query('COMMIT');
+    recordAuctionSettlement('settled');
+    return expiring.rows.length;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    recordAuctionSettlement('failed');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+let auctionSweepTimer: NodeJS.Timeout | null = null;
+
+function startAuctionSweepScheduler(): void {
+  if (auctionSweepTimer) {
+    return;
+  }
+
+  const queueSweep = async (reason: 'interval' | 'manual') => {
+    try {
+      await enqueueAuctionSweepJob(reason);
+    } catch (error) {
+      app.log.error({ err: error, reason }, 'Failed to enqueue auction sweep job');
+    }
+  };
+
+  void queueSweep('interval');
+
+  auctionSweepTimer = setInterval(() => {
+    void queueSweep('interval');
+  }, config.auctionSweepIntervalMs);
+
+  auctionSweepTimer.unref?.();
+}
+
+function stopAuctionSweepScheduler(): void {
+  if (!auctionSweepTimer) {
+    return;
+  }
+
+  clearInterval(auctionSweepTimer);
+  auctionSweepTimer = null;
+}
+
 app.get('/health', async () => {
   const [{ now }] = (await db.query<{ now: string }>('SELECT NOW() AS now')).rows;
   const redisPing = await redis.ping();
@@ -1091,10 +2694,34 @@ app.get('/health', async () => {
   };
 });
 
+app.get('/metrics', async (_request, reply) => {
+  reply.header('Content-Type', metricsContentType());
+  return renderMetrics();
+});
+
+app.post('/ops/auctions/sweep', async (request, reply) => {
+  try {
+    ensureSecurityAdmin(request.headers['x-security-admin-token'] as string | undefined);
+  } catch (error) {
+    reply.code(401);
+    return {
+      ok: false,
+      error: (error as Error).message,
+    };
+  }
+
+  await enqueueAuctionSweepJob('manual');
+  return {
+    ok: true,
+    queued: true,
+  };
+});
+
 app.get('/health/deep', async (_request, reply) => {
   const status = {
     api: 'ok',
     postgres: 'unknown',
+    replica: 'unknown',
     redis: 'unknown',
     keyService: 'unknown',
     ml: 'unknown',
@@ -1106,6 +2733,7 @@ app.get('/health/deep', async (_request, reply) => {
     checks: {
       api: string;
       postgres: string;
+      replica: string;
       redis: string;
       keyService: string;
       ml: string;
@@ -1127,6 +2755,19 @@ app.get('/health/deep', async (_request, reply) => {
     result.ok = false;
     result.checks.postgres = 'error';
     result.details!.postgres = (error as Error).message;
+  }
+
+  if (replicaConfigured) {
+    try {
+      await readDb.query('SELECT 1');
+      result.checks.replica = 'ok';
+    } catch (error) {
+      result.ok = false;
+      result.checks.replica = 'error';
+      result.details!.replica = (error as Error).message;
+    }
+  } else {
+    result.checks.replica = 'not_configured';
   }
 
   try {
@@ -1226,11 +2867,2385 @@ app.post('/security/keys/:keyName/rotate', async (request, reply) => {
   }
 });
 
+type AuthUserRow = {
+  id: string;
+  username: string;
+  email: string | null;
+  role: string;
+  password_hash: string | null;
+  email_verified_at: string | null;
+  two_factor_enabled: boolean;
+};
+
+function normalizeAuthRole(role: string | null | undefined): AuthRole {
+  if (role === 'seller' || role === 'moderator' || role === 'admin') {
+    return role;
+  }
+
+  return 'user';
+}
+
+function toAuthUserPayload(row: Pick<AuthUserRow, 'id' | 'username' | 'email' | 'role' | 'email_verified_at' | 'two_factor_enabled'>) {
+  return {
+    id: row.id,
+    username: row.username,
+    email: row.email,
+    role: normalizeAuthRole(row.role),
+    emailVerified: Boolean(row.email_verified_at),
+    twoFactorEnabled: Boolean(row.two_factor_enabled),
+  };
+}
+
+app.post(
+  '/auth/signup',
+  {
+    config: {
+      rateLimit: {
+        max: 12,
+        timeWindow: '1 minute',
+      },
+    },
+  },
+  async (request, reply) => {
+    const bodySchema = z.object({
+      email: z.string().trim().email().max(320),
+      username: z.string().trim().min(3).max(32),
+      password: z.string().min(8).max(128),
+    });
+
+    const payload = bodySchema.parse(request.body ?? {});
+    const email = payload.email.trim().toLowerCase();
+
+    const existing = await db.query<{ id: string }>(
+      `
+        SELECT id
+        FROM users
+        WHERE LOWER(email) = LOWER($1)
+        LIMIT 1
+      `,
+      [email]
+    );
+
+    if (existing.rowCount) {
+      reply.code(409);
+      return {
+        ok: false,
+        error: 'An account with this email already exists',
+      };
+    }
+
+    const userId = createPublicToken('usr');
+    const passwordHash = await hashPassword(payload.password);
+
+    const createResult = await db.query<AuthUserRow>(
+      `
+        INSERT INTO users (id, username, email, password_hash, role)
+        VALUES ($1, $2, $3, $4, 'user')
+        RETURNING id, username, email, role, password_hash, email_verified_at, two_factor_enabled
+      `,
+      [userId, payload.username.trim(), email, passwordHash]
+    );
+
+    const user = createResult.rows[0];
+    const authSession = await issueAuthSession(
+      {
+        userId: user.id,
+        role: normalizeAuthRole(user.role),
+      },
+      {
+        userAgent: request.headers['user-agent'],
+        ipAddress: request.ip,
+      }
+    );
+
+    reply.code(201);
+    return {
+      ok: true,
+      user: toAuthUserPayload(user),
+      accessToken: authSession.accessToken,
+      refreshToken: authSession.refreshToken,
+      accessTokenExpiresInSeconds: authSession.accessTokenExpiresInSeconds,
+      refreshTokenExpiresAt: authSession.refreshTokenExpiresAt,
+    };
+  }
+);
+
+app.post(
+  '/auth/login',
+  {
+    config: {
+      rateLimit: {
+        max: 20,
+        timeWindow: '1 minute',
+      },
+    },
+  },
+  async (request, reply) => {
+    const bodySchema = z.object({
+      email: z.string().trim().email().max(320),
+      password: z.string().min(1).max(128),
+    });
+
+    const payload = bodySchema.parse(request.body ?? {});
+
+    const userResult = await db.query<AuthUserRow>(
+      `
+        SELECT id, username, email, role, password_hash, email_verified_at, two_factor_enabled
+        FROM users
+        WHERE LOWER(email) = LOWER($1)
+        LIMIT 1
+      `,
+      [payload.email.trim().toLowerCase()]
+    );
+
+    const user = userResult.rows[0];
+    const passwordHash = user?.password_hash;
+
+    if (!user || !passwordHash) {
+      reply.code(401);
+      return {
+        ok: false,
+        error: 'Invalid credentials',
+      };
+    }
+
+    const passwordMatches = await verifyPassword(payload.password, passwordHash);
+    if (!passwordMatches) {
+      reply.code(401);
+      return {
+        ok: false,
+        error: 'Invalid credentials',
+      };
+    }
+
+    const authSession = await issueAuthSession(
+      {
+        userId: user.id,
+        role: normalizeAuthRole(user.role),
+      },
+      {
+        userAgent: request.headers['user-agent'],
+        ipAddress: request.ip,
+      }
+    );
+
+    return {
+      ok: true,
+      user: toAuthUserPayload(user),
+      accessToken: authSession.accessToken,
+      refreshToken: authSession.refreshToken,
+      accessTokenExpiresInSeconds: authSession.accessTokenExpiresInSeconds,
+      refreshTokenExpiresAt: authSession.refreshTokenExpiresAt,
+    };
+  }
+);
+
+app.post('/auth/refresh', async (request, reply) => {
+  const bodySchema = z.object({
+    refreshToken: z.string().min(20),
+  });
+
+  const payload = bodySchema.parse(request.body ?? {});
+
+  try {
+    const authSession = await rotateRefreshSession(payload.refreshToken, {
+      userAgent: request.headers['user-agent'],
+      ipAddress: request.ip,
+    });
+
+    const userResult = await db.query<AuthUserRow>(
+      `
+        SELECT id, username, email, role, password_hash, email_verified_at, two_factor_enabled
+        FROM users
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [authSession.userId]
+    );
+
+    const user = userResult.rows[0];
+    if (!user) {
+      reply.code(401);
+      return {
+        ok: false,
+        error: 'Session is no longer valid',
+      };
+    }
+
+    return {
+      ok: true,
+      user: toAuthUserPayload(user),
+      accessToken: authSession.accessToken,
+      refreshToken: authSession.refreshToken,
+      accessTokenExpiresInSeconds: authSession.accessTokenExpiresInSeconds,
+      refreshTokenExpiresAt: authSession.refreshTokenExpiresAt,
+    };
+  } catch {
+    reply.code(401);
+    return {
+      ok: false,
+      error: 'Refresh token invalid or expired',
+    };
+  }
+});
+
+app.get('/auth/me', async (request, reply) => {
+  if (!request.authUser) {
+    reply.code(401);
+    return {
+      ok: false,
+      error: 'Unauthorized',
+    };
+  }
+
+  const result = await db.query<AuthUserRow>(
+    `
+      SELECT id, username, email, role, password_hash, email_verified_at, two_factor_enabled
+      FROM users
+      WHERE id = $1
+      LIMIT 1
+    `,
+    [request.authUser.userId]
+  );
+
+  const user = result.rows[0];
+  if (!user) {
+    reply.code(404);
+    return {
+      ok: false,
+      error: 'User not found',
+    };
+  }
+
+  return {
+    ok: true,
+    user: toAuthUserPayload(user),
+  };
+});
+
+app.post('/auth/logout', async (request) => {
+  const bodySchema = z.object({
+    refreshToken: z.string().min(20).optional(),
+  });
+
+  const payload = bodySchema.parse(request.body ?? {});
+
+  if (payload.refreshToken) {
+    await revokeSessionByRefreshToken(payload.refreshToken);
+  }
+
+  if (request.authUser) {
+    await db.query(
+      `
+        UPDATE user_sessions
+        SET revoked_at = NOW()
+        WHERE id = $1
+          AND user_id = $2
+          AND revoked_at IS NULL
+      `,
+      [request.authUser.sessionId, request.authUser.userId]
+    );
+
+    await db.query(
+      `
+        UPDATE refresh_tokens
+        SET revoked_at = NOW()
+        WHERE session_id = $1
+          AND user_id = $2
+          AND revoked_at IS NULL
+      `,
+      [request.authUser.sessionId, request.authUser.userId]
+    );
+  }
+
+  return { ok: true };
+});
+
+app.post('/auth/password-reset/request', async (request) => {
+  const bodySchema = z.object({
+    email: z.string().trim().email().max(320),
+  });
+
+  const payload = bodySchema.parse(request.body ?? {});
+  const normalizedEmail = payload.email.trim().toLowerCase();
+
+  const userResult = await db.query<{ id: string }>(
+    `
+      SELECT id
+      FROM users
+      WHERE LOWER(email) = LOWER($1)
+      LIMIT 1
+    `,
+    [normalizedEmail]
+  );
+
+  let developmentToken: string | undefined;
+
+  if (userResult.rowCount) {
+    const userId = userResult.rows[0].id;
+    const resetToken = createPublicToken('pwd');
+    const resetTokenHash = hashOpaqueValue(resetToken);
+    const expiresAt = new Date(Date.now() + config.authPasswordResetTokenTtlSeconds * 1000).toISOString();
+
+    await db.query(
+      `
+        INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
+        VALUES ($1, $2, $3)
+      `,
+      [userId, resetTokenHash, expiresAt]
+    );
+
+    if (config.nodeEnv !== 'production') {
+      developmentToken = resetToken;
+    }
+  }
+
+  return {
+    ok: true,
+    message: 'If an account exists for that email, a reset link has been issued.',
+    developmentToken,
+  };
+});
+
+app.post('/auth/password-reset/confirm', async (request, reply) => {
+  const bodySchema = z.object({
+    token: z.string().min(20),
+    newPassword: z.string().min(8).max(128),
+  });
+
+  const payload = bodySchema.parse(request.body ?? {});
+  const tokenHash = hashOpaqueValue(payload.token);
+
+  const tokenResult = await db.query<{
+    id: number;
+    user_id: string;
+    expires_at: string;
+    used_at: string | null;
+  }>(
+    `
+      SELECT id, user_id, expires_at, used_at
+      FROM password_reset_tokens
+      WHERE token_hash = $1
+      LIMIT 1
+    `,
+    [tokenHash]
+  );
+
+  const tokenRow = tokenResult.rows[0];
+  if (!tokenRow || tokenRow.used_at || new Date(tokenRow.expires_at).getTime() <= Date.now()) {
+    reply.code(400);
+    return {
+      ok: false,
+      error: 'Reset token invalid or expired',
+    };
+  }
+
+  const nextPasswordHash = await hashPassword(payload.newPassword);
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    await client.query(
+      `
+        UPDATE users
+        SET
+          password_hash = $2,
+          password_changed_at = NOW(),
+          two_factor_enabled = COALESCE(two_factor_enabled, FALSE)
+        WHERE id = $1
+      `,
+      [tokenRow.user_id, nextPasswordHash]
+    );
+
+    await client.query(
+      `
+        UPDATE password_reset_tokens
+        SET used_at = NOW()
+        WHERE id = $1
+      `,
+      [tokenRow.id]
+    );
+
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  await revokeAllUserSessions(tokenRow.user_id);
+
+  return {
+    ok: true,
+    message: 'Password reset complete. Please log in again.',
+  };
+});
+
+const complianceMarketSchema = z.enum(['syndicate', 'auctions', 'wallet']);
+const kycStatusSchema = z.enum(['not_started', 'pending', 'verified', 'rejected', 'expired']);
+const kycLevelSchema = z.enum(['none', 'basic', 'enhanced']);
+const sanctionsStatusSchema = z.enum(['unknown', 'clear', 'watchlist', 'blocked']);
+const documentStatusSchema = z.enum(['unsubmitted', 'submitted', 'approved', 'rejected']);
+const livenessStatusSchema = z.enum(['unsubmitted', 'pending', 'passed', 'failed']);
+const pepStatusSchema = z.enum(['unknown', 'clear', 'flagged']);
+const amlRiskTierSchema = z.enum(['low', 'medium', 'high', 'critical']);
+
+function toComplianceProfilePayload(profile: Awaited<ReturnType<typeof getOrCreateComplianceProfile>>) {
+  return {
+    userId: profile.userId,
+    legalName: profile.legalName,
+    dateOfBirth: profile.dateOfBirth,
+    countryCode: profile.countryCode,
+    residencyCountryCode: profile.residencyCountryCode,
+    kycStatus: profile.kycStatus,
+    kycLevel: profile.kycLevel,
+    kycVendor: profile.kycVendor,
+    kycVendorRef: profile.kycVendorRef,
+    documentStatus: profile.documentStatus,
+    livenessStatus: profile.livenessStatus,
+    sanctionsStatus: profile.sanctionsStatus,
+    pepStatus: profile.pepStatus,
+    amlRiskTier: profile.amlRiskTier,
+    tradingEnabled: profile.tradingEnabled,
+    maxSingleTradeGbp: profile.maxSingleTradeGbp,
+    maxDailyVolumeGbp: profile.maxDailyVolumeGbp,
+    metadata: profile.metadata,
+    createdAt: profile.createdAt,
+    updatedAt: profile.updatedAt,
+  };
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+
+  return {};
+}
+
+app.get('/compliance/profile/:userId', async (request, reply) => {
+  const paramsSchema = z.object({ userId: z.string().min(2) });
+  const { userId } = paramsSchema.parse(request.params);
+
+  await ensureUserExists(userId);
+  const profile = await getOrCreateComplianceProfile(db, userId);
+
+  return {
+    ok: true,
+    profile: toComplianceProfilePayload(profile),
+  };
+});
+
+app.patch('/compliance/profile/:userId', async (request, reply) => {
+  const paramsSchema = z.object({ userId: z.string().min(2) });
+  const bodySchema = z.object({
+    legalName: z.string().trim().min(2).max(180).nullable().optional(),
+    dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+    countryCode: z.string().trim().min(2).max(3).optional(),
+    residencyCountryCode: z.string().trim().min(2).max(3).nullable().optional(),
+    maxSingleTradeGbp: z.number().positive().nullable().optional(),
+    maxDailyVolumeGbp: z.number().positive().nullable().optional(),
+    metadata: z.record(z.unknown()).optional(),
+  });
+
+  const { userId } = paramsSchema.parse(request.params);
+  const payload = bodySchema.parse(request.body ?? {});
+
+  await ensureUserExists(userId);
+  const current = await getOrCreateComplianceProfile(db, userId);
+
+  const nextLegalName = payload.legalName === undefined ? current.legalName : payload.legalName;
+  const nextDateOfBirth = payload.dateOfBirth === undefined ? current.dateOfBirth : payload.dateOfBirth;
+  const nextCountryCode =
+    payload.countryCode === undefined ? current.countryCode : normalizeCountryCode(payload.countryCode);
+  const nextResidencyCountryCode =
+    payload.residencyCountryCode === undefined
+      ? current.residencyCountryCode
+      : payload.residencyCountryCode === null
+        ? null
+        : normalizeCountryCode(payload.residencyCountryCode);
+  const nextMaxSingleTradeGbp =
+    payload.maxSingleTradeGbp === undefined ? current.maxSingleTradeGbp : payload.maxSingleTradeGbp;
+  const nextMaxDailyVolumeGbp =
+    payload.maxDailyVolumeGbp === undefined ? current.maxDailyVolumeGbp : payload.maxDailyVolumeGbp;
+  const nextMetadata = payload.metadata
+    ? {
+      ...asRecord(current.metadata),
+      ...asRecord(payload.metadata),
+    }
+    : current.metadata;
+
+  await db.query(
+    `
+      UPDATE user_compliance_profiles
+      SET
+        legal_name = $2,
+        date_of_birth = $3::date,
+        country_code = $4,
+        residency_country_code = $5,
+        max_single_trade_gbp = $6,
+        max_daily_volume_gbp = $7,
+        metadata = $8::jsonb,
+        updated_at = NOW()
+      WHERE user_id = $1
+    `,
+    [
+      userId,
+      nextLegalName,
+      nextDateOfBirth,
+      nextCountryCode,
+      nextResidencyCountryCode,
+      nextMaxSingleTradeGbp,
+      nextMaxDailyVolumeGbp,
+      toJsonString(nextMetadata),
+    ]
+  );
+
+  const profile = await getOrCreateComplianceProfile(db, userId);
+
+  await appendComplianceAuditSafe(request, {
+    eventType: 'compliance.profile.updated',
+    subjectUserId: userId,
+    payload: {
+      countryCode: profile.countryCode,
+      residencyCountryCode: profile.residencyCountryCode,
+      maxSingleTradeGbp: profile.maxSingleTradeGbp,
+      maxDailyVolumeGbp: profile.maxDailyVolumeGbp,
+    },
+  });
+
+  return {
+    ok: true,
+    profile: toComplianceProfilePayload(profile),
+  };
+});
+
+app.post('/compliance/kyc/sessions', async (request, reply) => {
+  const bodySchema = z.object({
+    userId: z.string().min(2),
+    vendor: z.string().trim().min(2).max(60).default('mock_kyc_vendor'),
+    kycLevel: kycLevelSchema.default('basic'),
+    requiredChecks: z.array(z.enum(['document', 'liveness', 'sanctions'])).min(1).max(6).default([
+      'document',
+      'liveness',
+      'sanctions',
+    ]),
+    metadata: z.record(z.unknown()).optional(),
+  });
+
+  const payload = bodySchema.parse(request.body ?? {});
+  await ensureUserExists(payload.userId);
+
+  const caseId = createComplianceId('kyc_case');
+  const userAgent = resolveRequestUserAgent(request);
+  const ipAddress = resolveRequestIpAddress(request);
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    const current = await getOrCreateComplianceProfile(client, payload.userId);
+    const kycVendorRef = `${payload.vendor}:${caseId}`;
+
+    await client.query(
+      `
+        UPDATE user_compliance_profiles
+        SET
+          kyc_status = 'pending',
+          kyc_level = $2,
+          kyc_vendor = $3,
+          kyc_vendor_ref = $4,
+          document_status = CASE
+            WHEN document_status = 'approved' THEN document_status
+            ELSE 'submitted'
+          END,
+          liveness_status = CASE
+            WHEN liveness_status = 'passed' THEN liveness_status
+            ELSE 'pending'
+          END,
+          trading_enabled = FALSE,
+          metadata = metadata || $5::jsonb,
+          updated_at = NOW()
+        WHERE user_id = $1
+      `,
+      [
+        payload.userId,
+        payload.kycLevel,
+        payload.vendor,
+        kycVendorRef,
+        toJsonString({
+          latestKycCaseId: caseId,
+          initiatedAt: new Date().toISOString(),
+        }),
+      ]
+    );
+
+    await client.query(
+      `
+        INSERT INTO kyc_cases (
+          id,
+          user_id,
+          vendor,
+          vendor_case_ref,
+          status,
+          kyc_level,
+          required_checks,
+          document_status,
+          liveness_status,
+          sanctions_status,
+          payload
+        )
+        VALUES ($1, $2, $3, $4, 'pending', $5, $6::jsonb, 'submitted', 'pending', 'unknown', $7::jsonb)
+      `,
+      [
+        caseId,
+        payload.userId,
+        payload.vendor,
+        kycVendorRef,
+        payload.kycLevel,
+        toJsonString(payload.requiredChecks),
+        toJsonString({
+          requestedBy: request.authUser?.userId,
+          userAgent,
+          ipAddress,
+          metadata: payload.metadata ?? {},
+        }),
+      ]
+    );
+
+    await client.query(
+      `
+        INSERT INTO kyc_verification_events (
+          user_id,
+          case_id,
+          event_type,
+          status,
+          vendor,
+          vendor_ref,
+          payload,
+          ip_address,
+          user_agent
+        )
+        VALUES ($1, $2, 'session_created', 'pending', $3, $4, $5::jsonb, $6, $7)
+      `,
+      [
+        payload.userId,
+        caseId,
+        payload.vendor,
+        kycVendorRef,
+        toJsonString({
+          requiredChecks: payload.requiredChecks,
+          previousStatus: current.kycStatus,
+          metadata: payload.metadata ?? {},
+        }),
+        ipAddress,
+        userAgent,
+      ]
+    );
+
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  await appendComplianceAuditSafe(request, {
+    eventType: 'kyc.session.created',
+    subjectUserId: payload.userId,
+    payload: {
+      caseId,
+      vendor: payload.vendor,
+      kycLevel: payload.kycLevel,
+      requiredChecks: payload.requiredChecks,
+    },
+  });
+
+  reply.code(201);
+  return {
+    ok: true,
+    kycSession: {
+      id: caseId,
+      userId: payload.userId,
+      vendor: payload.vendor,
+      status: 'pending',
+      kycLevel: payload.kycLevel,
+      requiredChecks: payload.requiredChecks,
+      verificationUrl: `https://mock-kyc.thryftverse.local/session/${caseId}`,
+    },
+  };
+});
+
+app.post('/compliance/kyc/webhook', async (request, reply) => {
+  try {
+    ensureSecurityAdmin(request.headers['x-security-admin-token'] as string | undefined);
+  } catch (error) {
+    reply.code(401);
+    return {
+      ok: false,
+      error: (error as Error).message,
+    };
+  }
+
+  const bodySchema = z.object({
+    userId: z.string().min(2),
+    caseId: z.string().min(6).optional(),
+    vendor: z.string().trim().min(2).max(60).default('mock_kyc_vendor'),
+    kycStatus: kycStatusSchema.optional(),
+    kycLevel: kycLevelSchema.optional(),
+    documentStatus: documentStatusSchema.optional(),
+    livenessStatus: livenessStatusSchema.optional(),
+    sanctionsStatus: sanctionsStatusSchema.optional(),
+    pepStatus: pepStatusSchema.optional(),
+    amlRiskTier: amlRiskTierSchema.optional(),
+    tradingEnabled: z.boolean().optional(),
+    reason: z.string().max(300).optional(),
+    payload: z.record(z.unknown()).optional(),
+  });
+
+  const payload = bodySchema.parse(request.body ?? {});
+  await ensureUserExists(payload.userId);
+
+  const userAgent = resolveRequestUserAgent(request);
+  const ipAddress = resolveRequestIpAddress(request);
+  const effectiveCaseId = payload.caseId ?? createComplianceId('kyc_case');
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    const current = await getOrCreateComplianceProfile(client, payload.userId);
+    const nextKycStatus = payload.kycStatus ?? current.kycStatus;
+    const nextKycLevel = payload.kycLevel ?? current.kycLevel;
+    const nextDocumentStatus = payload.documentStatus ?? current.documentStatus;
+    const nextLivenessStatus = payload.livenessStatus ?? current.livenessStatus;
+    const nextSanctionsStatus = payload.sanctionsStatus ?? current.sanctionsStatus;
+    const nextPepStatus = payload.pepStatus ?? current.pepStatus;
+    const nextAmlRiskTier = payload.amlRiskTier ?? current.amlRiskTier;
+    const nextTradingEnabled =
+      payload.tradingEnabled
+      ?? (
+        nextKycStatus === 'verified'
+        && nextDocumentStatus === 'approved'
+        && nextLivenessStatus === 'passed'
+        && nextSanctionsStatus === 'clear'
+      );
+
+    await client.query(
+      `
+        INSERT INTO kyc_cases (
+          id,
+          user_id,
+          vendor,
+          vendor_case_ref,
+          status,
+          kyc_level,
+          required_checks,
+          document_status,
+          liveness_status,
+          sanctions_status,
+          decision_reason,
+          payload,
+          completed_at
+        )
+        VALUES (
+          $1,
+          $2,
+          $3,
+          $4,
+          $5,
+          $6,
+          '["document","liveness","sanctions"]'::jsonb,
+          $7,
+          $8,
+          $9,
+          $10,
+          $11::jsonb,
+          CASE WHEN $5 IN ('verified', 'rejected', 'expired') THEN NOW() ELSE NULL END
+        )
+        ON CONFLICT (id)
+        DO UPDATE
+          SET
+            status = EXCLUDED.status,
+            kyc_level = EXCLUDED.kyc_level,
+            document_status = EXCLUDED.document_status,
+            liveness_status = EXCLUDED.liveness_status,
+            sanctions_status = EXCLUDED.sanctions_status,
+            decision_reason = EXCLUDED.decision_reason,
+            payload = kyc_cases.payload || EXCLUDED.payload,
+            completed_at = CASE
+              WHEN EXCLUDED.status IN ('verified', 'rejected', 'expired') THEN NOW()
+              ELSE kyc_cases.completed_at
+            END,
+            updated_at = NOW()
+      `,
+      [
+        effectiveCaseId,
+        payload.userId,
+        payload.vendor,
+        `${payload.vendor}:${effectiveCaseId}`,
+        nextKycStatus === 'pending' ? 'pending' : nextKycStatus,
+        nextKycLevel,
+        nextDocumentStatus,
+        nextLivenessStatus,
+        nextSanctionsStatus,
+        payload.reason ?? null,
+        toJsonString(payload.payload ?? {}),
+      ]
+    );
+
+    await client.query(
+      `
+        UPDATE user_compliance_profiles
+        SET
+          kyc_status = $2,
+          kyc_level = $3,
+          kyc_vendor = $4,
+          kyc_vendor_ref = $5,
+          document_status = $6,
+          liveness_status = $7,
+          sanctions_status = $8,
+          pep_status = $9,
+          aml_risk_tier = $10,
+          trading_enabled = $11,
+          metadata = metadata || $12::jsonb,
+          updated_at = NOW()
+        WHERE user_id = $1
+      `,
+      [
+        payload.userId,
+        nextKycStatus,
+        nextKycLevel,
+        payload.vendor,
+        `${payload.vendor}:${effectiveCaseId}`,
+        nextDocumentStatus,
+        nextLivenessStatus,
+        nextSanctionsStatus,
+        nextPepStatus,
+        nextAmlRiskTier,
+        nextTradingEnabled,
+        toJsonString({
+          lastKycWebhookAt: new Date().toISOString(),
+          lastKycCaseId: effectiveCaseId,
+        }),
+      ]
+    );
+
+    await client.query(
+      `
+        INSERT INTO kyc_verification_events (
+          user_id,
+          case_id,
+          event_type,
+          status,
+          vendor,
+          vendor_ref,
+          payload,
+          reviewer_user_id,
+          ip_address,
+          user_agent
+        )
+        VALUES ($1, $2, 'webhook_received', $3, $4, $5, $6::jsonb, $7, $8, $9)
+      `,
+      [
+        payload.userId,
+        effectiveCaseId,
+        nextKycStatus,
+        payload.vendor,
+        `${payload.vendor}:${effectiveCaseId}`,
+        toJsonString({
+          reason: payload.reason ?? null,
+          payload: payload.payload ?? {},
+        }),
+        request.authUser?.userId ?? null,
+        ipAddress,
+        userAgent,
+      ]
+    );
+
+    if (payload.sanctionsStatus) {
+      await client.query(
+        `
+          INSERT INTO sanctions_screenings (
+            user_id,
+            provider,
+            screening_ref,
+            status,
+            matched_entities,
+            payload
+          )
+          VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb)
+        `,
+        [
+          payload.userId,
+          payload.vendor,
+          `${payload.vendor}:${effectiveCaseId}`,
+          payload.sanctionsStatus === 'unknown' ? 'error' : payload.sanctionsStatus,
+          '[]',
+          toJsonString(payload.payload ?? {}),
+        ]
+      );
+    }
+
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  const profile = await getOrCreateComplianceProfile(db, payload.userId);
+
+  await appendComplianceAuditSafe(request, {
+    eventType: 'kyc.webhook.processed',
+    subjectUserId: payload.userId,
+    payload: {
+      caseId: effectiveCaseId,
+      kycStatus: profile.kycStatus,
+      sanctionsStatus: profile.sanctionsStatus,
+      tradingEnabled: profile.tradingEnabled,
+    },
+  });
+
+  return {
+    ok: true,
+    profile: toComplianceProfilePayload(profile),
+  };
+});
+
+app.get('/compliance/kyc/:userId', async (request, reply) => {
+  const paramsSchema = z.object({ userId: z.string().min(2) });
+  const querySchema = z.object({
+    caseLimit: z.coerce.number().int().min(1).max(50).default(10),
+    eventLimit: z.coerce.number().int().min(1).max(100).default(30),
+  });
+
+  const { userId } = paramsSchema.parse(request.params);
+  const { caseLimit, eventLimit } = querySchema.parse(request.query);
+
+  await ensureUserExists(userId);
+  const profile = await getOrCreateComplianceProfile(db, userId);
+
+  const cases = await db.query<{
+    id: string;
+    vendor: string;
+    vendor_case_ref: string | null;
+    status: string;
+    kyc_level: string;
+    document_status: string;
+    liveness_status: string;
+    sanctions_status: string;
+    decision_reason: string | null;
+    payload: Record<string, unknown>;
+    created_at: string;
+    updated_at: string;
+    completed_at: string | null;
+  }>(
+    `
+      SELECT
+        id,
+        vendor,
+        vendor_case_ref,
+        status,
+        kyc_level,
+        document_status,
+        liveness_status,
+        sanctions_status,
+        decision_reason,
+        payload,
+        created_at::text,
+        updated_at::text,
+        completed_at::text
+      FROM kyc_cases
+      WHERE user_id = $1
+      ORDER BY created_at DESC
+      LIMIT $2
+    `,
+    [userId, caseLimit]
+  );
+
+  const events = await db.query<{
+    id: number;
+    case_id: string | null;
+    event_type: string;
+    status: string | null;
+    vendor: string | null;
+    vendor_ref: string | null;
+    payload: Record<string, unknown>;
+    reviewer_user_id: string | null;
+    ip_address: string | null;
+    user_agent: string | null;
+    created_at: string;
+  }>(
+    `
+      SELECT
+        id,
+        case_id,
+        event_type,
+        status,
+        vendor,
+        vendor_ref,
+        payload,
+        reviewer_user_id,
+        ip_address,
+        user_agent,
+        created_at::text
+      FROM kyc_verification_events
+      WHERE user_id = $1
+      ORDER BY created_at DESC
+      LIMIT $2
+    `,
+    [userId, eventLimit]
+  );
+
+  return {
+    ok: true,
+    profile: toComplianceProfilePayload(profile),
+    cases: cases.rows,
+    events: events.rows,
+  };
+});
+
+app.post('/compliance/aml/evaluate', async (request, reply) => {
+  const bodySchema = z.object({
+    userId: z.string().min(2),
+    market: complianceMarketSchema,
+    eventType: z.enum(['trade', 'bid', 'deposit', 'withdrawal', 'manual']).default('manual'),
+    amountGbp: z.number().nonnegative(),
+    relatedUserId: z.string().min(2).optional(),
+    referenceId: z.string().min(2).max(80).optional(),
+    ruleCode: z.string().max(80).optional(),
+    notes: z.string().max(300).optional(),
+    context: z.record(z.unknown()).optional(),
+  });
+
+  const payload = bodySchema.parse(request.body ?? {});
+  await ensureUserExists(payload.userId);
+
+  const assessment = await evaluateAmlRisk(db, {
+    userId: payload.userId,
+    market: payload.market,
+    amountGbp: payload.amountGbp,
+    counterpartyUserId: payload.relatedUserId,
+  });
+
+  let alert: { alertId: string; status: string } | null = null;
+
+  if (assessment.shouldCreateAlert) {
+    alert = await createAmlAlert(db, {
+      userId: payload.userId,
+      relatedUserId: payload.relatedUserId,
+      market: payload.market,
+      eventType: payload.eventType,
+      amountGbp: payload.amountGbp,
+      referenceId: payload.referenceId,
+      ruleCode: payload.ruleCode,
+      notes: payload.notes,
+      context: payload.context,
+      assessment,
+    });
+  }
+
+  await appendComplianceAuditSafe(request, {
+    eventType: 'aml.evaluated',
+    subjectUserId: payload.userId,
+    payload: {
+      market: payload.market,
+      eventType: payload.eventType,
+      amountGbp: payload.amountGbp,
+      riskScore: assessment.riskScore,
+      riskLevel: assessment.riskLevel,
+      alertId: alert?.alertId ?? null,
+    },
+  });
+
+  return {
+    ok: true,
+    assessment,
+    alert,
+  };
+});
+
+app.get('/compliance/aml/alerts', async (request) => {
+  const querySchema = z.object({
+    userId: z.string().min(2).optional(),
+    status: z.enum(['open', 'under_review', 'sar_required', 'sar_filed', 'dismissed']).optional(),
+    limit: z.coerce.number().int().min(1).max(200).default(100),
+  });
+
+  const { userId, status, limit } = querySchema.parse(request.query);
+
+  const result = await db.query<{
+    id: string;
+    user_id: string;
+    related_user_id: string | null;
+    market: string;
+    event_type: string;
+    risk_score: string;
+    risk_level: string;
+    status: string;
+    amount_gbp: string | null;
+    reference_id: string | null;
+    rule_code: string | null;
+    notes: string | null;
+    context: Record<string, unknown>;
+    reviewed_by: string | null;
+    reviewed_at: string | null;
+    sar_filed_at: string | null;
+    created_at: string;
+    updated_at: string;
+  }>(
+    `
+      SELECT
+        id,
+        user_id,
+        related_user_id,
+        market,
+        event_type,
+        risk_score::text,
+        risk_level,
+        status,
+        amount_gbp::text,
+        reference_id,
+        rule_code,
+        notes,
+        context,
+        reviewed_by,
+        reviewed_at::text,
+        sar_filed_at::text,
+        created_at::text,
+        updated_at::text
+      FROM aml_alerts
+      WHERE ($1::text IS NULL OR user_id = $1)
+        AND ($2::text IS NULL OR status = $2)
+      ORDER BY created_at DESC
+      LIMIT $3
+    `,
+    [userId ?? null, status ?? null, limit]
+  );
+
+  return {
+    ok: true,
+    items: result.rows.map((row) => ({
+      id: row.id,
+      userId: row.user_id,
+      relatedUserId: row.related_user_id,
+      market: row.market,
+      eventType: row.event_type,
+      riskScore: Number(row.risk_score),
+      riskLevel: row.risk_level,
+      status: row.status,
+      amountGbp: row.amount_gbp === null ? null : Number(row.amount_gbp),
+      referenceId: row.reference_id,
+      ruleCode: row.rule_code,
+      notes: row.notes,
+      context: row.context,
+      reviewedBy: row.reviewed_by,
+      reviewedAt: row.reviewed_at,
+      sarFiledAt: row.sar_filed_at,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    })),
+  };
+});
+
+app.post('/compliance/aml/alerts/:alertId/review', async (request, reply) => {
+  try {
+    ensureSecurityAdmin(request.headers['x-security-admin-token'] as string | undefined);
+  } catch (error) {
+    reply.code(401);
+    return {
+      ok: false,
+      error: (error as Error).message,
+    };
+  }
+
+  const paramsSchema = z.object({ alertId: z.string().min(4) });
+  const bodySchema = z.object({
+    status: z.enum(['under_review', 'sar_required', 'sar_filed', 'dismissed']),
+    notes: z.string().max(300).optional(),
+    jurisdictionCode: z.string().trim().min(2).max(12).optional(),
+    narrative: z.string().max(2000).optional(),
+    externalReportRef: z.string().max(120).optional(),
+    metadata: z.record(z.unknown()).optional(),
+  }).superRefine((value, ctx) => {
+    if (value.status === 'sar_filed' && (!value.narrative || value.narrative.trim().length < 20)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['narrative'],
+        message: 'narrative with at least 20 characters is required when filing SAR',
+      });
+    }
+  });
+
+  const { alertId } = paramsSchema.parse(request.params);
+  const payload = bodySchema.parse(request.body ?? {});
+
+  const client = await db.connect();
+  let resolvedUserId: string | null = null;
+
+  try {
+    await client.query('BEGIN');
+
+    const alertUpdate = await client.query<{
+      id: string;
+      user_id: string;
+      status: string;
+    }>(
+      `
+        UPDATE aml_alerts
+        SET
+          status = $2,
+          notes = COALESCE($3, notes),
+          reviewed_by = $4,
+          reviewed_at = NOW(),
+          sar_filed_at = CASE WHEN $2 = 'sar_filed' THEN NOW() ELSE sar_filed_at END,
+          updated_at = NOW()
+        WHERE id = $1
+        RETURNING id, user_id, status
+      `,
+      [alertId, payload.status, payload.notes ?? null, request.authUser?.userId ?? null]
+    );
+
+    if (!alertUpdate.rowCount) {
+      await client.query('ROLLBACK');
+      reply.code(404);
+      return {
+        ok: false,
+        error: 'AML alert not found',
+      };
+    }
+
+    resolvedUserId = alertUpdate.rows[0].user_id;
+
+    if (payload.status === 'sar_filed') {
+      const sarId = createComplianceId('sar');
+      await client.query(
+        `
+          INSERT INTO compliance_sar_reports (
+            id,
+            alert_id,
+            user_id,
+            jurisdiction_code,
+            status,
+            narrative,
+            external_report_ref,
+            submitted_by,
+            submitted_at,
+            metadata
+          )
+          VALUES ($1, $2, $3, $4, 'submitted', $5, $6, $7, NOW(), $8::jsonb)
+          ON CONFLICT (alert_id)
+          DO UPDATE
+            SET
+              status = 'submitted',
+              narrative = EXCLUDED.narrative,
+              external_report_ref = EXCLUDED.external_report_ref,
+              submitted_by = EXCLUDED.submitted_by,
+              submitted_at = NOW(),
+              metadata = compliance_sar_reports.metadata || EXCLUDED.metadata,
+              updated_at = NOW()
+        `,
+        [
+          sarId,
+          alertId,
+          resolvedUserId,
+          payload.jurisdictionCode ?? null,
+          payload.narrative,
+          payload.externalReportRef ?? null,
+          request.authUser?.userId ?? null,
+          toJsonString(payload.metadata ?? {}),
+        ]
+      );
+    }
+
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  await appendComplianceAuditSafe(request, {
+    eventType: 'aml.alert.reviewed',
+    subjectUserId: resolvedUserId,
+    payload: {
+      alertId,
+      status: payload.status,
+      jurisdictionCode: payload.jurisdictionCode ?? null,
+    },
+  });
+
+  return {
+    ok: true,
+    alertId,
+    status: payload.status,
+  };
+});
+
+app.get('/compliance/jurisdiction/rules', async (request) => {
+  const querySchema = z.object({
+    market: complianceMarketSchema.optional(),
+    scope: z.enum(['country', 'region', 'global']).optional(),
+    scopeCode: z.string().trim().min(2).max(32).optional(),
+    limit: z.coerce.number().int().min(1).max(500).default(200),
+  });
+
+  const { market, scope, scopeCode, limit } = querySchema.parse(request.query);
+
+  const result = await db.query<{
+    id: string;
+    market: string;
+    scope: string;
+    scope_code: string;
+    is_enabled: boolean;
+    min_kyc_level: string;
+    require_sanctions_clear: boolean;
+    max_order_notional_gbp: string | null;
+    max_daily_notional_gbp: string | null;
+    max_open_orders: number | null;
+    blocked_reason: string | null;
+    metadata: Record<string, unknown>;
+    created_at: string;
+    updated_at: string;
+  }>(
+    `
+      SELECT
+        id,
+        market,
+        scope,
+        scope_code,
+        is_enabled,
+        min_kyc_level,
+        require_sanctions_clear,
+        max_order_notional_gbp::text,
+        max_daily_notional_gbp::text,
+        max_open_orders,
+        blocked_reason,
+        metadata,
+        created_at::text,
+        updated_at::text
+      FROM jurisdiction_rules
+      WHERE ($1::text IS NULL OR market = $1)
+        AND ($2::text IS NULL OR scope = $2)
+        AND ($3::text IS NULL OR scope_code = $3)
+      ORDER BY market ASC, scope ASC, scope_code ASC
+      LIMIT $4
+    `,
+    [market ?? null, scope ?? null, scopeCode ? scopeCode.toUpperCase() : null, limit]
+  );
+
+  return {
+    ok: true,
+    items: result.rows.map((row) => ({
+      id: row.id,
+      market: row.market,
+      scope: row.scope,
+      scopeCode: row.scope_code,
+      isEnabled: row.is_enabled,
+      minKycLevel: row.min_kyc_level,
+      requireSanctionsClear: row.require_sanctions_clear,
+      maxOrderNotionalGbp: row.max_order_notional_gbp === null ? null : Number(row.max_order_notional_gbp),
+      maxDailyNotionalGbp: row.max_daily_notional_gbp === null ? null : Number(row.max_daily_notional_gbp),
+      maxOpenOrders: row.max_open_orders,
+      blockedReason: row.blocked_reason,
+      metadata: row.metadata,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    })),
+  };
+});
+
+app.post('/compliance/jurisdiction/rules', async (request, reply) => {
+  try {
+    ensureSecurityAdmin(request.headers['x-security-admin-token'] as string | undefined);
+  } catch (error) {
+    reply.code(401);
+    return {
+      ok: false,
+      error: (error as Error).message,
+    };
+  }
+
+  const bodySchema = z.object({
+    id: z.string().min(4).max(80).optional(),
+    market: complianceMarketSchema,
+    scope: z.enum(['country', 'region', 'global']),
+    scopeCode: z.string().trim().min(2).max(32),
+    isEnabled: z.boolean().default(true),
+    minKycLevel: kycLevelSchema.default('basic'),
+    requireSanctionsClear: z.boolean().default(true),
+    maxOrderNotionalGbp: z.number().positive().nullable().optional(),
+    maxDailyNotionalGbp: z.number().positive().nullable().optional(),
+    maxOpenOrders: z.number().int().positive().nullable().optional(),
+    blockedReason: z.string().max(300).nullable().optional(),
+    metadata: z.record(z.unknown()).optional(),
+  });
+
+  const payload = bodySchema.parse(request.body ?? {});
+
+  const scopeCode = payload.scope === 'global' ? 'GLOBAL' : payload.scopeCode.trim().toUpperCase();
+  const ruleId = payload.id ?? createComplianceId('jr');
+
+  await db.query(
+    `
+      INSERT INTO jurisdiction_rules (
+        id,
+        market,
+        scope,
+        scope_code,
+        is_enabled,
+        min_kyc_level,
+        require_sanctions_clear,
+        max_order_notional_gbp,
+        max_daily_notional_gbp,
+        max_open_orders,
+        blocked_reason,
+        metadata
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb)
+      ON CONFLICT (market, scope, scope_code)
+      DO UPDATE
+        SET
+          is_enabled = EXCLUDED.is_enabled,
+          min_kyc_level = EXCLUDED.min_kyc_level,
+          require_sanctions_clear = EXCLUDED.require_sanctions_clear,
+          max_order_notional_gbp = EXCLUDED.max_order_notional_gbp,
+          max_daily_notional_gbp = EXCLUDED.max_daily_notional_gbp,
+          max_open_orders = EXCLUDED.max_open_orders,
+          blocked_reason = EXCLUDED.blocked_reason,
+          metadata = EXCLUDED.metadata,
+          updated_at = NOW()
+    `,
+    [
+      ruleId,
+      payload.market,
+      payload.scope,
+      scopeCode,
+      payload.isEnabled,
+      payload.minKycLevel,
+      payload.requireSanctionsClear,
+      payload.maxOrderNotionalGbp ?? null,
+      payload.maxDailyNotionalGbp ?? null,
+      payload.maxOpenOrders ?? null,
+      payload.blockedReason ?? null,
+      toJsonString(payload.metadata ?? {}),
+    ]
+  );
+
+  await appendComplianceAuditSafe(request, {
+    eventType: 'jurisdiction.rule.upserted',
+    payload: {
+      market: payload.market,
+      scope: payload.scope,
+      scopeCode,
+      isEnabled: payload.isEnabled,
+    },
+  });
+
+  return {
+    ok: true,
+    id: ruleId,
+  };
+});
+
+app.post('/compliance/jurisdiction/eligibility', async (request) => {
+  const bodySchema = z.object({
+    userId: z.string().min(2),
+    market: complianceMarketSchema,
+    orderNotionalGbp: z.number().nonnegative().default(0),
+  });
+
+  const payload = bodySchema.parse(request.body ?? {});
+  const decision = await evaluateMarketEligibility(db, {
+    userId: payload.userId,
+    market: payload.market,
+    orderNotionalGbp: payload.orderNotionalGbp,
+  });
+
+  return {
+    ok: true,
+    decision,
+  };
+});
+
+app.get('/compliance/consents/documents', async (request) => {
+  const querySchema = z.object({
+    docType: z.enum(['terms_of_service', 'privacy_policy', 'risk_disclosure', 'kyc_terms', 'consent_notice']).optional(),
+    activeOnly: z.union([z.string(), z.boolean()]).optional(),
+    limit: z.coerce.number().int().min(1).max(200).default(80),
+  });
+
+  const parsed = querySchema.parse(request.query);
+  const activeOnly = parseQueryBoolean(parsed.activeOnly, true);
+
+  const result = await db.query<{
+    id: string;
+    doc_type: string;
+    version: string;
+    locale: string;
+    title: string;
+    content_url: string | null;
+    content_hash: string | null;
+    is_active: boolean;
+    effective_at: string;
+    retired_at: string | null;
+    metadata: Record<string, unknown>;
+    created_at: string;
+  }>(
+    `
+      SELECT
+        id,
+        doc_type,
+        version,
+        locale,
+        title,
+        content_url,
+        content_hash,
+        is_active,
+        effective_at::text,
+        retired_at::text,
+        metadata,
+        created_at::text
+      FROM legal_documents
+      WHERE ($1::text IS NULL OR doc_type = $1)
+        AND ($2::boolean = FALSE OR is_active = TRUE)
+      ORDER BY effective_at DESC
+      LIMIT $3
+    `,
+    [parsed.docType ?? null, activeOnly, parsed.limit]
+  );
+
+  return {
+    ok: true,
+    items: result.rows.map((row) => ({
+      id: row.id,
+      docType: row.doc_type,
+      version: row.version,
+      locale: row.locale,
+      title: row.title,
+      contentUrl: row.content_url,
+      contentHash: row.content_hash,
+      isActive: row.is_active,
+      effectiveAt: row.effective_at,
+      retiredAt: row.retired_at,
+      metadata: row.metadata,
+      createdAt: row.created_at,
+    })),
+  };
+});
+
+app.post('/compliance/consents/documents', async (request, reply) => {
+  try {
+    ensureSecurityAdmin(request.headers['x-security-admin-token'] as string | undefined);
+  } catch (error) {
+    reply.code(401);
+    return {
+      ok: false,
+      error: (error as Error).message,
+    };
+  }
+
+  const bodySchema = z.object({
+    id: z.string().min(4).max(80).optional(),
+    docType: z.enum(['terms_of_service', 'privacy_policy', 'risk_disclosure', 'kyc_terms', 'consent_notice']),
+    version: z.string().trim().min(2).max(40),
+    locale: z.string().trim().min(2).max(12).default('en'),
+    title: z.string().trim().min(4).max(200),
+    contentUrl: z.string().url().optional(),
+    contentHash: z.string().max(200).optional(),
+    isActive: z.boolean().default(true),
+    effectiveAt: z.string().datetime().optional(),
+    metadata: z.record(z.unknown()).optional(),
+  });
+
+  const payload = bodySchema.parse(request.body ?? {});
+  const documentId = payload.id ?? createComplianceId('doc');
+
+  await db.query(
+    `
+      INSERT INTO legal_documents (
+        id,
+        doc_type,
+        version,
+        locale,
+        title,
+        content_url,
+        content_hash,
+        is_active,
+        effective_at,
+        metadata
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9::timestamptz, NOW()), $10::jsonb)
+      ON CONFLICT (doc_type, version, locale)
+      DO UPDATE
+        SET
+          title = EXCLUDED.title,
+          content_url = EXCLUDED.content_url,
+          content_hash = EXCLUDED.content_hash,
+          is_active = EXCLUDED.is_active,
+          effective_at = EXCLUDED.effective_at,
+          metadata = EXCLUDED.metadata
+    `,
+    [
+      documentId,
+      payload.docType,
+      payload.version,
+      payload.locale,
+      payload.title,
+      payload.contentUrl ?? null,
+      payload.contentHash ?? null,
+      payload.isActive,
+      payload.effectiveAt ?? null,
+      toJsonString(payload.metadata ?? {}),
+    ]
+  );
+
+  await appendComplianceAuditSafe(request, {
+    eventType: 'consent.document.upserted',
+    payload: {
+      documentId,
+      docType: payload.docType,
+      version: payload.version,
+      locale: payload.locale,
+      isActive: payload.isActive,
+    },
+  });
+
+  reply.code(201);
+  return {
+    ok: true,
+    documentId,
+  };
+});
+
+app.post('/compliance/consents/accept', async (request, reply) => {
+  const bodySchema = z.object({
+    userId: z.string().min(2),
+    documentId: z.string().min(4),
+    accepted: z.boolean().default(true),
+    evidence: z.record(z.unknown()).optional(),
+  });
+
+  const payload = bodySchema.parse(request.body ?? {});
+  await ensureUserExists(payload.userId);
+
+  const documentExists = await db.query('SELECT id FROM legal_documents WHERE id = $1 LIMIT 1', [payload.documentId]);
+  if (!documentExists.rowCount) {
+    reply.code(404);
+    return {
+      ok: false,
+      error: 'Legal document not found',
+    };
+  }
+
+  const ipAddress = resolveRequestIpAddress(request);
+  const userAgent = resolveRequestUserAgent(request);
+
+  await db.query(
+    `
+      INSERT INTO user_consents (
+        user_id,
+        document_id,
+        accepted,
+        accepted_at,
+        ip_address,
+        user_agent,
+        evidence
+      )
+      VALUES ($1, $2, $3, NOW(), $4, $5, $6::jsonb)
+      ON CONFLICT (user_id, document_id)
+      DO UPDATE
+        SET
+          accepted = EXCLUDED.accepted,
+          accepted_at = NOW(),
+          ip_address = EXCLUDED.ip_address,
+          user_agent = EXCLUDED.user_agent,
+          evidence = user_consents.evidence || EXCLUDED.evidence,
+          updated_at = NOW()
+    `,
+    [
+      payload.userId,
+      payload.documentId,
+      payload.accepted,
+      ipAddress,
+      userAgent,
+      toJsonString(payload.evidence ?? {}),
+    ]
+  );
+
+  await appendComplianceAuditSafe(request, {
+    eventType: payload.accepted ? 'consent.accepted' : 'consent.declined',
+    subjectUserId: payload.userId,
+    payload: {
+      documentId: payload.documentId,
+      accepted: payload.accepted,
+      evidence: payload.evidence ?? {},
+    },
+  });
+
+  return {
+    ok: true,
+    consent: {
+      userId: payload.userId,
+      documentId: payload.documentId,
+      accepted: payload.accepted,
+      acceptedAt: new Date().toISOString(),
+      ipAddress,
+    },
+  };
+});
+
+app.get('/compliance/consents/:userId', async (request) => {
+  const paramsSchema = z.object({ userId: z.string().min(2) });
+  const querySchema = z.object({
+    limit: z.coerce.number().int().min(1).max(200).default(80),
+  });
+
+  const { userId } = paramsSchema.parse(request.params);
+  const { limit } = querySchema.parse(request.query);
+
+  const result = await db.query<{
+    id: number;
+    user_id: string;
+    document_id: string;
+    accepted: boolean;
+    accepted_at: string;
+    ip_address: string | null;
+    user_agent: string | null;
+    evidence: Record<string, unknown>;
+    created_at: string;
+    updated_at: string;
+    doc_type: string;
+    version: string;
+    locale: string;
+    title: string;
+    content_url: string | null;
+  }>(
+    `
+      SELECT
+        uc.id,
+        uc.user_id,
+        uc.document_id,
+        uc.accepted,
+        uc.accepted_at::text,
+        uc.ip_address,
+        uc.user_agent,
+        uc.evidence,
+        uc.created_at::text,
+        uc.updated_at::text,
+        ld.doc_type,
+        ld.version,
+        ld.locale,
+        ld.title,
+        ld.content_url
+      FROM user_consents uc
+      INNER JOIN legal_documents ld ON ld.id = uc.document_id
+      WHERE uc.user_id = $1
+      ORDER BY uc.accepted_at DESC
+      LIMIT $2
+    `,
+    [userId, limit]
+  );
+
+  return {
+    ok: true,
+    items: result.rows.map((row) => ({
+      id: row.id,
+      userId: row.user_id,
+      documentId: row.document_id,
+      accepted: row.accepted,
+      acceptedAt: row.accepted_at,
+      ipAddress: row.ip_address,
+      userAgent: row.user_agent,
+      evidence: row.evidence,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      document: {
+        docType: row.doc_type,
+        version: row.version,
+        locale: row.locale,
+        title: row.title,
+        contentUrl: row.content_url,
+      },
+    })),
+  };
+});
+
+app.get('/compliance/audit/logs', async (request, reply) => {
+  try {
+    ensureSecurityAdmin(request.headers['x-security-admin-token'] as string | undefined);
+  } catch (error) {
+    reply.code(401);
+    return {
+      ok: false,
+      error: (error as Error).message,
+    };
+  }
+
+  const querySchema = z.object({
+    subjectUserId: z.string().min(2).optional(),
+    eventType: z.string().min(3).optional(),
+    limit: z.coerce.number().int().min(1).max(500).default(200),
+  });
+
+  const { subjectUserId, eventType, limit } = querySchema.parse(request.query);
+
+  const result = await db.query<{
+    id: number;
+    event_type: string;
+    actor_user_id: string | null;
+    subject_user_id: string | null;
+    request_id: string | null;
+    ip_address: string | null;
+    user_agent: string | null;
+    payload: Record<string, unknown>;
+    previous_hash: string;
+    entry_hash: string;
+    created_at: string;
+  }>(
+    `
+      SELECT
+        id,
+        event_type,
+        actor_user_id,
+        subject_user_id,
+        request_id,
+        ip_address,
+        user_agent,
+        payload,
+        previous_hash,
+        entry_hash,
+        created_at::text
+      FROM compliance_audit_log
+      WHERE ($1::text IS NULL OR subject_user_id = $1)
+        AND ($2::text IS NULL OR event_type = $2)
+      ORDER BY id DESC
+      LIMIT $3
+    `,
+    [subjectUserId ?? null, eventType ?? null, limit]
+  );
+
+  return {
+    ok: true,
+    items: result.rows,
+  };
+});
+
+app.get('/users/me/export', async (request, reply) => {
+  if (!request.authUser) {
+    reply.code(401);
+    return {
+      ok: false,
+      error: 'Unauthorized',
+    };
+  }
+
+  const userId = request.authUser.userId;
+  const gdprRequestId = createComplianceId('gdpr_export');
+  const ipAddress = resolveRequestIpAddress(request);
+  const userAgent = resolveRequestUserAgent(request);
+
+  const client = await db.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const userResult = await client.query<{
+      id: string;
+      username: string;
+      email: string | null;
+      role: string;
+      email_verified_at: string | null;
+      created_at: string;
+      last_login_at: string | null;
+      two_factor_enabled: boolean;
+      is_erased: boolean;
+      erased_at: string | null;
+    }>(
+      `
+        SELECT
+          id,
+          username,
+          email,
+          role,
+          email_verified_at::text,
+          created_at::text,
+          last_login_at::text,
+          two_factor_enabled,
+          is_erased,
+          erased_at::text
+        FROM users
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [userId]
+    );
+
+    const user = userResult.rows[0];
+    if (!user) {
+      await client.query('ROLLBACK');
+      reply.code(404);
+      return {
+        ok: false,
+        error: 'User not found',
+      };
+    }
+
+    await client.query(
+      `
+        INSERT INTO gdpr_requests (
+          id,
+          user_id,
+          request_type,
+          status,
+          requested_ip,
+          requested_user_agent,
+          requested_at,
+          payload
+        )
+        VALUES ($1, $2, 'export', 'processing', $3, $4, NOW(), '{}'::jsonb)
+      `,
+      [gdprRequestId, userId, ipAddress, userAgent]
+    );
+
+    const [
+      addresses,
+      paymentMethods,
+      sessions,
+      interactions,
+      orders,
+      auctionBids,
+      syndicateOrders,
+      syndicateHoldings,
+      consents,
+      profile,
+      kycCases,
+      amlAlerts,
+      gdprHistory,
+    ] = await Promise.all([
+      client.query('SELECT * FROM user_addresses WHERE user_id = $1 ORDER BY updated_at DESC', [userId]),
+      client.query('SELECT * FROM user_payment_methods WHERE user_id = $1 ORDER BY updated_at DESC', [userId]),
+      client.query('SELECT id, created_at, last_seen_at, revoked_at, user_agent, ip_address FROM user_sessions WHERE user_id = $1 ORDER BY created_at DESC', [userId]),
+      client.query('SELECT * FROM interactions WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1000', [userId]),
+      client.query('SELECT * FROM orders WHERE buyer_id = $1 OR seller_id = $1 ORDER BY created_at DESC LIMIT 1000', [userId]),
+      client.query('SELECT * FROM auction_bids WHERE bidder_id = $1 ORDER BY created_at DESC LIMIT 1000', [userId]),
+      client.query('SELECT * FROM syndicate_orders WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1000', [userId]),
+      client.query('SELECT * FROM syndicate_holdings WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1000', [userId]),
+      client.query('SELECT * FROM user_consents WHERE user_id = $1 ORDER BY accepted_at DESC LIMIT 1000', [userId]),
+      client.query('SELECT * FROM user_compliance_profiles WHERE user_id = $1 LIMIT 1', [userId]),
+      client.query('SELECT * FROM kyc_cases WHERE user_id = $1 ORDER BY created_at DESC LIMIT 500', [userId]),
+      client.query('SELECT * FROM aml_alerts WHERE user_id = $1 ORDER BY created_at DESC LIMIT 500', [userId]),
+      client.query('SELECT id, request_type, status, requested_at, completed_at FROM gdpr_requests WHERE user_id = $1 ORDER BY requested_at DESC LIMIT 100', [userId]),
+    ]);
+
+    const exportPayload = {
+      user,
+      addresses: addresses.rows,
+      paymentMethods: paymentMethods.rows,
+      sessions: sessions.rows,
+      interactions: interactions.rows,
+      orders: orders.rows,
+      auctionBids: auctionBids.rows,
+      syndicateOrders: syndicateOrders.rows,
+      syndicateHoldings: syndicateHoldings.rows,
+      consents: consents.rows,
+      complianceProfile: profile.rows[0] ?? null,
+      kycCases: kycCases.rows,
+      amlAlerts: amlAlerts.rows,
+      gdprHistory: gdprHistory.rows,
+      exportedAt: new Date().toISOString(),
+    };
+
+    await client.query(
+      `
+        UPDATE gdpr_requests
+        SET
+          status = 'completed',
+          completed_at = NOW(),
+          payload = $2::jsonb,
+          updated_at = NOW()
+        WHERE id = $1
+      `,
+      [
+        gdprRequestId,
+        toJsonString({
+          records: {
+            addresses: addresses.rowCount ?? 0,
+            paymentMethods: paymentMethods.rowCount ?? 0,
+            sessions: sessions.rowCount ?? 0,
+            interactions: interactions.rowCount ?? 0,
+            orders: orders.rowCount ?? 0,
+            auctionBids: auctionBids.rowCount ?? 0,
+            syndicateOrders: syndicateOrders.rowCount ?? 0,
+            syndicateHoldings: syndicateHoldings.rowCount ?? 0,
+            consents: consents.rowCount ?? 0,
+            kycCases: kycCases.rowCount ?? 0,
+            amlAlerts: amlAlerts.rowCount ?? 0,
+          },
+        }),
+      ]
+    );
+
+    await client.query('COMMIT');
+
+    await appendComplianceAuditSafe(request, {
+      eventType: 'gdpr.export.completed',
+      subjectUserId: userId,
+      payload: {
+        gdprRequestId,
+      },
+    });
+
+    return {
+      ok: true,
+      requestId: gdprRequestId,
+      export: exportPayload,
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+});
+
+app.delete('/users/me', async (request, reply) => {
+  if (!request.authUser) {
+    reply.code(401);
+    return {
+      ok: false,
+      error: 'Unauthorized',
+    };
+  }
+
+  const bodySchema = z.object({
+    reason: z.string().max(500).optional(),
+  });
+  const payload = bodySchema.parse(request.body ?? {});
+
+  const userId = request.authUser.userId;
+  const gdprRequestId = createComplianceId('gdpr_erasure');
+  const ipAddress = resolveRequestIpAddress(request);
+  const userAgent = resolveRequestUserAgent(request);
+
+  const client = await db.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const userExists = await client.query('SELECT id FROM users WHERE id = $1 LIMIT 1', [userId]);
+    if (!userExists.rowCount) {
+      await client.query('ROLLBACK');
+      reply.code(404);
+      return {
+        ok: false,
+        error: 'User not found',
+      };
+    }
+
+    await client.query(
+      `
+        INSERT INTO gdpr_requests (
+          id,
+          user_id,
+          request_type,
+          status,
+          requested_ip,
+          requested_user_agent,
+          requested_at,
+          payload
+        )
+        VALUES ($1, $2, 'erasure', 'processing', $3, $4, NOW(), $5::jsonb)
+      `,
+      [
+        gdprRequestId,
+        userId,
+        ipAddress,
+        userAgent,
+        toJsonString({ reason: payload.reason ?? null }),
+      ]
+    );
+
+    const anonymizedUsername = `deleted_user_${Date.now()}`;
+
+    await client.query(
+      `
+        UPDATE users
+        SET
+          username = $2,
+          email = NULL,
+          password_hash = NULL,
+          email_verified_at = NULL,
+          last_login_at = NULL,
+          two_factor_enabled = FALSE,
+          is_erased = TRUE,
+          erased_at = NOW(),
+          deleted_at = NOW(),
+          password_changed_at = NOW(),
+          role = 'user'
+        WHERE id = $1
+      `,
+      [userId, anonymizedUsername]
+    );
+
+    await client.query('DELETE FROM user_addresses WHERE user_id = $1', [userId]);
+    await client.query('DELETE FROM user_payment_methods WHERE user_id = $1', [userId]);
+    await client.query('DELETE FROM user_secure_profiles WHERE user_id = $1', [userId]);
+    await client.query('DELETE FROM wallet_secure_snapshots WHERE user_id = $1', [userId]);
+    await client.query('DELETE FROM secure_messages WHERE sender_id = $1 OR recipient_id = $1', [userId]);
+    await client.query('DELETE FROM interactions WHERE user_id = $1', [userId]);
+    await client.query('DELETE FROM recommendations WHERE user_id = $1', [userId]);
+    await client.query('DELETE FROM recommendation_feedback WHERE user_id = $1', [userId]);
+    await client.query('DELETE FROM notification_devices WHERE user_id = $1', [userId]);
+
+    await client.query(
+      `
+        UPDATE notification_events
+        SET
+          title = '[erased]',
+          body = '[erased]',
+          payload = '{}'::jsonb,
+          metadata = metadata || '{"gdprErased": true}'::jsonb
+        WHERE user_id = $1
+      `,
+      [userId]
+    );
+
+    await client.query('DELETE FROM user_totp_factors WHERE user_id = $1', [userId]);
+    await client.query('DELETE FROM user_recovery_codes WHERE user_id = $1', [userId]);
+    await client.query('UPDATE user_sessions SET revoked_at = COALESCE(revoked_at, NOW()) WHERE user_id = $1', [userId]);
+    await client.query('UPDATE refresh_tokens SET revoked_at = COALESCE(revoked_at, NOW()) WHERE user_id = $1', [userId]);
+    await client.query('DELETE FROM password_reset_tokens WHERE user_id = $1', [userId]);
+
+    await client.query(
+      `
+        UPDATE user_compliance_profiles
+        SET
+          legal_name = NULL,
+          date_of_birth = NULL,
+          kyc_status = 'expired',
+          document_status = 'unsubmitted',
+          liveness_status = 'unsubmitted',
+          sanctions_status = 'unknown',
+          pep_status = 'unknown',
+          trading_enabled = FALSE,
+          metadata = metadata || '{"gdprErased": true}'::jsonb,
+          updated_at = NOW()
+        WHERE user_id = $1
+      `,
+      [userId]
+    );
+
+    await client.query(
+      `
+        UPDATE gdpr_requests
+        SET
+          status = 'completed',
+          completed_at = NOW(),
+          resolution_notes = $2,
+          updated_at = NOW()
+        WHERE id = $1
+      `,
+      [gdprRequestId, 'User personal data anonymized and non-essential records erased']
+    );
+
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  await revokeAllUserSessions(userId);
+
+  await appendComplianceAuditSafe(request, {
+    eventType: 'gdpr.erasure.completed',
+    subjectUserId: userId,
+    payload: {
+      gdprRequestId,
+      reason: payload.reason ?? null,
+    },
+  });
+
+  return {
+    ok: true,
+    requestId: gdprRequestId,
+    message: 'Account personal data has been anonymized and compliance records retained.',
+  };
+});
+
 app.get('/listings', async () => {
-  const result = await db.query(
+  const result = await readDb.query(
     'SELECT id, seller_id, title, description, price_gbp, image_url, created_at FROM listings ORDER BY created_at DESC'
   );
   return { items: result.rows };
+});
+
+app.get('/search/listings', async (request) => {
+  const querySchema = z.object({
+    q: z.string().trim().min(2).max(120),
+    limit: z.coerce.number().int().min(1).max(100).default(24),
+  });
+
+  const { q, limit } = querySchema.parse(request.query);
+
+  const result = await readDb.query<{
+    id: string;
+    seller_id: string;
+    title: string;
+    description: string;
+    price_gbp: string;
+    image_url: string | null;
+    created_at: string;
+    rank_score: string;
+  }>(
+    `
+      SELECT
+        id,
+        seller_id,
+        title,
+        description,
+        price_gbp::text,
+        image_url,
+        created_at::text,
+        ts_rank_cd(search_vector, websearch_to_tsquery('simple', $1))::text AS rank_score
+      FROM listings
+      WHERE search_vector @@ websearch_to_tsquery('simple', $1)
+      ORDER BY rank_score::numeric DESC, created_at DESC
+      LIMIT $2
+    `,
+    [q, limit]
+  );
+
+  if (result.rowCount && result.rowCount > 0) {
+    return {
+      ok: true,
+      query: q,
+      items: result.rows.map((row) => ({
+        id: row.id,
+        sellerId: row.seller_id,
+        title: row.title,
+        description: row.description,
+        priceGbp: Number(row.price_gbp),
+        imageUrl: row.image_url,
+        rank: Number(row.rank_score),
+        createdAt: row.created_at,
+      })),
+    };
+  }
+
+  const fallback = await readDb.query<{
+    id: string;
+    seller_id: string;
+    title: string;
+    description: string;
+    price_gbp: string;
+    image_url: string | null;
+    created_at: string;
+  }>(
+    `
+      SELECT id, seller_id, title, description, price_gbp::text, image_url, created_at::text
+      FROM listings
+      WHERE title ILIKE $1 OR description ILIKE $1
+      ORDER BY created_at DESC
+      LIMIT $2
+    `,
+    [`%${q}%`, limit]
+  );
+
+  return {
+    ok: true,
+    query: q,
+    fallback: true,
+    items: fallback.rows.map((row) => ({
+      id: row.id,
+      sellerId: row.seller_id,
+      title: row.title,
+      description: row.description,
+      priceGbp: Number(row.price_gbp),
+      imageUrl: row.image_url,
+      rank: 0,
+      createdAt: row.created_at,
+    })),
+  };
+});
+
+app.get('/feed/looks', async () => {
+  const rankedLooks = [
+    {
+      id: 'f1',
+      rank: 1,
+      creator: {
+        id: 'u1',
+        name: 'mariefullery',
+        avatar: 'https://picsum.photos/seed/u1/200/200',
+        isVerified: true,
+      },
+      title: 'Winter Layers in the City',
+      description: 'Mixing high and low, keeping it cozy.',
+      coverImage: 'https://images.unsplash.com/photo-1509631179647-0177331693ae?w=800&q=80',
+      items: [
+        { id: 'l5', label: 'Off-White Hoodie' },
+        { id: 'l7', label: 'Cargo Trousers' },
+        { id: 'l6', label: 'Air Max 90' },
+      ],
+      likes: 245,
+      comments: 18,
+      timeAgo: '2h ago',
+    },
+    {
+      id: 'f2',
+      rank: 2,
+      creator: {
+        id: 'u2',
+        name: 'scott_art',
+        avatar: 'https://picsum.photos/seed/u2/200/200',
+        isVerified: false,
+      },
+      title: 'Minimal Monochrome',
+      description: 'Clean lines for the weekend.',
+      coverImage: 'https://images.unsplash.com/photo-1529139574466-a303027c1d8b?w=800&q=80',
+      items: [
+        { id: 'l2', label: 'AMI Striped Shirt' },
+        { id: 'l3', label: 'RL Harrington' },
+      ],
+      likes: 156,
+      comments: 12,
+      timeAgo: '5h ago',
+    },
+    {
+      id: 'f3',
+      rank: 3,
+      creator: {
+        id: 'u3',
+        name: 'dankdunksuk',
+        avatar: 'https://picsum.photos/seed/u3/200/200',
+        isVerified: true,
+      },
+      title: 'Streetwear Daily',
+      description: 'Latest pickups. Those Chucks never get old.',
+      coverImage: 'https://images.unsplash.com/photo-1552374196-1ab2a1c593e8?w=800&q=80',
+      items: [
+        { id: 'l4', label: 'Stussy Logo Tee' },
+        { id: 'l9', label: 'Represent Hoodie' },
+        { id: 'l10', label: 'Chuck Taylor' },
+      ],
+      likes: 89,
+      comments: 7,
+      timeAgo: '1d ago',
+    },
+  ];
+
+  return {
+    items: rankedLooks.sort((a, b) => a.rank - b.rank),
+  };
 });
 
 app.post('/listings', async (request, reply) => {
@@ -1363,6 +5378,262 @@ app.get('/secure-profiles/:userId', async (request, reply) => {
   };
 });
 
+app.get('/realtime/ws', { websocket: true }, (connection, request) => {
+  const querySchema = z.object({
+    topics: z.string().optional(),
+  });
+
+  const parsed = querySchema.safeParse(request.query ?? {});
+  const authUserId = request.authUser?.userId;
+
+  if (!authUserId) {
+    connection.socket.close(4401, 'unauthorized');
+    return;
+  }
+
+  const queryTopics = parsed.success ? parseRealtimeTopics(parsed.data.topics) : [];
+  const topics = new Set<string>([
+    `notifications.user:${authUserId}`,
+    ...queryTopics,
+  ]);
+
+  registerWsClient({
+    socket: connection.socket,
+    topics: Array.from(topics.values()),
+    userId: authUserId,
+  });
+});
+
+app.get('/realtime/stream', async (request, reply) => {
+  const querySchema = z.object({
+    topics: z.string().optional(),
+  });
+
+  const parsed = querySchema.safeParse(request.query ?? {});
+  const authUserId = request.authUser?.userId;
+
+  if (!authUserId) {
+    reply.code(401);
+    return {
+      ok: false,
+      error: 'Unauthorized',
+    };
+  }
+
+  const queryTopics = parsed.success ? parseRealtimeTopics(parsed.data.topics) : [];
+  const topics = new Set<string>([
+    `notifications.user:${authUserId}`,
+    ...queryTopics,
+  ]);
+
+  registerSseClient({
+    reply,
+    topics: Array.from(topics.values()),
+    userId: authUserId,
+  });
+});
+
+app.post('/notifications/devices/register', async (request, reply) => {
+  const bodySchema = z.object({
+    userId: z.string().min(2),
+    token: z.string().min(16).max(4096),
+    provider: z.enum(['expo']).default('expo'),
+    platform: z.enum(['ios', 'android', 'web']),
+    appVersion: z.string().max(120).optional(),
+    metadata: z.record(z.unknown()).optional(),
+  });
+
+  const payload = bodySchema.parse(request.body ?? {});
+  await ensureUserExists(payload.userId);
+
+  const result = await db.query<{
+    id: number;
+    user_id: string;
+    provider: string;
+    platform: string;
+    token: string;
+    is_active: boolean;
+    app_version: string | null;
+    created_at: string;
+    last_seen_at: string;
+  }>(
+    `
+      INSERT INTO notification_devices (
+        user_id,
+        provider,
+        platform,
+        token,
+        is_active,
+        app_version,
+        metadata,
+        last_seen_at
+      )
+      VALUES ($1, $2, $3, $4, TRUE, $5, $6::jsonb, NOW())
+      ON CONFLICT (token)
+      DO UPDATE
+        SET
+          user_id = EXCLUDED.user_id,
+          provider = EXCLUDED.provider,
+          platform = EXCLUDED.platform,
+          is_active = TRUE,
+          app_version = EXCLUDED.app_version,
+          metadata = notification_devices.metadata || EXCLUDED.metadata,
+          last_seen_at = NOW()
+      RETURNING id, user_id, provider, platform, token, is_active, app_version, created_at, last_seen_at
+    `,
+    [
+      payload.userId,
+      payload.provider,
+      payload.platform,
+      payload.token,
+      payload.appVersion ?? null,
+      toJsonString(payload.metadata ?? {}),
+    ]
+  );
+
+  reply.code(201);
+  return {
+    ok: true,
+    device: {
+      id: result.rows[0].id,
+      userId: result.rows[0].user_id,
+      provider: result.rows[0].provider,
+      platform: result.rows[0].platform,
+      token: result.rows[0].token,
+      isActive: result.rows[0].is_active,
+      appVersion: result.rows[0].app_version,
+      createdAt: result.rows[0].created_at,
+      lastSeenAt: result.rows[0].last_seen_at,
+    },
+  };
+});
+
+app.delete('/notifications/devices/:token', async (request, reply) => {
+  const paramsSchema = z.object({ token: z.string().min(16).max(4096) });
+  const { token } = paramsSchema.parse(request.params);
+
+  const userId = request.authUser?.userId;
+  if (!userId) {
+    reply.code(401);
+    return {
+      ok: false,
+      error: 'Unauthorized',
+    };
+  }
+
+  const deleted = await db.query(
+    `
+      UPDATE notification_devices
+      SET is_active = FALSE, last_seen_at = NOW()
+      WHERE user_id = $1
+        AND token = $2
+      RETURNING id
+    `,
+    [userId, token]
+  );
+
+  if (!deleted.rowCount) {
+    reply.code(404);
+    return {
+      ok: false,
+      error: 'Notification device token not found',
+    };
+  }
+
+  return {
+    ok: true,
+  };
+});
+
+app.get('/notifications/events', async (request) => {
+  const querySchema = z.object({
+    userId: z.string().min(2),
+    limit: z.coerce.number().int().min(1).max(120).default(30),
+  });
+
+  const { userId, limit } = querySchema.parse(request.query);
+
+  const result = await db.query<{
+    id: string;
+    user_id: string;
+    channel: string;
+    title: string;
+    body: string;
+    payload: Record<string, unknown>;
+    status: 'queued' | 'sent' | 'failed';
+    provider_message_id: string | null;
+    provider_error: string | null;
+    created_at: string;
+    sent_at: string | null;
+  }>(
+    `
+      SELECT
+        id,
+        user_id,
+        channel,
+        title,
+        body,
+        payload,
+        status,
+        provider_message_id,
+        provider_error,
+        created_at::text,
+        sent_at::text
+      FROM notification_events
+      WHERE user_id = $1
+      ORDER BY created_at DESC
+      LIMIT $2
+    `,
+    [userId, limit]
+  );
+
+  return {
+    ok: true,
+    items: result.rows.map((row) => ({
+      id: row.id,
+      userId: row.user_id,
+      channel: row.channel,
+      title: row.title,
+      body: row.body,
+      payload: row.payload,
+      status: row.status,
+      providerMessageId: row.provider_message_id,
+      providerError: row.provider_error,
+      createdAt: row.created_at,
+      sentAt: row.sent_at,
+    })),
+  };
+});
+
+app.post('/notifications/push/test', async (request, reply) => {
+  const bodySchema = z.object({
+    userId: z.string().min(2),
+    title: z.string().min(2).max(160),
+    body: z.string().min(2).max(500),
+    payload: z.record(z.unknown()).optional(),
+  });
+
+  const payload = bodySchema.parse(request.body ?? {});
+  await ensureUserExists(payload.userId);
+
+  const eventId = await queueUserNotification({
+    userId: payload.userId,
+    title: payload.title,
+    body: payload.body,
+    payload: payload.payload,
+    metadata: {
+      source: 'manual_test',
+    },
+  });
+
+  reply.code(202);
+  return {
+    ok: true,
+    eventId,
+    status: 'queued',
+  };
+});
+
 app.post('/secure-messages', async (request, reply) => {
   const bodySchema = z.object({
     conversationId: z.string().min(2).max(80),
@@ -1405,6 +5676,39 @@ app.post('/secure-messages', async (request, reply) => {
       encrypted.keyVersion,
     ]
   );
+
+  publishRealtimeEvent({
+    topic: `chat.conversation:${payload.conversationId}`,
+    type: 'chat.message.created',
+    payload: {
+      id: result.rows[0].id,
+      conversationId: payload.conversationId,
+      senderId: payload.senderId,
+      recipientId: payload.recipientId,
+      sentAt: result.rows[0].created_at,
+    },
+  });
+
+  if (payload.senderId !== payload.recipientId) {
+    try {
+      await queueUserNotification({
+        userId: payload.recipientId,
+        title: 'New message',
+        body: 'You have a new secure message in Thryftverse.',
+        payload: {
+          conversationId: payload.conversationId,
+          messageId: result.rows[0].id,
+          senderId: payload.senderId,
+          event: 'chat_message',
+        },
+        metadata: {
+          source: 'secure_messages',
+        },
+      });
+    } catch (error) {
+      request.log.error({ err: error }, 'Failed to queue push notification for secure message');
+    }
+  }
 
   reply.code(201);
   return {
@@ -1580,6 +5884,474 @@ app.get('/wallets/:userId/snapshot', async (request, reply) => {
     createdAt: row.created_at,
     snapshot,
     payoutSummary,
+  };
+});
+
+app.get('/oracle/gold/latest', async (request, reply) => {
+  const querySchema = z.object({
+    currency: z.string().length(3).default('GBP'),
+    forceRefresh: z.coerce.boolean().default(false),
+  });
+
+  const { currency, forceRefresh } = querySchema.parse(request.query);
+
+  if (!(await onezeTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze money-layer tables are unavailable. Run migrations first.',
+    };
+  }
+
+  try {
+    const rate = await resolveGoldRate(db, currency, {
+      forceRefresh,
+    });
+
+    return {
+      ok: true,
+      rate,
+    };
+  } catch (error) {
+    request.log.error({ err: error, currency }, 'Failed to resolve gold oracle rate');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to resolve gold oracle rate',
+    };
+  }
+});
+
+app.post('/oracle/gold/override', async (request, reply) => {
+  const bodySchema = z.object({
+    currency: z.string().length(3),
+    ratePerGram: z.number().positive(),
+    reason: z.string().max(240).optional(),
+    expiresAt: z.string().datetime().optional(),
+    metadata: z.record(z.unknown()).optional(),
+  });
+
+  try {
+    assertGoldOperatorToken(request.headers['x-gold-operator-token'] as string | undefined);
+  } catch {
+    reply.code(401);
+    return {
+      ok: false,
+      error: 'Missing or invalid gold operator token',
+    };
+  }
+
+  const payload = bodySchema.parse(request.body ?? {});
+
+  if (!(await onezeTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze money-layer tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    await setGoldRateOverride(client, {
+      currency: payload.currency,
+      ratePerGram: payload.ratePerGram,
+      reason: payload.reason,
+      createdBy: 'operator',
+      expiresAt: payload.expiresAt,
+      metadata: payload.metadata,
+    });
+
+    const rate = await resolveGoldRate(client, payload.currency, {
+      forceRefresh: false,
+    });
+
+    await client.query('COMMIT');
+    return {
+      ok: true,
+      rate,
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    request.log.error({ err: error }, 'Failed to apply gold rate override');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to apply gold rate override',
+    };
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/wallet/1ze/mint', async (request, reply) => {
+  const bodySchema = z.object({
+    userId: z.string().min(2),
+    fiatAmount: z.number().positive(),
+    fiatCurrency: z.string().length(3).default('GBP'),
+    paymentIntentId: z.string().min(4).max(120).optional(),
+    metadata: z.record(z.unknown()).optional(),
+  });
+
+  const payload = bodySchema.parse(request.body ?? {});
+
+  if (!(await onezeTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze money-layer tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    await ensureUserExists(payload.userId);
+
+    const quote = await resolveGoldRate(client, payload.fiatCurrency, {
+      forceRefresh: false,
+    });
+    const izeAmount = Number((payload.fiatAmount / quote.ratePerGram).toFixed(6));
+
+    if (!Number.isFinite(izeAmount) || izeAmount <= 0) {
+      throw createApiError('IZE_MINT_INVALID', 'Unable to derive a valid 1ze mint amount');
+    }
+
+    const operationId = createRuntimeId('ize_mint');
+    await recordIzeMint(client, {
+      operationId,
+      userId: payload.userId,
+      fiatAmount: payload.fiatAmount,
+      fiatCurrency: payload.fiatCurrency.toUpperCase(),
+      izeAmount,
+      ratePerGram: quote.ratePerGram,
+      paymentIntentId: payload.paymentIntentId,
+      metadata: payload.metadata,
+    });
+
+    const [walletBalanceIze, reserveSnapshot] = await Promise.all([
+      getLedgerAccountBalance(client, 'user', payload.userId, 'ize_wallet', 'IZE'),
+      getPlatformIzeReserveSnapshot(client),
+    ]);
+
+    await client.query('COMMIT');
+    reply.code(201);
+    return {
+      ok: true,
+      operation: {
+        id: operationId,
+        type: 'mint',
+        userId: payload.userId,
+        fiatAmount: payload.fiatAmount,
+        fiatCurrency: payload.fiatCurrency.toUpperCase(),
+        izeAmount,
+        ratePerGram: quote.ratePerGram,
+        rateSource: quote.source,
+      },
+      balances: {
+        userIze: walletBalanceIze,
+        outstandingIze: reserveSnapshot.outstandingIze,
+        reserveGrams: reserveSnapshot.reserveGrams,
+      },
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    const apiError = getApiError(error);
+    if (apiError) {
+      reply.code(409);
+      return {
+        ok: false,
+        error: apiError.message,
+        details: apiError.details,
+      };
+    }
+
+    request.log.error({ err: error, userId: payload.userId }, 'Failed to mint 1ze');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to mint 1ze',
+    };
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/wallet/1ze/burn', async (request, reply) => {
+  const bodySchema = z.object({
+    userId: z.string().min(2),
+    izeAmount: z.number().positive(),
+    fiatCurrency: z.string().length(3).default('GBP'),
+    payoutRequestId: z.string().min(4).max(140).optional(),
+    metadata: z.record(z.unknown()).optional(),
+  });
+
+  const payload = bodySchema.parse(request.body ?? {});
+
+  if (!(await onezeTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze money-layer tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    await ensureUserExists(payload.userId);
+
+    const quote = await resolveGoldRate(client, payload.fiatCurrency, {
+      forceRefresh: false,
+    });
+    const fiatAmount = Number((payload.izeAmount * quote.ratePerGram).toFixed(6));
+
+    const operationId = createRuntimeId('ize_burn');
+    await recordIzeBurn(client, {
+      operationId,
+      userId: payload.userId,
+      fiatAmount,
+      fiatCurrency: payload.fiatCurrency.toUpperCase(),
+      izeAmount: Number(payload.izeAmount.toFixed(6)),
+      ratePerGram: quote.ratePerGram,
+      payoutRequestId: payload.payoutRequestId,
+      metadata: payload.metadata,
+    });
+
+    const [walletBalanceIze, reserveSnapshot] = await Promise.all([
+      getLedgerAccountBalance(client, 'user', payload.userId, 'ize_wallet', 'IZE'),
+      getPlatformIzeReserveSnapshot(client),
+    ]);
+
+    await client.query('COMMIT');
+    reply.code(201);
+    return {
+      ok: true,
+      operation: {
+        id: operationId,
+        type: 'burn',
+        userId: payload.userId,
+        fiatAmount,
+        fiatCurrency: payload.fiatCurrency.toUpperCase(),
+        izeAmount: Number(payload.izeAmount.toFixed(6)),
+        ratePerGram: quote.ratePerGram,
+        rateSource: quote.source,
+      },
+      balances: {
+        userIze: walletBalanceIze,
+        outstandingIze: reserveSnapshot.outstandingIze,
+        reserveGrams: reserveSnapshot.reserveGrams,
+      },
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    const apiError = getApiError(error);
+    if (apiError?.code === 'IZE_INSUFFICIENT_BALANCE') {
+      reply.code(409);
+      return {
+        ok: false,
+        error: apiError.message,
+        details: apiError.details,
+      };
+    }
+
+    request.log.error({ err: error, userId: payload.userId }, 'Failed to burn 1ze');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to burn 1ze',
+    };
+  } finally {
+    client.release();
+  }
+});
+
+app.get('/wallet/1ze/:userId/position', async (request, reply) => {
+  const paramsSchema = z.object({ userId: z.string().min(2) });
+  const querySchema = z.object({
+    fiatCurrency: z.string().length(3).default('GBP'),
+  });
+
+  const { userId } = paramsSchema.parse(request.params);
+  const { fiatCurrency } = querySchema.parse(request.query);
+
+  if (!(await onezeTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze money-layer tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const [quote, userIze, reserveSnapshot] = await Promise.all([
+    resolveGoldRate(db, fiatCurrency, { forceRefresh: false }),
+    getLedgerAccountBalance(db, 'user', userId, 'ize_wallet', 'IZE'),
+    getPlatformIzeReserveSnapshot(db),
+  ]);
+
+  return {
+    ok: true,
+    userId,
+    rate: quote,
+    balances: {
+      userIze,
+      userFiatValue: Number((userIze * quote.ratePerGram).toFixed(2)),
+      outstandingIze: reserveSnapshot.outstandingIze,
+      reserveGrams: reserveSnapshot.reserveGrams,
+      reserveCoverageRatio:
+        reserveSnapshot.outstandingIze > 0
+          ? Number((reserveSnapshot.reserveGrams / reserveSnapshot.outstandingIze).toFixed(6))
+          : null,
+    },
+  };
+});
+
+app.post('/wallet/1ze/reconcile', async (request, reply) => {
+  const bodySchema = z.object({
+    reserveGramsOverride: z.number().nonnegative().optional(),
+    metadata: z.record(z.unknown()).optional(),
+  });
+
+  try {
+    assertGoldOperatorToken(request.headers['x-gold-operator-token'] as string | undefined);
+  } catch {
+    reply.code(401);
+    return {
+      ok: false,
+      error: 'Missing or invalid gold operator token',
+    };
+  }
+
+  if (!(await onezeTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze money-layer tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const payload = bodySchema.parse(request.body ?? {});
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    if (payload.reserveGramsOverride !== undefined) {
+      const currentReserve = await getLedgerAccountBalance(
+        client,
+        'platform',
+        'platform',
+        'gold_reserve_grams',
+        'XAU'
+      );
+
+      const delta = Number((payload.reserveGramsOverride - currentReserve).toFixed(6));
+      if (Math.abs(delta) > 1e-8) {
+        const reserveAccountId = await ensureLedgerAccount(
+          client,
+          'platform',
+          'platform',
+          'gold_reserve_grams',
+          'XAU'
+        );
+
+        await appendLedgerEntry(client, {
+          accountId: reserveAccountId,
+          counterpartyAccountId: reserveAccountId,
+          direction: delta > 0 ? 'credit' : 'debit',
+          amount: Math.abs(delta),
+          currency: 'XAU',
+          sourceType: 'reserve_reconcile',
+          sourceId: createRuntimeId('reserve_adj'),
+          lineType: 'operator_override',
+          metadata: {
+            previousReserveGrams: currentReserve,
+            nextReserveGrams: payload.reserveGramsOverride,
+            ...(payload.metadata ?? {}),
+          },
+        });
+      }
+    }
+
+    const attestation = await createGoldReserveAttestation(client, {
+      attestedBy: 'operator',
+      metadata: payload.metadata,
+      thresholdGrams: config.goldReserveDriftThresholdGrams,
+    });
+
+    await client.query('COMMIT');
+    return {
+      ok: true,
+      attestation,
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    request.log.error({ err: error }, 'Failed to reconcile 1ze reserve');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to reconcile 1ze reserve',
+    };
+  } finally {
+    client.release();
+  }
+});
+
+app.get('/wallet/1ze/attestations', async (request, reply) => {
+  const querySchema = z.object({
+    limit: z.coerce.number().int().min(1).max(120).default(30),
+  });
+
+  const { limit } = querySchema.parse(request.query);
+
+  if (!(await onezeTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze money-layer tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const result = await db.query<{
+    id: string;
+    reserve_grams: string;
+    outstanding_ize: string;
+    drift_grams: string;
+    within_threshold: boolean;
+    attested_by: string | null;
+    metadata: Record<string, unknown>;
+    created_at: string;
+  }>(
+    `
+      SELECT
+        id,
+        reserve_grams::text,
+        outstanding_ize::text,
+        drift_grams::text,
+        within_threshold,
+        attested_by,
+        metadata,
+        created_at::text
+      FROM gold_reserve_attestations
+      ORDER BY created_at DESC
+      LIMIT $1
+    `,
+    [limit]
+  );
+
+  return {
+    ok: true,
+    items: result.rows.map((row) => ({
+      id: row.id,
+      reserveGrams: Number(row.reserve_grams),
+      outstandingIze: Number(row.outstanding_ize),
+      driftGrams: Number(row.drift_grams),
+      withinThreshold: row.within_threshold,
+      attestedBy: row.attested_by,
+      metadata: row.metadata,
+      createdAt: row.created_at,
+    })),
   };
 });
 
@@ -2074,8 +6846,32 @@ app.get('/payments/gateways', async () => {
       ok: true,
       items: [
         {
-          id: 'mock_fiat_gbp',
-          displayName: 'Mock Fiat Gateway',
+          id: 'stripe_americas',
+          displayName: 'Stripe Americas',
+          type: 'fiat',
+          isActive: true,
+        },
+        {
+          id: 'mollie_eu',
+          displayName: 'Mollie Europe',
+          type: 'fiat',
+          isActive: true,
+        },
+        {
+          id: 'razorpay_in',
+          displayName: 'Razorpay India',
+          type: 'fiat',
+          isActive: true,
+        },
+        {
+          id: 'flutterwave_africa',
+          displayName: 'Flutterwave Africa',
+          type: 'fiat',
+          isActive: true,
+        },
+        {
+          id: 'tap_gulf',
+          displayName: 'Tap Payments Gulf',
           type: 'fiat',
           isActive: true,
         },
@@ -2242,7 +7038,7 @@ app.get('/users/:userId/payout-accounts', async (request, reply) => {
 app.post('/users/:userId/payout-accounts', async (request, reply) => {
   const paramsSchema = z.object({ userId: z.string().min(2) });
   const bodySchema = z.object({
-    gatewayId: z.string().min(2).max(80).default('mock_fiat_gbp'),
+    gatewayId: z.string().min(2).max(80).default('stripe_americas'),
     providerAccountRef: z.string().min(3).max(140).optional(),
     countryCode: z.string().min(2).max(3).optional(),
     currency: z.string().length(3).default('GBP'),
@@ -2697,6 +7493,8 @@ app.post('/payments/intents', async (request, reply) => {
     amountGbp: z.number().positive().optional(),
     amountCurrency: z.string().length(3).default('GBP'),
     idempotencyKey: z.string().min(6).max(140).optional(),
+    returnUrl: z.string().url().optional(),
+    webhookUrl: z.string().url().optional(),
     metadata: z.record(z.unknown()).optional(),
   });
 
@@ -2742,6 +7540,10 @@ app.post('/payments/intents', async (request, reply) => {
           status,
           provider_intent_ref,
           client_secret,
+          provider_status,
+          next_action_url,
+          sca_expires_at,
+          settled_at,
           failure_code,
           failure_message,
           created_at,
@@ -2769,7 +7571,7 @@ app.post('/payments/intents', async (request, reply) => {
 
     let channel: PaymentIntentChannel;
     let amountGbp: number;
-    let gatewayId = payload.gatewayId ?? 'mock_fiat_gbp';
+    let gatewayId = payload.gatewayId ?? resolveDefaultGatewayForChannel('commerce');
     let orderId: string | null = null;
     let syndicateOrderId: number | null = null;
 
@@ -2815,7 +7617,7 @@ app.post('/payments/intents', async (request, reply) => {
       channel = 'commerce';
       amountGbp = Number(orderRow.total_gbp);
       orderId = orderRow.id;
-      gatewayId = payload.gatewayId ?? 'mock_fiat_gbp';
+      gatewayId = payload.gatewayId ?? resolveDefaultGatewayForChannel(channel);
     } else if (payload.syndicateOrderId) {
       const syndicateOrder = await client.query<{
         id: number;
@@ -2848,7 +7650,7 @@ app.post('/payments/intents', async (request, reply) => {
       channel = 'syndicate';
       amountGbp = Number(syndicateOrderRow.total_gbp);
       syndicateOrderId = syndicateOrderRow.id;
-      gatewayId = payload.gatewayId ?? 'mock_tvusd';
+      gatewayId = payload.gatewayId ?? resolveDefaultGatewayForChannel(channel);
     } else {
       channel = payload.channel as PaymentIntentChannel;
       if (!payload.amountGbp || !Number.isFinite(payload.amountGbp) || payload.amountGbp <= 0) {
@@ -2861,7 +7663,7 @@ app.post('/payments/intents', async (request, reply) => {
       }
 
       amountGbp = roundTo(payload.amountGbp, 2);
-      gatewayId = payload.gatewayId ?? 'mock_fiat_gbp';
+      gatewayId = payload.gatewayId ?? resolveDefaultGatewayForChannel(channel);
     }
 
     const gateway = await client.query<{ id: string }>(
@@ -2900,8 +7702,21 @@ app.post('/payments/intents', async (request, reply) => {
     }
 
     const intentId = createRuntimeId('pi');
-    const providerIntentRef = createRuntimeId(`mock_intent_${gatewayId}`);
-    const clientSecret = createRuntimeId('secret');
+    const gatewayIntent = await createGatewayPaymentIntent({
+      gatewayId,
+      intentId,
+      channel,
+      amountGbp,
+      amountCurrency: payload.amountCurrency,
+      returnUrl: payload.returnUrl,
+      webhookUrl: payload.webhookUrl,
+      metadata: {
+        ...(payload.metadata ?? {}),
+        userId: payload.userId,
+        orderId,
+        syndicateOrderId,
+      },
+    });
 
     const inserted = await client.query<PaymentIntentRow>(
       `
@@ -2918,10 +7733,13 @@ app.post('/payments/intents', async (request, reply) => {
           status,
           provider_intent_ref,
           client_secret,
+          provider_status,
+          next_action_url,
+          sca_expires_at,
           idempotency_key,
           metadata
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'requires_confirmation', $10, $11, $12, $13::jsonb)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17::jsonb)
         RETURNING
           id,
           user_id,
@@ -2935,6 +7753,10 @@ app.post('/payments/intents', async (request, reply) => {
           status,
           provider_intent_ref,
           client_secret,
+          provider_status,
+          next_action_url,
+          sca_expires_at,
+          settled_at,
           failure_code,
           failure_message,
           created_at,
@@ -2950,8 +7772,12 @@ app.post('/payments/intents', async (request, reply) => {
         payload.instrumentId ?? null,
         amountGbp,
         payload.amountCurrency.toUpperCase(),
-        providerIntentRef,
-        clientSecret,
+        gatewayIntent.initialStatus,
+        gatewayIntent.providerIntentRef,
+        gatewayIntent.clientSecret,
+        gatewayIntent.providerStatus ?? null,
+        gatewayIntent.nextActionUrl ?? null,
+        gatewayIntent.scaExpiresAt ?? null,
         payload.idempotencyKey ?? null,
         toJsonString(payload.metadata ?? {}),
       ]
@@ -3004,6 +7830,10 @@ app.get('/payments/intents/:intentId', async (request, reply) => {
         status,
         provider_intent_ref,
         client_secret,
+        provider_status,
+        next_action_url,
+        sca_expires_at,
+        settled_at,
         failure_code,
         failure_message,
         created_at,
@@ -3033,9 +7863,12 @@ app.get('/payments/intents/:intentId', async (request, reply) => {
 app.post('/payments/intents/:intentId/confirm', async (request, reply) => {
   const paramsSchema = z.object({ intentId: z.string().min(4).max(120) });
   const bodySchema = z.object({
-    simulateStatus: z.enum(['succeeded', 'failed', 'cancelled']).default('succeeded'),
+    simulateStatus: z.enum(['processing', 'succeeded', 'failed', 'cancelled']).default('processing'),
     providerFeeGbp: z.number().min(0).optional(),
     providerAttemptRef: z.string().min(4).max(140).optional(),
+    providerStatus: z.string().max(120).optional(),
+    nextActionUrl: z.string().url().optional(),
+    scaExpiresAt: z.string().datetime().optional(),
     failureCode: z.string().max(80).optional(),
     failureMessage: z.string().max(240).optional(),
     payload: z.record(z.unknown()).optional(),
@@ -3055,6 +7888,28 @@ app.post('/payments/intents/:intentId/confirm', async (request, reply) => {
   const client = await db.connect();
   try {
     await client.query('BEGIN');
+
+    if (payload.simulateStatus === 'processing') {
+      const transitioned = await transitionPaymentIntentStatus(client, {
+        intentId,
+        nextStatus: 'processing',
+        providerStatus: payload.providerStatus ?? 'processing',
+        nextActionUrl: payload.nextActionUrl ?? null,
+        scaExpiresAt: payload.scaExpiresAt ?? null,
+        metadataPatch: {
+          source: 'manual_confirm',
+          ...(payload.payload ?? {}),
+        },
+      });
+
+      await client.query('COMMIT');
+      return {
+        ok: true,
+        alreadyFinal: false,
+        idempotent: transitioned.idempotent,
+        intent: transitioned.intent,
+      };
+    }
 
     const settled = await settlePaymentIntent(client, {
       intentId,
@@ -3087,6 +7942,15 @@ app.post('/payments/intents/:intentId/confirm', async (request, reply) => {
       };
     }
 
+    const apiError = getApiError(error);
+    if (apiError?.code === 'PAYMENT_INTENT_INVALID_TRANSITION') {
+      reply.code(409);
+      return {
+        ok: false,
+        error: apiError.message,
+      };
+    }
+
     request.log.error({ err: error, intentId }, 'Failed to confirm payment intent');
     reply.code(500);
     return {
@@ -3096,6 +7960,281 @@ app.post('/payments/intents/:intentId/confirm', async (request, reply) => {
   } finally {
     client.release();
   }
+});
+
+app.post('/payments/intents/:intentId/refunds', async (request, reply) => {
+  const paramsSchema = z.object({ intentId: z.string().min(4).max(120) });
+  const bodySchema = z.object({
+    amount: z.number().positive().optional(),
+    currency: z.string().length(3).optional(),
+    reason: z.string().max(240).optional(),
+    metadata: z.record(z.unknown()).optional(),
+  });
+
+  const { intentId } = paramsSchema.parse(request.params);
+  const payload = bodySchema.parse(request.body ?? {});
+
+  if (!(await paymentTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: 'Payment settlement tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    const intentResult = await client.query<PaymentIntentRow>(
+      `
+        SELECT
+          id,
+          user_id,
+          gateway_id,
+          channel,
+          order_id,
+          syndicate_order_id,
+          instrument_id,
+          amount_gbp,
+          amount_currency,
+          status,
+          provider_intent_ref,
+          client_secret,
+          provider_status,
+          next_action_url,
+          sca_expires_at,
+          settled_at,
+          failure_code,
+          failure_message,
+          created_at,
+          updated_at
+        FROM payment_intents
+        WHERE id = $1
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [intentId]
+    );
+
+    const intent = intentResult.rows[0];
+    if (!intent) {
+      await client.query('ROLLBACK');
+      reply.code(404);
+      return {
+        ok: false,
+        error: 'Payment intent not found',
+      };
+    }
+
+    if (intent.status !== 'succeeded') {
+      await client.query('ROLLBACK');
+      reply.code(409);
+      return {
+        ok: false,
+        error: 'Refunds can only be initiated for succeeded payment intents',
+      };
+    }
+
+    const amount = roundTo(payload.amount ?? Number(intent.amount_gbp), 2);
+    const currency = (payload.currency ?? intent.amount_currency ?? 'GBP').toUpperCase();
+    let providerRefundRef = createRuntimeId(`refund_${intent.gateway_id}`);
+    let refundStatus: 'pending' | 'succeeded' | 'failed' | 'cancelled' = 'pending';
+
+    if (intent.gateway_id === 'stripe_americas' && config.stripeSecretKey && intent.provider_intent_ref) {
+      const stripe = new Stripe(config.stripeSecretKey, {
+        apiVersion: '2024-06-20',
+      });
+
+      const created = await stripe.refunds.create({
+        payment_intent: intent.provider_intent_ref,
+        amount: Math.max(1, Math.round(amount * 100)),
+        reason: payload.reason ? 'requested_by_customer' : undefined,
+        metadata: toStripeMetadata({
+          intentId,
+          ...(payload.metadata ?? {}),
+        }),
+      });
+
+      providerRefundRef = created.id;
+      refundStatus =
+        created.status === 'succeeded'
+          ? 'succeeded'
+          : created.status === 'failed'
+            ? 'failed'
+            : created.status === 'canceled'
+              ? 'cancelled'
+              : 'pending';
+    }
+
+    await upsertPaymentRefund(client, {
+      intentId,
+      gatewayId: intent.gateway_id,
+      providerRefundRef,
+      status: refundStatus,
+      amount,
+      currency,
+      reason: payload.reason,
+      metadata: {
+        source: 'manual_refund_request',
+        ...(payload.metadata ?? {}),
+      },
+    });
+
+    await client.query('COMMIT');
+    reply.code(201);
+    return {
+      ok: true,
+      refund: {
+        intentId,
+        gatewayId: intent.gateway_id,
+        providerRefundRef,
+        status: refundStatus,
+        amount,
+        currency,
+      },
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    request.log.error({ err: error, intentId }, 'Failed to initiate refund');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to initiate refund',
+    };
+  } finally {
+    client.release();
+  }
+});
+
+app.get('/payments/intents/:intentId/refunds', async (request, reply) => {
+  const paramsSchema = z.object({ intentId: z.string().min(4).max(120) });
+  const { intentId } = paramsSchema.parse(request.params);
+
+  if (!(await paymentTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: 'Payment settlement tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const result = await db.query<{
+    id: string;
+    intent_id: string;
+    gateway_id: string;
+    amount: string;
+    currency: string;
+    status: 'pending' | 'succeeded' | 'failed' | 'cancelled';
+    provider_refund_ref: string;
+    reason: string | null;
+    metadata: Record<string, unknown>;
+    created_at: string;
+    updated_at: string;
+  }>(
+    `
+      SELECT
+        id,
+        intent_id,
+        gateway_id,
+        amount::text,
+        currency,
+        status,
+        provider_refund_ref,
+        reason,
+        metadata,
+        created_at::text,
+        updated_at::text
+      FROM payment_refunds
+      WHERE intent_id = $1
+      ORDER BY created_at DESC
+    `,
+    [intentId]
+  );
+
+  return {
+    ok: true,
+    items: result.rows.map((row) => ({
+      id: row.id,
+      intentId: row.intent_id,
+      gatewayId: row.gateway_id,
+      amount: Number(row.amount),
+      currency: row.currency,
+      status: row.status,
+      providerRefundRef: row.provider_refund_ref,
+      reason: row.reason,
+      metadata: row.metadata,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    })),
+  };
+});
+
+app.get('/payments/disputes', async (request, reply) => {
+  const querySchema = z.object({
+    status: z.enum(['open', 'warning', 'needs_response', 'won', 'lost', 'closed']).optional(),
+    limit: z.coerce.number().int().min(1).max(200).default(80),
+  });
+  const { status, limit } = querySchema.parse(request.query);
+
+  if (!(await paymentTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: 'Payment settlement tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const result = await db.query<{
+    id: string;
+    intent_id: string | null;
+    gateway_id: string;
+    provider_dispute_ref: string;
+    status: 'open' | 'warning' | 'needs_response' | 'won' | 'lost' | 'closed';
+    amount: string;
+    currency: string;
+    reason: string | null;
+    metadata: Record<string, unknown>;
+    created_at: string;
+    updated_at: string;
+  }>(
+    `
+      SELECT
+        id,
+        intent_id,
+        gateway_id,
+        provider_dispute_ref,
+        status,
+        amount::text,
+        currency,
+        reason,
+        metadata,
+        created_at::text,
+        updated_at::text
+      FROM payment_disputes
+      WHERE ($1::text IS NULL OR status = $1)
+      ORDER BY updated_at DESC
+      LIMIT $2
+    `,
+    [status ?? null, limit]
+  );
+
+  return {
+    ok: true,
+    items: result.rows.map((row) => ({
+      id: row.id,
+      intentId: row.intent_id,
+      gatewayId: row.gateway_id,
+      providerDisputeRef: row.provider_dispute_ref,
+      status: row.status,
+      amount: Number(row.amount),
+      currency: row.currency,
+      reason: row.reason,
+      metadata: row.metadata,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    })),
+  };
 });
 
 app.post('/payments/webhooks/mock', async (request, reply) => {
@@ -3378,6 +8517,274 @@ app.post('/payouts/webhooks/mock', async (request, reply) => {
     return {
       ok: false,
       error: 'Unable to process payout webhook event',
+    };
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/webhooks/:provider', async (request, reply) => {
+  const paramsSchema = z.object({ provider: z.string().min(3).max(40) });
+  const { provider: providerSegment } = paramsSchema.parse(request.params);
+  const provider = resolveProviderFromPathSegment(providerSegment);
+
+  if (!provider) {
+    reply.code(404);
+    return {
+      ok: false,
+      error: 'Unsupported webhook provider',
+    };
+  }
+
+  if (!(await paymentTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: 'Payment settlement tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const rawBody =
+    typeof request.rawBody === 'string'
+      ? request.rawBody
+      : request.rawBody
+        ? request.rawBody.toString('utf8')
+        : toJsonString(request.body ?? {});
+  const verification = await verifyAndNormalizeWebhook(
+    provider,
+    rawBody,
+    request.headers as Record<string, unknown>,
+    request.body
+  );
+
+  if (!verification.verified || !verification.event) {
+    reply.code(401);
+    return {
+      ok: false,
+      error: verification.reason ?? 'Webhook signature verification failed',
+    };
+  }
+
+  const event = verification.event;
+  const expectedGateway = expectedGatewayIdForProvider(provider);
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    const gateway = await client.query<{ id: string }>(
+      'SELECT id FROM payment_gateways WHERE id = $1 LIMIT 1',
+      [expectedGateway]
+    );
+
+    if (!gateway.rowCount) {
+      await client.query('ROLLBACK');
+      reply.code(400);
+      return {
+        ok: false,
+        error: `Gateway '${expectedGateway}' is not configured`,
+      };
+    }
+
+    let intentRow: PaymentIntentRow | null = null;
+    if (event.intentId) {
+      const byId = await client.query<PaymentIntentRow>(
+        `
+          SELECT
+            id,
+            user_id,
+            gateway_id,
+            channel,
+            order_id,
+            syndicate_order_id,
+            instrument_id,
+            amount_gbp,
+            amount_currency,
+            status,
+            provider_intent_ref,
+            client_secret,
+            provider_status,
+            next_action_url,
+            sca_expires_at,
+            settled_at,
+            failure_code,
+            failure_message,
+            created_at,
+            updated_at
+          FROM payment_intents
+          WHERE id = $1
+          LIMIT 1
+        `,
+        [event.intentId]
+      );
+      intentRow = byId.rows[0] ?? null;
+    }
+
+    if (!intentRow && event.providerIntentRef) {
+      intentRow = await findPaymentIntentByProviderRef(client, expectedGateway, event.providerIntentRef);
+    }
+
+    const webhookInsert = await client.query<{ id: number }>(
+      `
+        INSERT INTO payment_webhook_events (
+          gateway_id,
+          provider_event_id,
+          event_type,
+          intent_id,
+          payload
+        )
+        VALUES ($1, $2, $3, $4, $5::jsonb)
+        ON CONFLICT (gateway_id, provider_event_id)
+        DO NOTHING
+        RETURNING id
+      `,
+      [
+        expectedGateway,
+        event.providerEventId,
+        event.eventType,
+        intentRow?.id ?? null,
+        toJsonString(event.rawPayload),
+      ]
+    );
+
+    if (!webhookInsert.rowCount) {
+      await client.query('COMMIT');
+      return {
+        ok: true,
+        duplicate: true,
+      };
+    }
+
+    let settledIntent: ReturnType<typeof toPaymentIntentPayload> | undefined;
+    let settledPayout: ReturnType<typeof toPayoutRequestPayload> | undefined;
+
+    if (event.paymentStatus && intentRow) {
+      if (['succeeded', 'failed', 'cancelled'].includes(event.paymentStatus)) {
+        const settled = await settlePaymentIntent(client, {
+          intentId: intentRow.id,
+          finalStatus: event.paymentStatus as PaymentIntentTerminalStatus,
+          providerAttemptRef: event.providerEventId,
+          failureCode: event.paymentStatus === 'failed' ? 'provider_failed' : undefined,
+          failureMessage: event.paymentStatus === 'failed' ? `Provider event ${event.eventType}` : undefined,
+          rawPayload: {
+            source: 'provider_webhook',
+            provider,
+            eventType: event.eventType,
+            payload: event.rawPayload,
+          },
+        });
+        settledIntent = settled.intent;
+      } else {
+        const transitioned = await transitionPaymentIntentStatus(client, {
+          intentId: intentRow.id,
+          nextStatus: event.paymentStatus as Exclude<ProviderPaymentStatus, 'succeeded' | 'failed' | 'cancelled'>,
+          providerStatus: event.eventType,
+          nextActionUrl: (event.metadata.nextActionUrl as string | undefined) ?? null,
+          metadataPatch: {
+            source: 'provider_webhook',
+            provider,
+            eventType: event.eventType,
+          },
+        });
+        settledIntent = transitioned.intent;
+      }
+    }
+
+    if (event.refund && intentRow) {
+      await upsertPaymentRefund(client, {
+        intentId: intentRow.id,
+        gatewayId: expectedGateway,
+        providerRefundRef: event.refund.providerRefundRef,
+        status: event.refund.status,
+        amount: event.refund.amount,
+        currency: event.refund.currency,
+        reason: event.refund.reason,
+        metadata: {
+          provider,
+          eventType: event.eventType,
+        },
+      });
+    }
+
+    if (event.dispute) {
+      await upsertPaymentDispute(client, {
+        intentId: intentRow?.id,
+        gatewayId: expectedGateway,
+        providerDisputeRef: event.dispute.providerDisputeRef,
+        status: event.dispute.status,
+        amount: event.dispute.amount,
+        currency: event.dispute.currency,
+        reason: event.dispute.reason,
+        metadata: {
+          provider,
+          eventType: event.eventType,
+        },
+      });
+    }
+
+    if (event.payoutRequestId && event.payoutStatus) {
+      const payoutRow = await client.query<{ id: string; user_id: string }>(
+        'SELECT id, user_id FROM payout_requests WHERE id = $1 LIMIT 1',
+        [event.payoutRequestId]
+      );
+
+      if (payoutRow.rowCount) {
+        const payoutSettled = await settlePayoutRequest(client, {
+          userId: payoutRow.rows[0].user_id,
+          requestId: payoutRow.rows[0].id,
+          targetStatus: event.payoutStatus,
+          providerPayoutRef: event.providerIntentRef,
+          failureReason: event.payoutStatus === 'failed' ? `Provider event ${event.eventType}` : undefined,
+          metadata: {
+            provider,
+            eventType: event.eventType,
+          },
+          source: 'provider_webhook',
+        });
+        settledPayout = payoutSettled.payoutRequest;
+      }
+    }
+
+    await client.query('UPDATE payment_webhook_events SET processed_at = NOW() WHERE id = $1', [
+      webhookInsert.rows[0].id,
+    ]);
+
+    await client.query('COMMIT');
+    return {
+      ok: true,
+      duplicate: false,
+      unresolved: !intentRow && !event.payoutRequestId,
+      intent: settledIntent,
+      payoutRequest: settledPayout,
+      refundRecorded: Boolean(event.refund),
+      disputeRecorded: Boolean(event.dispute),
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+
+    if ((error as Error).message === 'PAYMENT_INTENT_NOT_FOUND') {
+      reply.code(404);
+      return {
+        ok: false,
+        error: 'Payment intent not found for webhook event',
+      };
+    }
+
+    const apiError = getApiError(error);
+    if (apiError?.code === 'PAYOUT_INVALID_TRANSITION' || apiError?.code === 'PAYOUT_PENDING_INSUFFICIENT') {
+      reply.code(409);
+      return {
+        ok: false,
+        error: apiError.message,
+        details: apiError.details,
+      };
+    }
+
+    request.log.error({ err: error, provider, event }, 'Failed to process provider webhook');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to process provider webhook',
     };
   } finally {
     client.release();
@@ -3847,7 +9254,7 @@ app.get('/users/:userId/market-history', async (request, reply) => {
     units: number | null;
     unit_price_gbp: number | string | null;
     fee_gbp: number | string | null;
-    status: 'filled' | 'rejected' | null;
+    status: 'open' | 'partially_filled' | 'filled' | 'cancelled' | 'rejected' | null;
     note: string | null;
     timestamp: string;
   }>(
@@ -4178,6 +9585,7 @@ app.post('/auctions/:auctionId/bids', async (request, reply) => {
   await ensureUserExists(payload.bidderId);
 
   const client = await db.connect();
+  let amlAlert: { alertId: string; status: string } | null = null;
   try {
     await client.query('BEGIN');
 
@@ -4228,6 +9636,85 @@ app.post('/auctions/:auctionId/bids', async (request, reply) => {
       return { ok: false, error: `Bid must be greater than current bid (${currentBid.toFixed(2)} GBP)` };
     }
 
+    const eligibility = await evaluateMarketEligibility(client, {
+      userId: payload.bidderId,
+      market: 'auctions',
+      orderNotionalGbp: amountGbp,
+    });
+
+    if (!eligibility.allowed) {
+      await client.query('ROLLBACK');
+
+      await appendComplianceAuditSafe(request, {
+        eventType: 'auction.bid.blocked.eligibility',
+        subjectUserId: payload.bidderId,
+        payload: {
+          auctionId,
+          amountGbp,
+          code: eligibility.code,
+          message: eligibility.message,
+        },
+      });
+
+      reply.code(403);
+      return {
+        ok: false,
+        error: eligibility.message,
+        code: eligibility.code,
+      };
+    }
+
+    const amlAssessment = await evaluateAmlRisk(client, {
+      userId: payload.bidderId,
+      market: 'auctions',
+      amountGbp,
+      counterpartyUserId: auction.seller_id,
+    });
+
+    if (amlAssessment.shouldBlock) {
+      await client.query('ROLLBACK');
+
+      if (amlAssessment.shouldCreateAlert) {
+        amlAlert = await createAmlAlert(db, {
+          userId: payload.bidderId,
+          relatedUserId: auction.seller_id,
+          market: 'auctions',
+          eventType: 'bid',
+          amountGbp,
+          referenceId: auctionId,
+          ruleCode: 'AML_PRE_TRADE_BLOCK',
+          notes: 'Auction bid blocked by AML pre-trade evaluation',
+          context: {
+            auctionId,
+            bidderId: payload.bidderId,
+            sellerId: auction.seller_id,
+          },
+          assessment: amlAssessment,
+        });
+      }
+
+      await appendComplianceAuditSafe(request, {
+        eventType: 'auction.bid.blocked.aml',
+        subjectUserId: payload.bidderId,
+        payload: {
+          auctionId,
+          amountGbp,
+          riskScore: amlAssessment.riskScore,
+          riskLevel: amlAssessment.riskLevel,
+          alertId: amlAlert?.alertId ?? null,
+        },
+      });
+
+      reply.code(403);
+      return {
+        ok: false,
+        error: 'Bid blocked by AML controls. Please contact support for manual review.',
+        code: 'AML_BLOCKED',
+        riskLevel: amlAssessment.riskLevel,
+        alertId: amlAlert?.alertId ?? null,
+      };
+    }
+
     const bidResult = await client.query<{
       id: number;
       created_at: string;
@@ -4252,7 +9739,79 @@ app.post('/auctions/:auctionId/bids', async (request, reply) => {
       [auctionId, amountGbp, nextBidCount]
     );
 
+    if (amlAssessment.shouldCreateAlert) {
+      amlAlert = await createAmlAlert(client, {
+        userId: payload.bidderId,
+        relatedUserId: auction.seller_id,
+        market: 'auctions',
+        eventType: 'bid',
+        amountGbp,
+        referenceId: auctionId,
+        ruleCode: 'AML_POST_BID_MONITOR',
+        notes: 'Auction bid generated elevated AML risk score',
+        context: {
+          auctionId,
+          bidderId: payload.bidderId,
+          sellerId: auction.seller_id,
+        },
+        assessment: amlAssessment,
+      });
+    }
+
     await client.query('COMMIT');
+
+    publishRealtimeEvent({
+      topic: `auction:${auctionId}`,
+      type: 'auction.bid.created',
+      payload: {
+        auctionId,
+        bidderId: payload.bidderId,
+        amountGbp,
+        bidCount: nextBidCount,
+      },
+    });
+
+    publishRealtimeEvent({
+      topic: 'auctions.market',
+      type: 'auction.bid.created',
+      payload: {
+        auctionId,
+        currentBidGbp: amountGbp,
+        bidCount: nextBidCount,
+      },
+    });
+
+    if (auction.seller_id !== payload.bidderId) {
+      try {
+        await queueUserNotification({
+          userId: auction.seller_id,
+          title: 'New auction bid',
+          body: `A new bid was placed on auction ${auctionId}.`,
+          payload: {
+            auctionId,
+            bidderId: payload.bidderId,
+            amountGbp,
+            event: 'auction_bid',
+          },
+          metadata: {
+            source: 'auction_bid_route',
+          },
+        });
+      } catch (error) {
+        request.log.error({ err: error, auctionId }, 'Failed to queue seller bid notification');
+      }
+    }
+
+    await appendComplianceAuditSafe(request, {
+      eventType: 'auction.bid.created',
+      subjectUserId: payload.bidderId,
+      payload: {
+        auctionId,
+        amountGbp,
+        bidCount: nextBidCount,
+        amlAlertId: amlAlert?.alertId ?? null,
+      },
+    });
 
     reply.code(201);
     return {
@@ -4269,6 +9828,12 @@ app.post('/auctions/:auctionId/bids', async (request, reply) => {
         currentBidGbp: amountGbp,
         bidCount: nextBidCount,
       },
+      aml: amlAlert
+        ? {
+          alertId: amlAlert.alertId,
+          status: amlAlert.status,
+        }
+        : null,
     };
   } catch (error) {
     await client.query('ROLLBACK');
@@ -4492,14 +10057,210 @@ app.post('/syndicate/assets', async (request, reply) => {
   };
 });
 
+type SyndicateOrderStatus = 'open' | 'partially_filled' | 'filled' | 'cancelled' | 'rejected';
+type SyndicateOrderType = 'market' | 'limit';
+
+interface SyndicateHoldingRow {
+  user_id: string;
+  asset_id: string;
+  units_owned: number;
+  avg_entry_price_gbp: number | string;
+  realized_pnl_gbp: number | string;
+}
+
+async function getSyndicateHoldingForUpdate(
+  client: PoolClient,
+  userId: string,
+  assetId: string
+): Promise<SyndicateHoldingRow | null> {
+  const result = await client.query<SyndicateHoldingRow>(
+    `
+      SELECT
+        user_id,
+        asset_id,
+        units_owned,
+        avg_entry_price_gbp,
+        realized_pnl_gbp
+      FROM syndicate_holdings
+      WHERE user_id = $1
+        AND asset_id = $2
+      LIMIT 1
+      FOR UPDATE
+    `,
+    [userId, assetId]
+  );
+
+  return result.rows[0] ?? null;
+}
+
+async function saveSyndicateHolding(
+  client: PoolClient,
+  input: {
+    userId: string;
+    assetId: string;
+    unitsOwned: number;
+    avgEntryPriceGbp: number;
+    realizedPnlGbp: number;
+  }
+): Promise<void> {
+  await client.query(
+    `
+      INSERT INTO syndicate_holdings (
+        user_id,
+        asset_id,
+        units_owned,
+        avg_entry_price_gbp,
+        realized_pnl_gbp,
+        updated_at
+      )
+      VALUES ($1, $2, $3, $4, $5, NOW())
+      ON CONFLICT (user_id, asset_id)
+      DO UPDATE
+        SET
+          units_owned = EXCLUDED.units_owned,
+          avg_entry_price_gbp = EXCLUDED.avg_entry_price_gbp,
+          realized_pnl_gbp = EXCLUDED.realized_pnl_gbp,
+          updated_at = NOW()
+    `,
+    [
+      input.userId,
+      input.assetId,
+      Math.max(0, Math.floor(input.unitsOwned)),
+      roundTo(Math.max(0, input.avgEntryPriceGbp), 4),
+      roundTo(input.realizedPnlGbp, 4),
+    ]
+  );
+}
+
+async function applySyndicateTransfer(
+  client: PoolClient,
+  input: {
+    assetId: string;
+    buyerId: string;
+    sellerId: string;
+    units: number;
+    unitPriceGbp: number;
+    feeGbp: number;
+    sourceType: 'syndicate_trade' | 'buyout';
+    buyOrderId?: number | null;
+    sellOrderId?: number | null;
+    enforceSellerHolding: boolean;
+  }
+): Promise<{ notionalGbp: number; feeGbp: number }> {
+  const units = Math.max(0, Math.floor(input.units));
+  if (units <= 0) {
+    return {
+      notionalGbp: 0,
+      feeGbp: 0,
+    };
+  }
+
+  const buyerHolding = await getSyndicateHoldingForUpdate(client, input.buyerId, input.assetId);
+  const sellerHolding = await getSyndicateHoldingForUpdate(client, input.sellerId, input.assetId);
+
+  if (input.enforceSellerHolding) {
+    const sellerUnits = sellerHolding?.units_owned ?? 0;
+    if (sellerUnits < units) {
+      throw createApiError('SYNDICATE_SELLER_UNITS_INSUFFICIENT', 'Seller does not have enough units', {
+        sellerId: input.sellerId,
+        availableUnits: sellerUnits,
+        requestedUnits: units,
+      });
+    }
+  }
+
+  const buyerUnitsBefore = buyerHolding?.units_owned ?? 0;
+  const buyerAvgBefore = Number(buyerHolding?.avg_entry_price_gbp ?? 0);
+  const buyerRealizedBefore = Number(buyerHolding?.realized_pnl_gbp ?? 0);
+  const buyerUnitsAfter = buyerUnitsBefore + units;
+  const buyerAvgAfter =
+    buyerUnitsAfter > 0
+      ? (buyerAvgBefore * buyerUnitsBefore + input.unitPriceGbp * units) / buyerUnitsAfter
+      : input.unitPriceGbp;
+
+  await saveSyndicateHolding(client, {
+    userId: input.buyerId,
+    assetId: input.assetId,
+    unitsOwned: buyerUnitsAfter,
+    avgEntryPriceGbp: buyerAvgAfter,
+    realizedPnlGbp: buyerRealizedBefore,
+  });
+
+  if (input.enforceSellerHolding) {
+    const sellerUnitsBefore = sellerHolding?.units_owned ?? 0;
+    const sellerAvgBefore = Number(sellerHolding?.avg_entry_price_gbp ?? 0);
+    const sellerRealizedBefore = Number(sellerHolding?.realized_pnl_gbp ?? 0);
+    const sellerUnitsAfter = sellerUnitsBefore - units;
+    const realizedDelta = (input.unitPriceGbp - sellerAvgBefore) * units;
+
+    await saveSyndicateHolding(client, {
+      userId: input.sellerId,
+      assetId: input.assetId,
+      unitsOwned: sellerUnitsAfter,
+      avgEntryPriceGbp: sellerUnitsAfter > 0 ? sellerAvgBefore : 0,
+      realizedPnlGbp: sellerRealizedBefore + realizedDelta,
+    });
+  }
+
+  const notionalGbp = roundTo(units * input.unitPriceGbp, 4);
+
+  await client.query(
+    `
+      INSERT INTO syndicate_trades (
+        asset_id,
+        buy_order_id,
+        sell_order_id,
+        buyer_id,
+        seller_id,
+        units,
+        unit_price_gbp,
+        notional_gbp,
+        fee_gbp
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    `,
+    [
+      input.assetId,
+      input.buyOrderId ?? null,
+      input.sellOrderId ?? null,
+      input.buyerId,
+      input.sellerId,
+      units,
+      input.unitPriceGbp,
+      notionalGbp,
+      input.feeGbp,
+    ]
+  );
+
+  return {
+    notionalGbp,
+    feeGbp: input.feeGbp,
+  };
+}
+
+async function recalcSyndicateHolders(client: PoolClient, assetId: string): Promise<number> {
+  const result = await client.query<{ count: string }>(
+    `
+      SELECT COUNT(*)::text AS count
+      FROM syndicate_holdings
+      WHERE asset_id = $1
+        AND units_owned > 0
+    `,
+    [assetId]
+  );
+
+  return Number(result.rows[0]?.count ?? '0');
+}
+
 app.get('/syndicate/assets/:assetId/orders', async (request, reply) => {
   const paramsSchema = z.object({ assetId: z.string().min(2) });
   const querySchema = z.object({
+    status: z.enum(['open', 'partially_filled', 'filled', 'cancelled', 'rejected']).optional(),
     limit: z.coerce.number().int().min(1).max(200).default(60),
   });
 
   const { assetId } = paramsSchema.parse(request.params);
-  const { limit } = querySchema.parse(request.query);
+  const { status, limit } = querySchema.parse(request.query);
 
   const assetExists = await db.query('SELECT id FROM syndicate_assets WHERE id = $1 LIMIT 1', [assetId]);
   if (!assetExists.rowCount) {
@@ -4512,12 +10273,17 @@ app.get('/syndicate/assets/:assetId/orders', async (request, reply) => {
     asset_id: string;
     user_id: string;
     side: 'buy' | 'sell';
+    order_type: SyndicateOrderType;
+    limit_price_gbp: number | string | null;
     units: number;
+    remaining_units: number;
+    filled_units: number;
     unit_price_gbp: number | string;
     fee_gbp: number | string;
     total_gbp: number | string;
-    status: 'filled' | 'rejected';
+    status: SyndicateOrderStatus;
     created_at: string;
+    updated_at: string;
   }>(
     `
       SELECT
@@ -4525,18 +10291,24 @@ app.get('/syndicate/assets/:assetId/orders', async (request, reply) => {
         asset_id,
         user_id,
         side,
+        order_type,
+        limit_price_gbp,
         units,
+        remaining_units,
+        filled_units,
         unit_price_gbp,
         fee_gbp,
         total_gbp,
         status,
-        created_at
+        created_at,
+        updated_at
       FROM syndicate_orders
       WHERE asset_id = $1
+        AND ($2::text IS NULL OR status = $2)
       ORDER BY created_at DESC
-      LIMIT $2
+      LIMIT $3
     `,
-    [assetId, limit]
+    [assetId, status ?? null, limit]
   );
 
   return {
@@ -4546,12 +10318,122 @@ app.get('/syndicate/assets/:assetId/orders', async (request, reply) => {
       assetId: row.asset_id,
       userId: row.user_id,
       side: row.side,
+      orderType: row.order_type,
+      limitPriceGbp: row.limit_price_gbp === null ? null : Number(row.limit_price_gbp),
       units: row.units,
+      remainingUnits: row.remaining_units,
+      filledUnits: row.filled_units,
       unitPriceGbp: Number(row.unit_price_gbp),
       feeGbp: Number(row.fee_gbp),
       totalGbp: Number(row.total_gbp),
       status: row.status,
       createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    })),
+  };
+});
+
+app.get('/syndicate/assets/:assetId/orderbook', async (request, reply) => {
+  const paramsSchema = z.object({ assetId: z.string().min(2) });
+  const querySchema = z.object({
+    limit: z.coerce.number().int().min(1).max(200).default(40),
+  });
+
+  const { assetId } = paramsSchema.parse(request.params);
+  const { limit } = querySchema.parse(request.query);
+
+  const assetExists = await db.query('SELECT id FROM syndicate_assets WHERE id = $1 LIMIT 1', [assetId]);
+  if (!assetExists.rowCount) {
+    reply.code(404);
+    return { ok: false, error: 'Syndicate asset not found' };
+  }
+
+  const result = await db.query<{
+    side: 'buy' | 'sell';
+    unit_price_gbp: string;
+    units: string;
+    order_count: string;
+  }>(
+    `
+      SELECT
+        side,
+        unit_price_gbp::text,
+        SUM(remaining_units)::text AS units,
+        COUNT(*)::text AS order_count
+      FROM syndicate_orders
+      WHERE asset_id = $1
+        AND status IN ('open', 'partially_filled')
+        AND remaining_units > 0
+      GROUP BY side, unit_price_gbp
+      ORDER BY
+        CASE WHEN side = 'buy' THEN unit_price_gbp END DESC,
+        CASE WHEN side = 'sell' THEN unit_price_gbp END ASC,
+        side ASC
+      LIMIT $2
+    `,
+    [assetId, limit]
+  );
+
+  return {
+    ok: true,
+    bids: result.rows
+      .filter((row) => row.side === 'buy')
+      .map((row) => ({
+        side: row.side,
+        unitPriceGbp: Number(row.unit_price_gbp),
+        units: Number(row.units),
+        orderCount: Number(row.order_count),
+      })),
+    asks: result.rows
+      .filter((row) => row.side === 'sell')
+      .map((row) => ({
+        side: row.side,
+        unitPriceGbp: Number(row.unit_price_gbp),
+        units: Number(row.units),
+        orderCount: Number(row.order_count),
+      })),
+  };
+});
+
+app.get('/syndicate/assets/:assetId/holdings', async (request, reply) => {
+  const paramsSchema = z.object({ assetId: z.string().min(2) });
+  const querySchema = z.object({
+    limit: z.coerce.number().int().min(1).max(200).default(100),
+  });
+
+  const { assetId } = paramsSchema.parse(request.params);
+  const { limit } = querySchema.parse(request.query);
+
+  const result = await db.query<{
+    user_id: string;
+    units_owned: number;
+    avg_entry_price_gbp: string;
+    realized_pnl_gbp: string;
+    updated_at: string;
+  }>(
+    `
+      SELECT
+        user_id,
+        units_owned,
+        avg_entry_price_gbp::text,
+        realized_pnl_gbp::text,
+        updated_at::text
+      FROM syndicate_holdings
+      WHERE asset_id = $1
+      ORDER BY units_owned DESC, updated_at DESC
+      LIMIT $2
+    `,
+    [assetId, limit]
+  );
+
+  return {
+    ok: true,
+    items: result.rows.map((row) => ({
+      userId: row.user_id,
+      unitsOwned: row.units_owned,
+      avgEntryPriceGbp: Number(row.avg_entry_price_gbp),
+      realizedPnlGbp: Number(row.realized_pnl_gbp),
+      updatedAt: row.updated_at,
     })),
   };
 });
@@ -4562,6 +10444,24 @@ app.post('/syndicate/assets/:assetId/orders', async (request, reply) => {
     userId: z.string().min(2),
     side: z.enum(['buy', 'sell']),
     units: z.number().int().positive(),
+    orderType: z.enum(['market', 'limit']).default('market'),
+    limitPriceGbp: z.number().positive().optional(),
+  }).superRefine((value, ctx) => {
+    if (value.orderType === 'limit' && !value.limitPriceGbp) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'limitPriceGbp is required for limit orders',
+        path: ['limitPriceGbp'],
+      });
+    }
+
+    if (value.orderType === 'market' && value.limitPriceGbp !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'limitPriceGbp is only valid for limit orders',
+        path: ['limitPriceGbp'],
+      });
+    }
   });
 
   const { assetId } = paramsSchema.parse(request.params);
@@ -4569,6 +10469,7 @@ app.post('/syndicate/assets/:assetId/orders', async (request, reply) => {
   await ensureUserExists(payload.userId);
 
   const client = await db.connect();
+  let amlAlert: { alertId: string; status: string } | null = null;
   try {
     await client.query('BEGIN');
 
@@ -4578,6 +10479,7 @@ app.post('/syndicate/assets/:assetId/orders', async (request, reply) => {
       total_units: number;
       available_units: number;
       unit_price_gbp: number | string;
+      unit_price_stable: number | string;
       holders: number;
       volume_24h_gbp: number | string;
       is_open: boolean;
@@ -4589,6 +10491,7 @@ app.post('/syndicate/assets/:assetId/orders', async (request, reply) => {
           total_units,
           available_units,
           unit_price_gbp,
+          unit_price_stable,
           holders,
           volume_24h_gbp,
           is_open
@@ -4612,35 +10515,124 @@ app.post('/syndicate/assets/:assetId/orders', async (request, reply) => {
       return { ok: false, error: 'Syndicate asset is closed for trading' };
     }
 
-    const unitPriceGbp = Number(asset.unit_price_gbp);
-    const grossGbp = roundTo(unitPriceGbp * payload.units, 4);
-    const feeGbp = roundTo(grossGbp * 0.005, 4);
-    const totalGbp = payload.side === 'buy' ? roundTo(grossGbp + feeGbp, 4) : roundTo(Math.max(0, grossGbp - feeGbp), 4);
+    const referencePriceGbp = Number(asset.unit_price_gbp);
+    const proposedUnitPrice =
+      payload.orderType === 'limit'
+        ? roundTo(payload.limitPriceGbp ?? referencePriceGbp, 4)
+        : referencePriceGbp;
+    const proposedNotionalGbp = roundTo(Math.max(0, payload.units) * proposedUnitPrice, 2);
 
-    let nextAvailableUnits = asset.available_units;
-    let nextHolders = asset.holders;
+    const eligibility = await evaluateMarketEligibility(client, {
+      userId: payload.userId,
+      market: 'syndicate',
+      orderNotionalGbp: proposedNotionalGbp,
+    });
 
-    if (payload.side === 'buy') {
-      if (asset.available_units < payload.units) {
-        await client.query('ROLLBACK');
-        reply.code(400);
-        return {
-          ok: false,
-          error: `Only ${asset.available_units} units available`,
-        };
-      }
+    if (!eligibility.allowed) {
+      await client.query('ROLLBACK');
 
-      nextAvailableUnits = asset.available_units - payload.units;
-      nextHolders = asset.holders + 1;
-    } else {
-      nextAvailableUnits = Math.min(asset.total_units, asset.available_units + payload.units);
-      nextHolders = Math.max(0, asset.holders - 1);
+      await appendComplianceAuditSafe(request, {
+        eventType: 'syndicate.order.blocked.eligibility',
+        subjectUserId: payload.userId,
+        payload: {
+          assetId,
+          side: payload.side,
+          units: payload.units,
+          orderType: payload.orderType,
+          orderNotionalGbp: proposedNotionalGbp,
+          code: eligibility.code,
+          message: eligibility.message,
+        },
+      });
+
+      reply.code(403);
+      return {
+        ok: false,
+        error: eligibility.message,
+        code: eligibility.code,
+      };
     }
 
-    const volume24hGbp = roundTo(Number(asset.volume_24h_gbp) + grossGbp, 2);
+    const preTradeAml = await evaluateAmlRisk(client, {
+      userId: payload.userId,
+      market: 'syndicate',
+      amountGbp: proposedNotionalGbp,
+      counterpartyUserId: asset.issuer_id,
+    });
+
+    if (preTradeAml.shouldBlock) {
+      await client.query('ROLLBACK');
+
+      if (preTradeAml.shouldCreateAlert) {
+        amlAlert = await createAmlAlert(db, {
+          userId: payload.userId,
+          relatedUserId: asset.issuer_id,
+          market: 'syndicate',
+          eventType: 'trade',
+          amountGbp: proposedNotionalGbp,
+          referenceId: `${assetId}:pretrade`,
+          ruleCode: 'AML_PRE_TRADE_BLOCK',
+          notes: 'Syndicate order blocked by AML pre-trade evaluation',
+          context: {
+            assetId,
+            side: payload.side,
+            units: payload.units,
+            orderType: payload.orderType,
+          },
+          assessment: preTradeAml,
+        });
+      }
+
+      await appendComplianceAuditSafe(request, {
+        eventType: 'syndicate.order.blocked.aml',
+        subjectUserId: payload.userId,
+        payload: {
+          assetId,
+          side: payload.side,
+          units: payload.units,
+          orderType: payload.orderType,
+          orderNotionalGbp: proposedNotionalGbp,
+          riskScore: preTradeAml.riskScore,
+          riskLevel: preTradeAml.riskLevel,
+          alertId: amlAlert?.alertId ?? null,
+        },
+      });
+
+      reply.code(403);
+      return {
+        ok: false,
+        error: 'Order blocked by AML controls. Please contact support for review.',
+        code: 'AML_BLOCKED',
+        riskLevel: preTradeAml.riskLevel,
+        alertId: amlAlert?.alertId ?? null,
+      };
+    }
+
+    if (payload.side === 'sell') {
+      const sellerHolding = await getSyndicateHoldingForUpdate(client, payload.userId, assetId);
+      const sellerUnits = sellerHolding?.units_owned ?? 0;
+      if (sellerUnits < payload.units) {
+        await client.query('ROLLBACK');
+        reply.code(409);
+        return {
+          ok: false,
+          error: `Insufficient units to sell. Available: ${sellerUnits}`,
+        };
+      }
+    }
+
+    const orderPriceGbp =
+      payload.orderType === 'limit' ? roundTo(payload.limitPriceGbp ?? referencePriceGbp, 4) : referencePriceGbp;
 
     const orderResult = await client.query<{
       id: number;
+      side: 'buy' | 'sell';
+      units: number;
+      remaining_units: number;
+      filled_units: number;
+      unit_price_gbp: string;
+      fee_gbp: string;
+      total_gbp: string;
       created_at: string;
     }>(
       `
@@ -4648,23 +10640,273 @@ app.post('/syndicate/assets/:assetId/orders', async (request, reply) => {
           asset_id,
           user_id,
           side,
+          order_type,
+          limit_price_gbp,
           units,
+          remaining_units,
+          filled_units,
           unit_price_gbp,
           fee_gbp,
           total_gbp,
+          updated_at,
           status
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, 'filled')
-        RETURNING id, created_at
+        VALUES ($1, $2, $3, $4, $5, $6, $6, 0, $7, 0, 0, NOW(), 'open')
+        RETURNING id, side, units, remaining_units, filled_units, unit_price_gbp::text, fee_gbp::text, total_gbp::text, created_at
       `,
-      [assetId, payload.userId, payload.side, payload.units, unitPriceGbp, feeGbp, totalGbp]
+      [
+        assetId,
+        payload.userId,
+        payload.side,
+        payload.orderType,
+        payload.orderType === 'limit' ? payload.limitPriceGbp : null,
+        payload.units,
+        orderPriceGbp,
+      ]
     );
+
+    const incomingOrderId = orderResult.rows[0].id;
+    let remainingUnits = payload.units;
+    let filledUnits = 0;
+    let tradedNotionalGbp = 0;
+    let tradedFeeGbp = 0;
+    let nextAvailableUnits = asset.available_units;
+
+    const restingOrders = await client.query<{
+      id: number;
+      user_id: string;
+      side: 'buy' | 'sell';
+      units: number;
+      remaining_units: number;
+      filled_units: number;
+      unit_price_gbp: string;
+      fee_gbp: string;
+      total_gbp: string;
+    }>(
+      `
+        SELECT
+          id,
+          user_id,
+          side,
+          units,
+          remaining_units,
+          filled_units,
+          unit_price_gbp::text,
+          fee_gbp::text,
+          total_gbp::text
+        FROM syndicate_orders
+        WHERE asset_id = $1
+          AND side = $2
+          AND status IN ('open', 'partially_filled')
+          AND id <> $3
+          AND (
+            $4::numeric IS NULL
+            OR (
+              $5 = 'buy' AND unit_price_gbp <= $4
+            )
+            OR (
+              $5 = 'sell' AND unit_price_gbp >= $4
+            )
+          )
+        ORDER BY
+          CASE WHEN $5 = 'buy' THEN unit_price_gbp END ASC,
+          CASE WHEN $5 = 'sell' THEN unit_price_gbp END DESC,
+          id ASC
+        FOR UPDATE
+      `,
+      [
+        assetId,
+        payload.side === 'buy' ? 'sell' : 'buy',
+        incomingOrderId,
+        payload.orderType === 'limit' ? payload.limitPriceGbp : null,
+        payload.side,
+      ]
+    );
+
+    for (const resting of restingOrders.rows) {
+      if (remainingUnits <= 0) {
+        break;
+      }
+
+      const restingRemaining = resting.remaining_units;
+      if (restingRemaining <= 0) {
+        continue;
+      }
+
+      const fillUnits = Math.min(remainingUnits, restingRemaining);
+      const tradePrice = Number(resting.unit_price_gbp);
+      const tradeNotional = roundTo(fillUnits * tradePrice, 4);
+      const tradeFee = roundTo(tradeNotional * 0.005, 4);
+
+      if (payload.side === 'buy') {
+        await applySyndicateTransfer(client, {
+          assetId,
+          buyerId: payload.userId,
+          sellerId: resting.user_id,
+          units: fillUnits,
+          unitPriceGbp: tradePrice,
+          feeGbp: tradeFee,
+          sourceType: 'syndicate_trade',
+          buyOrderId: incomingOrderId,
+          sellOrderId: resting.id,
+          enforceSellerHolding: true,
+        });
+      } else {
+        await applySyndicateTransfer(client, {
+          assetId,
+          buyerId: resting.user_id,
+          sellerId: payload.userId,
+          units: fillUnits,
+          unitPriceGbp: tradePrice,
+          feeGbp: tradeFee,
+          sourceType: 'syndicate_trade',
+          buyOrderId: resting.id,
+          sellOrderId: incomingOrderId,
+          enforceSellerHolding: true,
+        });
+      }
+
+      tradedNotionalGbp = roundTo(tradedNotionalGbp + tradeNotional, 4);
+      tradedFeeGbp = roundTo(tradedFeeGbp + tradeFee, 4);
+      remainingUnits -= fillUnits;
+      filledUnits += fillUnits;
+
+      const restingRemainingAfter = restingRemaining - fillUnits;
+      const restingFilledAfter = resting.filled_units + fillUnits;
+      const restingStatus: SyndicateOrderStatus =
+        restingRemainingAfter <= 0 ? 'filled' : 'partially_filled';
+      const restingTradeNet =
+        resting.side === 'buy'
+          ? roundTo(tradeNotional + tradeFee, 4)
+          : roundTo(Math.max(0, tradeNotional - tradeFee), 4);
+      const restingTotalAfter = roundTo(Number(resting.total_gbp) + restingTradeNet, 4);
+      const restingFeeAfter = roundTo(Number(resting.fee_gbp) + tradeFee, 4);
+
+      await client.query(
+        `
+          UPDATE syndicate_orders
+          SET
+            remaining_units = $2,
+            filled_units = $3,
+            fee_gbp = $4,
+            total_gbp = $5,
+            status = $6,
+            updated_at = NOW()
+          WHERE id = $1
+        `,
+        [
+          resting.id,
+          Math.max(0, restingRemainingAfter),
+          restingFilledAfter,
+          restingFeeAfter,
+          restingTotalAfter,
+          restingStatus,
+        ]
+      );
+    }
+
+    if (
+      payload.side === 'buy'
+      && remainingUnits > 0
+      && (payload.orderType === 'market' || (payload.limitPriceGbp ?? 0) >= referencePriceGbp)
+      && nextAvailableUnits > 0
+    ) {
+      const primaryFillUnits = Math.min(remainingUnits, nextAvailableUnits);
+      if (primaryFillUnits > 0) {
+        const tradePrice = referencePriceGbp;
+        const tradeNotional = roundTo(primaryFillUnits * tradePrice, 4);
+        const tradeFee = roundTo(tradeNotional * 0.005, 4);
+
+        await applySyndicateTransfer(client, {
+          assetId,
+          buyerId: payload.userId,
+          sellerId: asset.issuer_id,
+          units: primaryFillUnits,
+          unitPriceGbp: tradePrice,
+          feeGbp: tradeFee,
+          sourceType: 'syndicate_trade',
+          buyOrderId: incomingOrderId,
+          sellOrderId: null,
+          enforceSellerHolding: false,
+        });
+
+        tradedNotionalGbp = roundTo(tradedNotionalGbp + tradeNotional, 4);
+        tradedFeeGbp = roundTo(tradedFeeGbp + tradeFee, 4);
+        remainingUnits -= primaryFillUnits;
+        filledUnits += primaryFillUnits;
+        nextAvailableUnits -= primaryFillUnits;
+      }
+    }
+
+    let orderStatus: SyndicateOrderStatus;
+    let persistedRemainingUnits = Math.max(0, remainingUnits);
+
+    if (payload.orderType === 'market') {
+      orderStatus = filledUnits > 0 ? 'filled' : 'rejected';
+      persistedRemainingUnits = 0;
+    } else if (filledUnits === 0) {
+      orderStatus = 'open';
+    } else if (remainingUnits > 0) {
+      orderStatus = 'partially_filled';
+    } else {
+      orderStatus = 'filled';
+    }
+
+    const orderTotalGbp =
+      payload.side === 'buy'
+        ? roundTo(tradedNotionalGbp + tradedFeeGbp, 4)
+        : roundTo(Math.max(0, tradedNotionalGbp - tradedFeeGbp), 4);
+
+    const incomingOrder = await client.query<{
+      id: number;
+      created_at: string;
+      updated_at: string;
+      status: SyndicateOrderStatus;
+      remaining_units: number;
+      filled_units: number;
+    }>(
+      `
+        UPDATE syndicate_orders
+        SET
+          remaining_units = $2,
+          filled_units = $3,
+          fee_gbp = $4,
+          total_gbp = $5,
+          status = $6,
+          updated_at = NOW()
+        WHERE id = $1
+        RETURNING id, created_at, updated_at, status, remaining_units, filled_units
+      `,
+      [incomingOrderId, persistedRemainingUnits, filledUnits, tradedFeeGbp, orderTotalGbp, orderStatus]
+    );
+
+    const impactPct =
+      filledUnits > 0
+        ? Math.min(0.14, (filledUnits / Math.max(1, asset.total_units)) * 0.14)
+        : 0;
+    const nextUnitPriceGbp =
+      filledUnits > 0
+        ? payload.side === 'buy'
+          ? roundTo(referencePriceGbp * (1 + impactPct), 4)
+          : roundTo(Math.max(0.05, referencePriceGbp * (1 - impactPct)), 4)
+        : referencePriceGbp;
+    const stableRatio = Number(asset.unit_price_stable) / Math.max(referencePriceGbp, 0.0001);
+    const nextUnitPriceStable = roundTo(nextUnitPriceGbp * stableRatio, 4);
+    const nextMarketMovePct24h = roundTo(
+      ((nextUnitPriceGbp - referencePriceGbp) / Math.max(referencePriceGbp, 0.0001)) * 100,
+      3
+    );
+    const nextVolume24hGbp = roundTo(Number(asset.volume_24h_gbp) + tradedNotionalGbp, 2);
+    const nextHolders = await recalcSyndicateHolders(client, assetId);
 
     const updatedAssetResult = await client.query<{
       id: string;
       available_units: number;
       holders: number;
-      volume_24h_gbp: number | string;
+      volume_24h_gbp: string;
+      unit_price_gbp: string;
+      unit_price_stable: string;
+      market_move_pct_24h: string;
       updated_at: string;
     }>(
       `
@@ -4673,40 +10915,122 @@ app.post('/syndicate/assets/:assetId/orders', async (request, reply) => {
           available_units = $2,
           holders = $3,
           volume_24h_gbp = $4,
+          unit_price_gbp = $5,
+          unit_price_stable = $6,
+          market_move_pct_24h = $7,
           updated_at = NOW()
         WHERE id = $1
-        RETURNING id, available_units, holders, volume_24h_gbp, updated_at
+        RETURNING
+          id,
+          available_units,
+          holders,
+          volume_24h_gbp::text,
+          unit_price_gbp::text,
+          unit_price_stable::text,
+          market_move_pct_24h::text,
+          updated_at
       `,
-      [assetId, nextAvailableUnits, nextHolders, volume24hGbp]
+      [
+        assetId,
+        nextAvailableUnits,
+        nextHolders,
+        nextVolume24hGbp,
+        nextUnitPriceGbp,
+        nextUnitPriceStable,
+        nextMarketMovePct24h,
+      ]
     );
 
+    if (preTradeAml.shouldCreateAlert) {
+      const monitoredAmount = tradedNotionalGbp > 0 ? tradedNotionalGbp : proposedNotionalGbp;
+      amlAlert = await createAmlAlert(client, {
+        userId: payload.userId,
+        relatedUserId: asset.issuer_id,
+        market: 'syndicate',
+        eventType: 'trade',
+        amountGbp: monitoredAmount,
+        referenceId: String(incomingOrder.rows[0].id),
+        ruleCode: 'AML_POST_TRADE_MONITOR',
+        notes: 'Syndicate order generated elevated AML risk score',
+        context: {
+          assetId,
+          side: payload.side,
+          orderType: payload.orderType,
+          units: payload.units,
+          filledUnits: incomingOrder.rows[0].filled_units,
+        },
+        assessment: preTradeAml,
+      });
+    }
+
     await client.query('COMMIT');
+
+    await appendComplianceAuditSafe(request, {
+      eventType: 'syndicate.order.created',
+      subjectUserId: payload.userId,
+      payload: {
+        assetId,
+        orderId: incomingOrder.rows[0].id,
+        side: payload.side,
+        orderType: payload.orderType,
+        units: payload.units,
+        filledUnits: incomingOrder.rows[0].filled_units,
+        remainingUnits: incomingOrder.rows[0].remaining_units,
+        status: incomingOrder.rows[0].status,
+        amlAlertId: amlAlert?.alertId ?? null,
+      },
+    });
 
     reply.code(201);
     return {
       ok: true,
       order: {
-        id: orderResult.rows[0].id,
+        id: incomingOrder.rows[0].id,
         assetId,
         userId: payload.userId,
         side: payload.side,
+        orderType: payload.orderType,
+        limitPriceGbp: payload.limitPriceGbp ?? null,
         units: payload.units,
-        unitPriceGbp,
-        feeGbp,
-        totalGbp,
-        status: 'filled',
-        createdAt: orderResult.rows[0].created_at,
+        filledUnits: incomingOrder.rows[0].filled_units,
+        remainingUnits: incomingOrder.rows[0].remaining_units,
+        unitPriceGbp: orderPriceGbp,
+        feeGbp: tradedFeeGbp,
+        totalGbp: orderTotalGbp,
+        status: incomingOrder.rows[0].status,
+        createdAt: incomingOrder.rows[0].created_at,
+        updatedAt: incomingOrder.rows[0].updated_at,
       },
       asset: {
         id: updatedAssetResult.rows[0].id,
         availableUnits: updatedAssetResult.rows[0].available_units,
         holders: updatedAssetResult.rows[0].holders,
         volume24hGbp: Number(updatedAssetResult.rows[0].volume_24h_gbp),
+        unitPriceGbp: Number(updatedAssetResult.rows[0].unit_price_gbp),
+        unitPriceStable: Number(updatedAssetResult.rows[0].unit_price_stable),
+        marketMovePct24h: Number(updatedAssetResult.rows[0].market_move_pct_24h),
         updatedAt: updatedAssetResult.rows[0].updated_at,
       },
+      aml: amlAlert
+        ? {
+          alertId: amlAlert.alertId,
+          status: amlAlert.status,
+        }
+        : null,
     };
   } catch (error) {
     await client.query('ROLLBACK');
+
+    const apiError = getApiError(error);
+    if (apiError?.code === 'SYNDICATE_SELLER_UNITS_INSUFFICIENT') {
+      reply.code(409);
+      return {
+        ok: false,
+        error: apiError.message,
+        details: apiError.details,
+      };
+    }
+
     reply.code(500);
     return {
       ok: false,
@@ -4717,20 +11041,795 @@ app.post('/syndicate/assets/:assetId/orders', async (request, reply) => {
   }
 });
 
+app.get('/syndicate/assets/:assetId/buyout-offers', async (request, reply) => {
+  const paramsSchema = z.object({ assetId: z.string().min(2) });
+  const querySchema = z.object({
+    status: z.enum(['open', 'accepted', 'expired', 'cancelled', 'rejected', 'settled']).optional(),
+    limit: z.coerce.number().int().min(1).max(200).default(60),
+  });
+
+  const { assetId } = paramsSchema.parse(request.params);
+  const { status, limit } = querySchema.parse(request.query);
+
+  const result = await db.query<{
+    id: string;
+    asset_id: string;
+    bidder_user_id: string;
+    offer_price_gbp: string;
+    target_units: number;
+    accepted_units: number;
+    status: string;
+    expires_at: string;
+    metadata: Record<string, unknown>;
+    created_at: string;
+    updated_at: string;
+  }>(
+    `
+      SELECT
+        id,
+        asset_id,
+        bidder_user_id,
+        offer_price_gbp::text,
+        target_units,
+        accepted_units,
+        status,
+        expires_at::text,
+        metadata,
+        created_at::text,
+        updated_at::text
+      FROM syndicate_buyout_offers
+      WHERE asset_id = $1
+        AND ($2::text IS NULL OR status = $2)
+      ORDER BY created_at DESC
+      LIMIT $3
+    `,
+    [assetId, status ?? null, limit]
+  );
+
+  return {
+    ok: true,
+    items: result.rows.map((row) => ({
+      id: row.id,
+      assetId: row.asset_id,
+      bidderUserId: row.bidder_user_id,
+      offerPriceGbp: Number(row.offer_price_gbp),
+      targetUnits: row.target_units,
+      acceptedUnits: row.accepted_units,
+      status: row.status,
+      expiresAt: row.expires_at,
+      metadata: row.metadata,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    })),
+  };
+});
+
+app.post('/syndicate/assets/:assetId/buyout-offers', async (request, reply) => {
+  const paramsSchema = z.object({ assetId: z.string().min(2) });
+  const bodySchema = z.object({
+    bidderUserId: z.string().min(2),
+    offerPriceGbp: z.number().positive(),
+    targetUnits: z.number().int().positive().optional(),
+    expiresInHours: z.number().int().min(1).max(168).default(24),
+    metadata: z.record(z.unknown()).optional(),
+  });
+
+  const { assetId } = paramsSchema.parse(request.params);
+  const payload = bodySchema.parse(request.body ?? {});
+  await ensureUserExists(payload.bidderUserId);
+
+  const client = await db.connect();
+  let amlAlert: { alertId: string; status: string } | null = null;
+  try {
+    await client.query('BEGIN');
+
+    const assetResult = await client.query<{
+      id: string;
+      total_units: number;
+      is_open: boolean;
+    }>(
+      `
+        SELECT id, total_units, is_open
+        FROM syndicate_assets
+        WHERE id = $1
+        FOR UPDATE
+      `,
+      [assetId]
+    );
+
+    const asset = assetResult.rows[0];
+    if (!asset) {
+      await client.query('ROLLBACK');
+      reply.code(404);
+      return { ok: false, error: 'Syndicate asset not found' };
+    }
+
+    if (!asset.is_open) {
+      await client.query('ROLLBACK');
+      reply.code(409);
+      return { ok: false, error: 'Syndicate asset is closed for buyout offers' };
+    }
+
+    const bidderHolding = await getSyndicateHoldingForUpdate(client, payload.bidderUserId, assetId);
+    const bidderUnits = bidderHolding?.units_owned ?? 0;
+    const inferredTarget = Math.max(0, asset.total_units - bidderUnits);
+    const targetUnits = payload.targetUnits ?? inferredTarget;
+
+    if (targetUnits <= 0) {
+      await client.query('ROLLBACK');
+      reply.code(409);
+      return {
+        ok: false,
+        error: 'Bidder already controls all units for this asset',
+      };
+    }
+
+    const offerNotionalGbp = roundTo(targetUnits * payload.offerPriceGbp, 2);
+
+    const eligibility = await evaluateMarketEligibility(client, {
+      userId: payload.bidderUserId,
+      market: 'syndicate',
+      orderNotionalGbp: offerNotionalGbp,
+    });
+
+    if (!eligibility.allowed) {
+      await client.query('ROLLBACK');
+
+      await appendComplianceAuditSafe(request, {
+        eventType: 'buyout.offer.blocked.eligibility',
+        subjectUserId: payload.bidderUserId,
+        payload: {
+          assetId,
+          targetUnits,
+          offerPriceGbp: payload.offerPriceGbp,
+          offerNotionalGbp,
+          code: eligibility.code,
+          message: eligibility.message,
+        },
+      });
+
+      reply.code(403);
+      return {
+        ok: false,
+        error: eligibility.message,
+        code: eligibility.code,
+      };
+    }
+
+    const amlAssessment = await evaluateAmlRisk(client, {
+      userId: payload.bidderUserId,
+      market: 'syndicate',
+      amountGbp: offerNotionalGbp,
+    });
+
+    if (amlAssessment.shouldBlock) {
+      await client.query('ROLLBACK');
+
+      if (amlAssessment.shouldCreateAlert) {
+        amlAlert = await createAmlAlert(db, {
+          userId: payload.bidderUserId,
+          market: 'syndicate',
+          eventType: 'trade',
+          amountGbp: offerNotionalGbp,
+          referenceId: `${assetId}:buyout-offer`,
+          ruleCode: 'AML_BUYOUT_OFFER_BLOCK',
+          notes: 'Buyout offer blocked by AML controls',
+          context: {
+            assetId,
+            bidderUserId: payload.bidderUserId,
+            targetUnits,
+            offerPriceGbp: payload.offerPriceGbp,
+          },
+          assessment: amlAssessment,
+        });
+      }
+
+      await appendComplianceAuditSafe(request, {
+        eventType: 'buyout.offer.blocked.aml',
+        subjectUserId: payload.bidderUserId,
+        payload: {
+          assetId,
+          targetUnits,
+          offerPriceGbp: payload.offerPriceGbp,
+          offerNotionalGbp,
+          riskScore: amlAssessment.riskScore,
+          riskLevel: amlAssessment.riskLevel,
+          alertId: amlAlert?.alertId ?? null,
+        },
+      });
+
+      reply.code(403);
+      return {
+        ok: false,
+        error: 'Buyout offer blocked by AML controls. Please contact support.',
+        code: 'AML_BLOCKED',
+        riskLevel: amlAssessment.riskLevel,
+        alertId: amlAlert?.alertId ?? null,
+      };
+    }
+
+    const offerId = createRuntimeId('buyout');
+    const expiresAt = new Date(Date.now() + payload.expiresInHours * 60 * 60 * 1000).toISOString();
+
+    const inserted = await client.query<{
+      id: string;
+      created_at: string;
+      updated_at: string;
+    }>(
+      `
+        INSERT INTO syndicate_buyout_offers (
+          id,
+          asset_id,
+          bidder_user_id,
+          offer_price_gbp,
+          target_units,
+          accepted_units,
+          status,
+          expires_at,
+          metadata
+        )
+        VALUES ($1, $2, $3, $4, $5, 0, 'open', $6, $7::jsonb)
+        RETURNING id, created_at::text, updated_at::text
+      `,
+      [
+        offerId,
+        assetId,
+        payload.bidderUserId,
+        roundTo(payload.offerPriceGbp, 4),
+        targetUnits,
+        expiresAt,
+        toJsonString(payload.metadata ?? {}),
+      ]
+    );
+
+    if (amlAssessment.shouldCreateAlert) {
+      amlAlert = await createAmlAlert(client, {
+        userId: payload.bidderUserId,
+        market: 'syndicate',
+        eventType: 'trade',
+        amountGbp: offerNotionalGbp,
+        referenceId: offerId,
+        ruleCode: 'AML_BUYOUT_OFFER_MONITOR',
+        notes: 'Buyout offer generated elevated AML risk score',
+        context: {
+          assetId,
+          bidderUserId: payload.bidderUserId,
+          targetUnits,
+          offerPriceGbp: payload.offerPriceGbp,
+        },
+        assessment: amlAssessment,
+      });
+    }
+
+    await client.query('COMMIT');
+
+    publishRealtimeEvent({
+      topic: `syndicate.asset:${assetId}`,
+      type: 'buyout.offer.opened',
+      payload: {
+        offerId,
+        assetId,
+        bidderUserId: payload.bidderUserId,
+        offerPriceGbp: roundTo(payload.offerPriceGbp, 4),
+        targetUnits,
+        expiresAt,
+      },
+    });
+
+    await appendComplianceAuditSafe(request, {
+      eventType: 'buyout.offer.opened',
+      subjectUserId: payload.bidderUserId,
+      payload: {
+        offerId,
+        assetId,
+        targetUnits,
+        offerPriceGbp: roundTo(payload.offerPriceGbp, 4),
+        amlAlertId: amlAlert?.alertId ?? null,
+      },
+    });
+
+    reply.code(201);
+    return {
+      ok: true,
+      offer: {
+        id: inserted.rows[0].id,
+        assetId,
+        bidderUserId: payload.bidderUserId,
+        offerPriceGbp: roundTo(payload.offerPriceGbp, 4),
+        targetUnits,
+        acceptedUnits: 0,
+        status: 'open',
+        expiresAt,
+        createdAt: inserted.rows[0].created_at,
+        updatedAt: inserted.rows[0].updated_at,
+      },
+      aml: amlAlert
+        ? {
+          alertId: amlAlert.alertId,
+          status: amlAlert.status,
+        }
+        : null,
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    reply.code(500);
+    return {
+      ok: false,
+      error: `Unable to create buyout offer: ${(error as Error).message}`,
+    };
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/syndicate/buyout-offers/:offerId/accept', async (request, reply) => {
+  const paramsSchema = z.object({ offerId: z.string().min(4) });
+  const bodySchema = z.object({
+    holderUserId: z.string().min(2),
+    units: z.number().int().positive(),
+    metadata: z.record(z.unknown()).optional(),
+  });
+
+  const { offerId } = paramsSchema.parse(request.params);
+  const payload = bodySchema.parse(request.body ?? {});
+  await ensureUserExists(payload.holderUserId);
+
+  const client = await db.connect();
+  let amlAlert: { alertId: string; status: string } | null = null;
+  try {
+    await client.query('BEGIN');
+
+    const offerResult = await client.query<{
+      id: string;
+      asset_id: string;
+      bidder_user_id: string;
+      offer_price_gbp: string;
+      target_units: number;
+      accepted_units: number;
+      status: string;
+      expires_at: string;
+      total_units: number;
+    }>(
+      `
+        SELECT
+          bo.id,
+          bo.asset_id,
+          bo.bidder_user_id,
+          bo.offer_price_gbp::text,
+          bo.target_units,
+          bo.accepted_units,
+          bo.status,
+          bo.expires_at::text,
+          sa.total_units
+        FROM syndicate_buyout_offers bo
+        INNER JOIN syndicate_assets sa ON sa.id = bo.asset_id
+        WHERE bo.id = $1
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [offerId]
+    );
+
+    const offer = offerResult.rows[0];
+    if (!offer) {
+      await client.query('ROLLBACK');
+      reply.code(404);
+      return {
+        ok: false,
+        error: 'Buyout offer not found',
+      };
+    }
+
+    if (offer.bidder_user_id === payload.holderUserId) {
+      await client.query('ROLLBACK');
+      reply.code(400);
+      return {
+        ok: false,
+        error: 'Bidder cannot accept their own buyout offer',
+      };
+    }
+
+    const offerExpired = new Date(offer.expires_at).getTime() <= Date.now();
+    if (offer.status !== 'open' || offerExpired) {
+      await client.query(
+        `
+          UPDATE syndicate_buyout_offers
+          SET status = CASE WHEN expires_at <= NOW() THEN 'expired' ELSE status END,
+              updated_at = NOW()
+          WHERE id = $1
+        `,
+        [offerId]
+      );
+      await client.query('ROLLBACK');
+      reply.code(409);
+      return {
+        ok: false,
+        error: 'Buyout offer is no longer open',
+      };
+    }
+
+    const remainingTarget = Math.max(0, offer.target_units - offer.accepted_units);
+    const acceptedUnits = Math.min(payload.units, remainingTarget);
+    if (acceptedUnits <= 0) {
+      await client.query('ROLLBACK');
+      reply.code(409);
+      return {
+        ok: false,
+        error: 'Buyout offer target already fulfilled',
+      };
+    }
+
+    const acceptanceNotionalGbp = roundTo(acceptedUnits * Number(offer.offer_price_gbp), 2);
+
+    const holderEligibility = await evaluateMarketEligibility(client, {
+      userId: payload.holderUserId,
+      market: 'syndicate',
+      orderNotionalGbp: acceptanceNotionalGbp,
+    });
+
+    if (!holderEligibility.allowed) {
+      await client.query('ROLLBACK');
+
+      await appendComplianceAuditSafe(request, {
+        eventType: 'buyout.accept.blocked.holder_eligibility',
+        subjectUserId: payload.holderUserId,
+        payload: {
+          offerId,
+          assetId: offer.asset_id,
+          acceptedUnits,
+          acceptanceNotionalGbp,
+          code: holderEligibility.code,
+          message: holderEligibility.message,
+        },
+      });
+
+      reply.code(403);
+      return {
+        ok: false,
+        error: holderEligibility.message,
+        code: holderEligibility.code,
+      };
+    }
+
+    const bidderEligibility = await evaluateMarketEligibility(client, {
+      userId: offer.bidder_user_id,
+      market: 'syndicate',
+      orderNotionalGbp: acceptanceNotionalGbp,
+    });
+
+    if (!bidderEligibility.allowed) {
+      await client.query('ROLLBACK');
+
+      await appendComplianceAuditSafe(request, {
+        eventType: 'buyout.accept.blocked.bidder_eligibility',
+        subjectUserId: offer.bidder_user_id,
+        payload: {
+          offerId,
+          assetId: offer.asset_id,
+          acceptedUnits,
+          acceptanceNotionalGbp,
+          code: bidderEligibility.code,
+          message: bidderEligibility.message,
+        },
+      });
+
+      reply.code(403);
+      return {
+        ok: false,
+        error: 'Buyout bidder no longer eligible for this jurisdiction.',
+        code: bidderEligibility.code,
+      };
+    }
+
+    const amlAssessment = await evaluateAmlRisk(client, {
+      userId: payload.holderUserId,
+      market: 'syndicate',
+      amountGbp: acceptanceNotionalGbp,
+      counterpartyUserId: offer.bidder_user_id,
+    });
+
+    if (amlAssessment.shouldBlock) {
+      await client.query('ROLLBACK');
+
+      if (amlAssessment.shouldCreateAlert) {
+        amlAlert = await createAmlAlert(db, {
+          userId: payload.holderUserId,
+          relatedUserId: offer.bidder_user_id,
+          market: 'syndicate',
+          eventType: 'trade',
+          amountGbp: acceptanceNotionalGbp,
+          referenceId: offerId,
+          ruleCode: 'AML_BUYOUT_ACCEPT_BLOCK',
+          notes: 'Buyout acceptance blocked by AML controls',
+          context: {
+            offerId,
+            assetId: offer.asset_id,
+            holderUserId: payload.holderUserId,
+            bidderUserId: offer.bidder_user_id,
+            acceptedUnits,
+          },
+          assessment: amlAssessment,
+        });
+      }
+
+      await appendComplianceAuditSafe(request, {
+        eventType: 'buyout.accept.blocked.aml',
+        subjectUserId: payload.holderUserId,
+        payload: {
+          offerId,
+          assetId: offer.asset_id,
+          acceptedUnits,
+          acceptanceNotionalGbp,
+          riskScore: amlAssessment.riskScore,
+          riskLevel: amlAssessment.riskLevel,
+          alertId: amlAlert?.alertId ?? null,
+        },
+      });
+
+      reply.code(403);
+      return {
+        ok: false,
+        error: 'Buyout acceptance blocked by AML controls.',
+        code: 'AML_BLOCKED',
+        riskLevel: amlAssessment.riskLevel,
+        alertId: amlAlert?.alertId ?? null,
+      };
+    }
+
+    await applySyndicateTransfer(client, {
+      assetId: offer.asset_id,
+      buyerId: offer.bidder_user_id,
+      sellerId: payload.holderUserId,
+      units: acceptedUnits,
+      unitPriceGbp: Number(offer.offer_price_gbp),
+      feeGbp: 0,
+      sourceType: 'buyout',
+      buyOrderId: null,
+      sellOrderId: null,
+      enforceSellerHolding: true,
+    });
+
+    await client.query(
+      `
+        INSERT INTO syndicate_buyout_acceptances (
+          offer_id,
+          holder_user_id,
+          units,
+          status,
+          responded_at,
+          metadata
+        )
+        VALUES ($1, $2, $3, 'accepted', NOW(), $4::jsonb)
+        ON CONFLICT (offer_id, holder_user_id)
+        DO UPDATE
+          SET
+            units = EXCLUDED.units,
+            status = EXCLUDED.status,
+            responded_at = NOW(),
+            metadata = syndicate_buyout_acceptances.metadata || EXCLUDED.metadata
+      `,
+      [offerId, payload.holderUserId, acceptedUnits, toJsonString(payload.metadata ?? {})]
+    );
+
+    const nextAcceptedUnits = offer.accepted_units + acceptedUnits;
+    const nextStatus = nextAcceptedUnits >= offer.target_units ? 'settled' : 'accepted';
+
+    await client.query(
+      `
+        UPDATE syndicate_buyout_offers
+        SET
+          accepted_units = $2,
+          status = $3,
+          updated_at = NOW()
+        WHERE id = $1
+      `,
+      [offerId, nextAcceptedUnits, nextStatus]
+    );
+
+    const bidderHolding = await getSyndicateHoldingForUpdate(client, offer.bidder_user_id, offer.asset_id);
+    const bidderUnits = bidderHolding?.units_owned ?? 0;
+    if (nextStatus === 'settled' && bidderUnits >= offer.total_units) {
+      await client.query(
+        `
+          UPDATE syndicate_assets
+          SET is_open = FALSE, updated_at = NOW()
+          WHERE id = $1
+        `,
+        [offer.asset_id]
+      );
+    }
+
+    const nextHolders = await recalcSyndicateHolders(client, offer.asset_id);
+    await client.query(
+      `
+        UPDATE syndicate_assets
+        SET holders = $2, updated_at = NOW()
+        WHERE id = $1
+      `,
+      [offer.asset_id, nextHolders]
+    );
+
+    if (amlAssessment.shouldCreateAlert) {
+      amlAlert = await createAmlAlert(client, {
+        userId: payload.holderUserId,
+        relatedUserId: offer.bidder_user_id,
+        market: 'syndicate',
+        eventType: 'trade',
+        amountGbp: acceptanceNotionalGbp,
+        referenceId: offerId,
+        ruleCode: 'AML_BUYOUT_ACCEPT_MONITOR',
+        notes: 'Buyout acceptance generated elevated AML risk score',
+        context: {
+          offerId,
+          assetId: offer.asset_id,
+          holderUserId: payload.holderUserId,
+          bidderUserId: offer.bidder_user_id,
+          acceptedUnits,
+        },
+        assessment: amlAssessment,
+      });
+    }
+
+    await client.query('COMMIT');
+
+    publishRealtimeEvent({
+      topic: `syndicate.asset:${offer.asset_id}`,
+      type: 'buyout.offer.accepted',
+      payload: {
+        offerId,
+        holderUserId: payload.holderUserId,
+        units: acceptedUnits,
+        acceptedUnits: nextAcceptedUnits,
+        status: nextStatus,
+      },
+    });
+
+    try {
+      await queueUserNotification({
+        userId: offer.bidder_user_id,
+        title: 'Buyout accepted',
+        body: `${payload.holderUserId} accepted ${acceptedUnits} units from your buyout offer.`,
+        payload: {
+          offerId,
+          assetId: offer.asset_id,
+          holderUserId: payload.holderUserId,
+          units: acceptedUnits,
+          event: 'buyout_acceptance',
+        },
+        metadata: {
+          source: 'buyout_accept_route',
+        },
+      });
+    } catch (error) {
+      request.log.error({ err: error, offerId }, 'Failed to queue bidder buyout notification');
+    }
+
+    await appendComplianceAuditSafe(request, {
+      eventType: 'buyout.accepted',
+      subjectUserId: payload.holderUserId,
+      payload: {
+        offerId,
+        assetId: offer.asset_id,
+        holderUserId: payload.holderUserId,
+        bidderUserId: offer.bidder_user_id,
+        acceptedUnits,
+        status: nextStatus,
+        amlAlertId: amlAlert?.alertId ?? null,
+      },
+    });
+
+    return {
+      ok: true,
+      offer: {
+        id: offerId,
+        assetId: offer.asset_id,
+        bidderUserId: offer.bidder_user_id,
+        offerPriceGbp: Number(offer.offer_price_gbp),
+        targetUnits: offer.target_units,
+        acceptedUnits: nextAcceptedUnits,
+        status: nextStatus,
+        expiresAt: offer.expires_at,
+      },
+      accepted: {
+        holderUserId: payload.holderUserId,
+        units: acceptedUnits,
+      },
+      aml: amlAlert
+        ? {
+          alertId: amlAlert.alertId,
+          status: amlAlert.status,
+        }
+        : null,
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+
+    const apiError = getApiError(error);
+    if (apiError?.code === 'SYNDICATE_SELLER_UNITS_INSUFFICIENT') {
+      reply.code(409);
+      return {
+        ok: false,
+        error: apiError.message,
+        details: apiError.details,
+      };
+    }
+
+    reply.code(500);
+    return {
+      ok: false,
+      error: `Unable to accept buyout offer: ${(error as Error).message}`,
+    };
+  } finally {
+    client.release();
+  }
+});
+
+let isShuttingDown = false;
+
 const start = async () => {
   try {
+    startBackgroundWorkers({
+      handlePushJob: processPushQueueJob,
+      handleAuctionSweepJob: async ({ reason }) => {
+        await sweepExpiredAuctions(reason);
+      },
+    });
+
+    startAuctionSweepScheduler();
+
     await app.listen({ port: config.port, host: '0.0.0.0' });
     app.log.info(`API running on :${config.port}`);
   } catch (error) {
     app.log.error(error);
+    await shutdown();
     process.exit(1);
   }
 };
 
 const shutdown = async () => {
-  await app.close();
-  await closeRedis();
-  await closeDb();
+  if (isShuttingDown) {
+    return;
+  }
+
+  isShuttingDown = true;
+
+  stopAuctionSweepScheduler();
+
+  try {
+    await app.close();
+  } catch (error) {
+    app.log.error({ err: error }, 'Failed closing HTTP server');
+  }
+
+  try {
+    await closeRealtimeConnections();
+  } catch (error) {
+    app.log.error({ err: error }, 'Failed closing realtime connections');
+  }
+
+  try {
+    await closeBackgroundQueues();
+  } catch (error) {
+    app.log.error({ err: error }, 'Failed closing background queues');
+  }
+
+  try {
+    await closeRedis();
+  } catch (error) {
+    app.log.error({ err: error }, 'Failed closing Redis client');
+  }
+
+  try {
+    await closeDb();
+  } catch (error) {
+    app.log.error({ err: error }, 'Failed closing Postgres pool');
+  }
+
+  try {
+    await shutdownTelemetry();
+  } catch (error) {
+    app.log.error({ err: error }, 'Failed shutting down telemetry');
+  }
 };
 
 process.on('SIGINT', async () => {

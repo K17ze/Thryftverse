@@ -240,7 +240,7 @@ const styles = StyleSheet.create({
     top: 4,
     height: '100%',
     borderRadius: 22,
-    backgroundColor: Colors.accent,
+    backgroundColor: Colors.accentGold,
     zIndex: 0,
   },
   tabBtn: {

@@ -92,8 +92,8 @@ export default function FavouritesScreen() {
         ListEmptyComponent={
           <EmptyState
             icon="heart-outline"
-            title="No favourites yet"
-            subtitle="Tap hearts on listings to save them here."
+            title="Nothing here yet. Your taste is too rare."
+            subtitle="Double-tap pieces you love and this vault fills up fast."
             ctaLabel="Browse Closet"
             onCtaPress={() => (navigation as any).navigate('MainTabs', { screen: 'Search' })}
           />

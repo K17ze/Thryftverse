@@ -50,16 +50,46 @@ $env:EXPO_PUBLIC_API_BASE_URL="http://192.168.1.10:4000"; npx expo start
 ## API Endpoints
 
 - `GET /health`
-- `GET /health/deep` (checks Postgres + Redis + key service + ML + S3 bucket connectivity)
+- `GET /health/deep` (checks Postgres + optional read replica + Redis + key service + ML + S3 bucket connectivity)
+- `GET /metrics` (Prometheus metrics export)
 - `GET /listings`
+- `GET /search/listings?q=<query>`
 - `POST /listings`
 - `POST /uploads/presign` (for direct MinIO upload)
 - `POST /interactions` (view/wishlist/purchase event)
 - `GET /recommendations/:userId` (calls ML service, cached in Redis)
 - `POST /secure-profiles` and `GET /secure-profiles/:userId`
 - `POST /secure-messages` and `GET /secure-messages/:conversationId`
+- `GET /realtime/ws` (WebSocket realtime channel)
+- `GET /realtime/stream` (SSE realtime channel)
+- `POST /notifications/devices/register`
+- `DELETE /notifications/devices/:token`
+- `GET /notifications/events`
+- `POST /notifications/push/test`
 - `POST /wallets/:userId/snapshot` and `GET /wallets/:userId/snapshot`
 - `POST /security/keys/:keyName/rotate` (admin-maintenance route, optional bulk rewrap)
+- `POST /ops/auctions/sweep` (admin maintenance trigger for auction settlement job)
+
+Compliance and regulatory:
+
+- `GET /compliance/profile/:userId`
+- `PATCH /compliance/profile/:userId`
+- `POST /compliance/kyc/sessions`
+- `POST /compliance/kyc/webhook` (admin-maintenance route)
+- `GET /compliance/kyc/:userId`
+- `POST /compliance/aml/evaluate`
+- `GET /compliance/aml/alerts`
+- `POST /compliance/aml/alerts/:alertId/review` (admin-maintenance route)
+- `GET /compliance/jurisdiction/rules`
+- `POST /compliance/jurisdiction/rules` (admin-maintenance route)
+- `POST /compliance/jurisdiction/eligibility`
+- `GET /compliance/consents/documents`
+- `POST /compliance/consents/documents` (admin-maintenance route)
+- `POST /compliance/consents/accept`
+- `GET /compliance/consents/:userId`
+- `GET /compliance/audit/logs` (admin-maintenance route)
+- `GET /users/me/export` (GDPR data export)
+- `DELETE /users/me` (GDPR anonymize/erasure request)
 
 Commerce and checkout:
 
@@ -125,12 +155,34 @@ Admin headers:
 - API maintenance routes: `x-security-admin-token`
 - API -> key-service admin actions use `KEY_SERVICE_ADMIN_TOKEN` from API env.
 
+Regulatory note:
+- Compliance tables include immutable hash-chained audit logs, KYC case tracking, AML alerts/SAR records, jurisdiction rules, legal document versioning, consent evidence, and GDPR request records.
+
 ## Development Notes
 
 - Migrations auto-run when API container starts (`npm run migrate`).
 - Schema and seed data live in `backend/api/src/db/migrations`.
 - API uses internal Docker hostname for S3 operations and `S3_PUBLIC_ENDPOINT` for host/browser object URLs.
 - No app code changes are needed when moving from laptop to a small Hetzner VPS; copy the same compose file and env vars.
+
+## Data Ops Runbook (Backup, PITR, Replica)
+
+- Logical backups (local/manual):
+
+```bash
+cd backend/api
+npm run backup:db
+```
+
+- Optional backup env vars:
+	- `BACKUP_DIR` (default `backend/api/backups`)
+	- `BACKUP_RETENTION_DAYS` (default `14`)
+- Read replica support:
+	- Set `DATABASE_REPLICA_URL` to route selected read-heavy endpoints to replica.
+	- `GET /health/deep` reports replica status under `checks.replica` (`ok`, `error`, or `not_configured`).
+- PITR recommendation for production:
+	- Use managed PostgreSQL with point-in-time recovery enabled (RDS/Azure Database/Flexible Server/Supabase/Neon).
+	- Keep WAL retention and backup window aligned with your RPO/RTO targets.
 
 ## Minimal .env (optional)
 

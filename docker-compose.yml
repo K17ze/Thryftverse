@@ -104,6 +104,7 @@ services:
       NODE_ENV: development
       PORT: 4000
       DATABASE_URL: postgresql://${POSTGRES_USER:-thryftverse}:${POSTGRES_PASSWORD:-thryftverse}@postgres:5432/${POSTGRES_DB:-thryftverse}
+      DATABASE_REPLICA_URL: ${DATABASE_REPLICA_URL:-}
       REDIS_URL: redis://redis:6379
       KEY_SERVICE_URL: http://key-service:4100
       KEY_SERVICE_ADMIN_TOKEN: ${KEY_SERVICE_ADMIN_TOKEN:-local-key-admin-token}
@@ -116,6 +117,13 @@ services:
       S3_BUCKET: ${S3_BUCKET:-thryftverse-media}
       S3_FORCE_PATH_STYLE: "true"
       ML_SERVICE_URL: http://ml-service:8000
+      EXPO_PUSH_API_URL: ${EXPO_PUSH_API_URL:-https://exp.host/--/api/v2/push/send}
+      PUSH_DEFAULT_CHANNEL: ${PUSH_DEFAULT_CHANNEL:-default}
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.15}
+      OTEL_ENABLED: ${OTEL_ENABLED:-true}
+      OTEL_EXPORTER_OTLP_HTTP_URL: ${OTEL_EXPORTER_OTLP_HTTP_URL:-http://localhost:4318/v1/traces}
+      AUCTION_SWEEP_INTERVAL_MS: ${AUCTION_SWEEP_INTERVAL_MS:-30000}
     ports:
       - "4000:4000"
 

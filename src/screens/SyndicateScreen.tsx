@@ -15,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { ActiveTheme, Colors } from '../constants/colors';
+import { Typography } from '../constants/typography';
 import { RootStackParamList } from '../navigation/types';
 import {
   formatMoney,
@@ -31,6 +32,7 @@ import { SkeletonLoader } from '../components/SkeletonLoader';
 import { SyncStatusPill } from '../components/SyncStatusPill';
 import { SyncRetryBanner } from '../components/SyncRetryBanner';
 import { formatIzeAmount, toIze } from '../utils/currency';
+import { parseApiError } from '../lib/apiClient';
 import { listSyndicateAssets, placeSyndicateOrder } from '../services/marketApi';
 
 type NavT = StackNavigationProp<RootStackParamList>;
@@ -38,7 +40,7 @@ type SyndicateView = 'MARKET' | 'HOLDINGS';
 
 const STABLE_COIN = '1ze';
 const IS_LIGHT = ActiveTheme === 'light';
-const BRAND = IS_LIGHT ? '#2f251b' : '#e8dcc8';
+const BRAND = Colors.accentGold;
 const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111111';
 const PANEL_SOFT_BG = IS_LIGHT ? '#f7f4ef' : '#161616';
 const PANEL_MUTED_BG = IS_LIGHT ? '#f1ede6' : '#151515';
@@ -63,6 +65,38 @@ const settlementLabelMap: Record<'GBP' | 'TVUSD' | 'HYBRID', string> = {
   TVUSD: '1ze settlement',
   HYBRID: '1ze settlement',
 };
+
+const COMPLIANCE_BLOCK_CODES = new Set([
+  'KYC_REQUIRED',
+  'KYC_LEVEL_INSUFFICIENT',
+  'JURISDICTION_BLOCKED',
+  'JURISDICTION_RULE_MISSING',
+  'SANCTIONS_BLOCKED',
+  'SANCTIONS_REVIEW_REQUIRED',
+  'TRADING_DISABLED',
+  'MAX_ORDER_NOTIONAL_EXCEEDED',
+  'MAX_DAILY_NOTIONAL_EXCEEDED',
+  'MAX_OPEN_ORDERS_EXCEEDED',
+  'AML_BLOCKED',
+]);
+
+function shouldOpenComplianceModal(errorMessage: string, errorCode: string | null) {
+  if (errorCode && COMPLIANCE_BLOCK_CODES.has(errorCode)) {
+    return true;
+  }
+
+  const normalized = errorMessage.toLowerCase();
+  return [
+    'kyc',
+    'jurisdiction',
+    'country',
+    'sanction',
+    'aml',
+    'risk',
+    'compliance',
+    'trading disabled',
+  ].some((token) => normalized.includes(token));
+}
 
 type ComposerMode = 'buy' | 'sell';
 
@@ -298,27 +332,63 @@ export default function SyndicateScreen() {
     setIsSubmittingOrder(true);
 
     try {
-      let backendSynced = false;
+      let remoteOrder: Awaited<ReturnType<typeof placeSyndicateOrder>> | null = null;
+      let canFallbackLocal = false;
 
       try {
-        await placeSyndicateOrder(selectedAsset.id, {
+        remoteOrder = await placeSyndicateOrder(selectedAsset.id, {
           userId: actingUserId,
           side: composerMode,
           units,
         });
-        backendSynced = true;
+
         await syncSyndicateAssets();
-      } catch {
-        backendSynced = false;
+      } catch (error) {
+        const parsedError = parseApiError(error, 'Unable to submit order');
+        if (!parsedError.isNetworkError) {
+          show(parsedError.message, 'error');
+          if (shouldOpenComplianceModal(parsedError.message, parsedError.code)) {
+            setComplianceModalVisible(true);
+          }
+          return;
+        }
+
+        canFallbackLocal = true;
+      }
+
+      if (remoteOrder) {
+        if (remoteOrder.order.status === 'rejected') {
+          show('Order rejected by matching engine.', 'error');
+          return;
+        }
+
+        closeUnitsComposer();
+
+        if (remoteOrder.order.status === 'open' || remoteOrder.order.status === 'partially_filled') {
+          show('Order placed on server order book.', 'info');
+        } else {
+          show('Order executed on server market.', 'success');
+        }
+
+        if (remoteOrder.aml?.alertId) {
+          show('Trade is flagged for AML review.', 'info');
+        }
+
+        return;
+      }
+
+      if (!canFallbackLocal) {
+        show('Unable to submit order', 'error');
+        return;
       }
 
       const localResult = composerMode === 'buy'
         ? buySyndicateUnits(selectedAsset, actingUserId, units)
         : sellSyndicateUnits(selectedAsset, actingUserId, units);
 
-      if (!backendSynced && !localResult.ok) {
+      if (!localResult.ok) {
         show(localResult.message ?? 'Unable to submit order', 'error');
-        if (localResult.message?.toLowerCase().includes('kyc') || localResult.message?.toLowerCase().includes('country')) {
+        if (shouldOpenComplianceModal(localResult.message ?? '', null)) {
           setComplianceModalVisible(true);
         }
         return;
@@ -330,7 +400,7 @@ export default function SyndicateScreen() {
         : 'Order submitted and filled';
 
       closeUnitsComposer();
-      show(successMessage, backendSynced ? 'success' : 'info');
+      show(`${successMessage}. Backend sync unavailable.`, 'info');
 
       if (localResult.deliveryTriggered && localResult.deliveryListingId) {
         navigation.navigate('Checkout', { itemId: localResult.deliveryListingId });
@@ -342,6 +412,11 @@ export default function SyndicateScreen() {
 
   const renderHeader = () => (
     <View>
+      <View style={styles.heroHeader}>
+        <Text style={styles.heroTitle}>Syndicate</Text>
+        <Text style={styles.heroSubtitle}>Tokenize. Split. Trade in 1ze.</Text>
+      </View>
+
       <View style={styles.metricsRow}>
         <View style={styles.metricCard}>
           <Text style={styles.metricValue}>{marketAssets.length}</Text>
@@ -863,6 +938,27 @@ const styles = StyleSheet.create({
   contentContainer: {
     paddingBottom: 130,
   },
+  heroHeader: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 10,
+  },
+  heroTitle: {
+    fontSize: Typography.size.hero,
+    lineHeight: 58,
+    letterSpacing: -1.25,
+    fontFamily: Typography.family.extrabold,
+    color: Colors.textPrimary,
+  },
+  heroSubtitle: {
+    marginTop: 2,
+    fontSize: 12,
+    lineHeight: 18,
+    letterSpacing: 0.28,
+    textTransform: 'uppercase',
+    fontFamily: Typography.family.light,
+    color: Colors.textMuted,
+  },
   metricsRow: {
     flexDirection: 'row',
     gap: 10,
@@ -890,6 +986,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: 'Inter_700Bold',
     textAlign: 'center',
+    fontVariant: ['tabular-nums'],
   },
   metricLabel: {
     marginTop: 2,
@@ -916,6 +1013,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontSize: 14,
     fontFamily: 'Inter_700Bold',
+    fontVariant: ['tabular-nums'],
   },
   pnlUp: {
     color: BRAND,
@@ -991,7 +1089,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 5,
     borderRadius: 14,
-    backgroundColor: Colors.accent,
+    backgroundColor: Colors.accentGold,
     paddingHorizontal: 12,
     paddingVertical: 7,
   },
@@ -1051,7 +1149,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   switcherBtnActive: {
-    backgroundColor: Colors.accent,
+    backgroundColor: Colors.accentGold,
   },
   switcherText: {
     color: Colors.textSecondary,
@@ -1231,11 +1329,13 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
     fontSize: 16,
     fontFamily: 'Inter_700Bold',
+    fontVariant: ['tabular-nums'],
   },
   priceSecondary: {
     color: BRAND,
     fontSize: 12,
     fontFamily: 'Inter_600SemiBold',
+    fontVariant: ['tabular-nums'],
   },
   progressTrack: {
     marginTop: 8,
@@ -1264,6 +1364,7 @@ const styles = StyleSheet.create({
   pnlValue: {
     fontSize: 11,
     fontFamily: 'Inter_700Bold',
+    fontVariant: ['tabular-nums'],
   },
   metaText: {
     color: Colors.textSecondary,
@@ -1277,7 +1378,7 @@ const styles = StyleSheet.create({
   },
   buyBtn: {
     flex: 1,
-    backgroundColor: Colors.accent,
+    backgroundColor: Colors.accentGold,
     borderRadius: 14,
     paddingVertical: 10,
     alignItems: 'center',
@@ -1427,7 +1528,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 10,
-    backgroundColor: Colors.accent,
+    backgroundColor: Colors.accentGold,
   },
   unitsSubmitText: {
     color: Colors.background,
@@ -1573,7 +1674,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 10,
-    backgroundColor: Colors.accent,
+    backgroundColor: Colors.accentGold,
   },
   complianceDoneBtnText: {
     color: Colors.background,

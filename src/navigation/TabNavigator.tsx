@@ -132,7 +132,7 @@ export default function TabNavigator() {
           name="Home"
           component={HomeScreen}
           options={{
-            tabBarLabel: 'Feed',
+            tabBarLabel: 'feed',
             tabBarIcon: ({ color, focused }) => (
               <TabIcon name={focused ? 'documents' : 'documents-outline'} color={color} focused={focused} />
             ),
@@ -142,7 +142,7 @@ export default function TabNavigator() {
           name="TradeHub"
           component={TradeHubScreen}
           options={{
-            tabBarLabel: 'Trade',
+            tabBarLabel: 'trade',
             tabBarIcon: ({ color, focused }) => (
               <TabIcon name={focused ? 'stats-chart' : 'stats-chart-outline'} color={color} focused={focused} />
             ),
@@ -152,7 +152,7 @@ export default function TabNavigator() {
           name="Search"
           component={SearchScreen}
           options={{
-            tabBarLabel: 'Closet',
+            tabBarLabel: 'closet',
             tabBarIcon: ({ color, focused }) => (
               <TabIcon name={focused ? 'bookmark' : 'bookmark-outline'} color={color} focused={focused} />
             ),
@@ -171,7 +171,7 @@ export default function TabNavigator() {
           name="Inbox"
           component={InboxScreen}
           options={{
-            tabBarLabel: 'Inbox',
+            tabBarLabel: 'dms',
             tabBarIcon: ({ color, focused }) => (
               <TabIcon name={focused ? 'chatbubbles' : 'chatbubbles-outline'} color={color} focused={focused} badgeCount={3} />
             ),
@@ -181,7 +181,7 @@ export default function TabNavigator() {
           name="Profile"
           component={MyProfileScreen}
           options={{
-            tabBarLabel: 'Profile',
+            tabBarLabel: 'you',
             tabBarIcon: ({ color, focused }) => (
               <TabIcon name={focused ? 'person' : 'person-outline'} color={color} focused={focused} />
             ),

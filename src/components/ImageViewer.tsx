@@ -4,10 +4,7 @@ import Reanimated, {
   useSharedValue,
   useAnimatedStyle,
   withSpring,
-  withTiming,
   runOnJS,
-  interpolate,
-  Extrapolation,
 } from 'react-native-reanimated';
 import {
   GestureDetector,
@@ -15,10 +12,23 @@ import {
   FlatList,
 } from 'react-native-gesture-handler';
 import { SharedTransitionImage } from './SharedTransitionImage';
+import { useReducedMotion } from '../hooks/useReducedMotion';
 
 const { width: W } = Dimensions.get('window');
 const MAX_ZOOM = 4;
 const MIN_ZOOM = 1;
+
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+
+const applyRubberBand = (value: number, min: number, max: number, friction = 0.24) => {
+  if (value < min) {
+    return min + (value - min) * friction;
+  }
+  if (value > max) {
+    return max + (value - max) * friction;
+  }
+  return value;
+};
 
 interface ImagePageProps {
   uri: string;
@@ -27,6 +37,7 @@ interface ImagePageProps {
 }
 
 function ImagePage({ uri, onDoubleTap, sharedTransitionTag }: ImagePageProps) {
+  const reducedMotionEnabled = useReducedMotion();
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
   const translateX = useSharedValue(0);
@@ -54,16 +65,47 @@ function ImagePage({ uri, onDoubleTap, sharedTransitionTag }: ImagePageProps) {
 
   const panGesture = Gesture.Pan()
     .onUpdate((e) => {
-      if (savedScale.value > 1) {
-        const maxTransX = (W * (savedScale.value - 1)) / 2;
-        const maxTransY = (W * (savedScale.value - 1)) / 2;
-        translateX.value = Math.max(-maxTransX, Math.min(maxTransX, savedTranslateX.value + e.translationX));
-        translateY.value = Math.max(-maxTransY, Math.min(maxTransY, savedTranslateY.value + e.translationY));
+      const zoomLevel = Math.max(scale.value, savedScale.value);
+      if (zoomLevel > 1) {
+        const maxTransX = (W * (zoomLevel - 1)) / 2;
+        const maxTransY = (W * (zoomLevel - 1)) / 2;
+        const nextX = savedTranslateX.value + e.translationX;
+        const nextY = savedTranslateY.value + e.translationY;
+        translateX.value = applyRubberBand(nextX, -maxTransX, maxTransX);
+        translateY.value = applyRubberBand(nextY, -maxTransY, maxTransY);
       }
     })
-    .onEnd(() => {
-      savedTranslateX.value = translateX.value;
-      savedTranslateY.value = translateY.value;
+    .onEnd((e) => {
+      const zoomLevel = Math.max(scale.value, savedScale.value);
+
+      if (zoomLevel <= 1) {
+        savedTranslateX.value = 0;
+        savedTranslateY.value = 0;
+        translateX.value = withSpring(0, { damping: 18, stiffness: 220 });
+        translateY.value = withSpring(0, { damping: 18, stiffness: 220 });
+        return;
+      }
+
+      const maxTransX = (W * (zoomLevel - 1)) / 2;
+      const maxTransY = (W * (zoomLevel - 1)) / 2;
+      const projectedX = translateX.value + e.velocityX * 0.08;
+      const projectedY = translateY.value + e.velocityY * 0.08;
+      const targetX = clamp(projectedX, -maxTransX, maxTransX);
+      const targetY = clamp(projectedY, -maxTransY, maxTransY);
+
+      savedTranslateX.value = targetX;
+      savedTranslateY.value = targetY;
+
+      translateX.value = withSpring(targetX, {
+        damping: 17,
+        stiffness: 200,
+        velocity: reducedMotionEnabled ? 0 : e.velocityX,
+      });
+      translateY.value = withSpring(targetY, {
+        damping: 17,
+        stiffness: 200,
+        velocity: reducedMotionEnabled ? 0 : e.velocityY,
+      });
     });
 
   const doubleTap = Gesture.Tap()
@@ -77,8 +119,9 @@ function ImagePage({ uri, onDoubleTap, sharedTransitionTag }: ImagePageProps) {
         savedTranslateX.value = 0;
         savedTranslateY.value = 0;
       } else {
-        scale.value = withSpring(2.5, { damping: 12 });
-        savedScale.value = 2.5;
+        const zoomTarget = reducedMotionEnabled ? 2 : 2.5;
+        scale.value = withSpring(zoomTarget, { damping: 12 });
+        savedScale.value = zoomTarget;
         if (onDoubleTap) runOnJS(onDoubleTap)();
       }
     });
@@ -122,7 +165,7 @@ function Dot({ index, activeIndex }: DotProps) {
 
   React.useEffect(() => {
     width.value = withSpring(isActive ? 24 : 8, { damping: 15, stiffness: 200 });
-  }, [isActive]);
+  }, [isActive, width]);
 
   const dotStyle = useAnimatedStyle(() => ({
     width: width.value,

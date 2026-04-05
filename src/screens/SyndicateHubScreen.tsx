@@ -328,7 +328,7 @@ const styles = StyleSheet.create({
   quickBtn: {
     flex: 1,
     borderRadius: 10,
-    backgroundColor: Colors.accent,
+    backgroundColor: Colors.accentGold,
     paddingVertical: 9,
     paddingHorizontal: 8,
     flexDirection: 'row',
@@ -468,7 +468,7 @@ const styles = StyleSheet.create({
   tradeBtn: {
     flex: 1,
     borderRadius: 10,
-    backgroundColor: Colors.accent,
+    backgroundColor: Colors.accentGold,
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 10,

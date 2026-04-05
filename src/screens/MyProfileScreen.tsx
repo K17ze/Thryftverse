@@ -211,9 +211,9 @@ export default function MyProfileScreen() {
             </View>
           </View>
 
-          <Text style={styles.heroName}>{MY_USER.username}</Text>
-          <Text style={styles.heroLocation}>
-            <Ionicons name="location-outline" size={12} color={Colors.textMuted} /> {MY_USER.location}
+          <Text style={styles.heroName}>@{MY_USER.username}</Text>
+          <Text style={styles.heroMeta}>
+            {MY_USER.location} · {MY_USER.reviewCount} reviews · last seen {MY_USER.lastSeen.toLowerCase()}
           </Text>
 
           <AnimatedPressable
@@ -221,7 +221,7 @@ export default function MyProfileScreen() {
             style={styles.editProfileBtn}
             onPress={() => navigation.navigate('EditProfile')}
           >
-            <Text style={styles.editProfileText}>Edit Profile</Text>
+            <Text style={styles.editProfileText}>edit profile</Text>
           </AnimatedPressable>
 
           {/* Animated Stats row */}
@@ -484,20 +484,21 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   heroName: {
-    fontSize: 23,
-    fontFamily: Typography.family.bold,
+    fontSize: 60,
+    lineHeight: 62,
+    fontFamily: Typography.family.extrabold,
     color: Colors.textPrimary,
-    marginBottom: 4,
+    marginBottom: 2,
     alignSelf: 'flex-start',
-    letterSpacing: -0.3,
+    letterSpacing: -1.9,
   },
-  heroLocation: {
-    fontSize: 13,
-    fontFamily: Typography.family.regular,
+  heroMeta: {
+    fontSize: 11,
+    fontFamily: Typography.family.light,
     color: Colors.textMuted,
     alignSelf: 'flex-start',
-    marginBottom: 16,
-    letterSpacing: 0.1,
+    marginBottom: 14,
+    letterSpacing: 0.24,
   },
   editProfileBtn: {
     alignSelf: 'flex-start',

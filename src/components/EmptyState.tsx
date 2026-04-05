@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import Reanimated, {
+  cancelAnimation,
   FadeInDown,
   useSharedValue,
   useAnimatedStyle,
@@ -14,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { Typography } from '../constants/typography';
 import { AnimatedPressable } from './AnimatedPressable';
+import { useReducedMotion } from '../hooks/useReducedMotion';
 
 const IS_LIGHT = ActiveTheme === 'light';
 const RING_BG = IS_LIGHT ? '#f0ebe3' : '#151515';
@@ -27,12 +29,62 @@ interface Props {
   iconColor?: string;
 }
 
+function resolveVoiceCopy(icon: keyof typeof Ionicons.glyphMap, title: string, subtitle?: string) {
+  const normalized = title.trim().toLowerCase();
+
+  if (
+    normalized === 'your wishlist is empty' ||
+    normalized === 'wishlist empty' ||
+    normalized === 'no favourites yet' ||
+    normalized === 'no favorites yet'
+  ) {
+    return {
+      title: "nothing caught your eye yet. you're picky. respect.",
+      subtitle: 'double-tap pieces you rate and this vault fills up quick.',
+    };
+  }
+
+  if (
+    normalized === 'your closet is empty' ||
+    normalized === 'closet empty' ||
+    normalized === 'no listings yet'
+  ) {
+    return {
+      title: 'time to cop something worth flexing.',
+      subtitle: 'your next grail is a few scrolls away.',
+    };
+  }
+
+  if (icon === 'heart-outline' && normalized.includes('empty')) {
+    return {
+      title: "nothing here yet. your taste is too rare.",
+      subtitle: subtitle ?? 'tap hearts to stash pieces that hit different.',
+    };
+  }
+
+  return {
+    title,
+    subtitle,
+  };
+}
+
 export function EmptyState({ icon, title, subtitle, ctaLabel, onCtaPress, iconColor = '#e8dcc8' }: Props) {
+  const copy = resolveVoiceCopy(icon, title, subtitle);
+  const reducedMotionEnabled = useReducedMotion();
+
   // Floating animation on the icon ring
   const translateY = useSharedValue(0);
   const iconScale = useSharedValue(0.8);
 
   useEffect(() => {
+    if (reducedMotionEnabled) {
+      cancelAnimation(translateY);
+      cancelAnimation(iconScale);
+      translateY.value = 0;
+      iconScale.value = 1;
+      return;
+    }
+
     // Gentle float up/down
     translateY.value = withRepeat(
       withSequence(
@@ -45,7 +97,12 @@ export function EmptyState({ icon, title, subtitle, ctaLabel, onCtaPress, iconCo
 
     // Spring entrance on mount
     iconScale.value = withSpring(1, { damping: 12, stiffness: 150 });
-  }, [translateY, iconScale]);
+
+    return () => {
+      cancelAnimation(translateY);
+      cancelAnimation(iconScale);
+    };
+  }, [iconScale, reducedMotionEnabled, translateY]);
 
   const floatStyle = useAnimatedStyle(() => ({
     transform: [
@@ -67,21 +124,21 @@ export function EmptyState({ icon, title, subtitle, ctaLabel, onCtaPress, iconCo
         entering={FadeInDown.delay(200).duration(400)}
         style={styles.title}
       >
-        {title}
+        {copy.title}
       </Reanimated.Text>
 
-      {subtitle && (
+      {copy.subtitle && (
         <Reanimated.Text
           entering={FadeInDown.delay(300).duration(400)}
           style={styles.subtitle}
         >
-          {subtitle}
+          {copy.subtitle}
         </Reanimated.Text>
       )}
 
       {ctaLabel && onCtaPress && (
         <Reanimated.View entering={FadeInDown.delay(400).duration(400)}>
-          <AnimatedPressable style={styles.cta} onPress={onCtaPress} activeOpacity={0.8}>
+          <AnimatedPressable style={styles.cta} onPress={onCtaPress} activeOpacity={0.8} hapticFeedback="selection">
             <Text style={styles.ctaText}>{ctaLabel}</Text>
           </AnimatedPressable>
         </Reanimated.View>

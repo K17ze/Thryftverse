@@ -35,7 +35,7 @@ export default function ListingSuccessScreen({ navigation, route }: Props) {
   const { formatFromFiat } = useFormattedPrice();
   const { source, isSyncing, lastError, refreshListings } = useBackendData();
   const bumpFeeLabel = formatFromFiat(1.99, 'GBP', { displayMode: 'fiat' });
-  const listingTitle = route.params?.title || 'Your listing';
+  const listingTitle = route.params?.title || 'your listing';
   const listingPrice =
     typeof route.params?.price === 'number'
       ? formatFromFiat(route.params.price, 'GBP', { displayMode: 'fiat' })
@@ -70,8 +70,9 @@ export default function ListingSuccessScreen({ navigation, route }: Props) {
           <View style={styles.iconCircle}>
             <Ionicons name="checkmark" size={64} color={Colors.accent} />
           </View>
-          <Text style={styles.heroBigText}>It's Live.</Text>
-          <Text style={styles.heroSubText}>Your item is now visible to the community.</Text>
+          <Text style={styles.heroBigText}>you're live.</Text>
+          <Text style={styles.heroSubText}>your item is in the feed now.</Text>
+          {listingPrice ? <Text style={styles.heroMicroCopy}>priced at {listingPrice}. let it cook.</Text> : null}
         </View>
 
         <View style={styles.syncCard}>
@@ -80,12 +81,12 @@ export default function ListingSuccessScreen({ navigation, route }: Props) {
           </View>
           <Text style={styles.syncHint}>
             {lastError
-              ? 'Feed indexing is delayed. The listing remains saved and will sync automatically once connected.'
-              : 'Your listing status updates automatically as marketplace sync completes.'}
+              ? 'feed is lagging. your listing is safe and will sync when connection returns.'
+              : 'we are pushing it live everywhere now.'}
           </Text>
           {lastError ? (
             <SyncRetryBanner
-              message="Retry feed sync now to publish this listing faster."
+              message="retry sync now to get this live faster."
               onRetry={() => void refreshListings()}
               isRetrying={isSyncing}
               telemetryContext="listing_success_publish_sync"
@@ -108,12 +109,12 @@ export default function ListingSuccessScreen({ navigation, route }: Props) {
             </View>
           )}
           <View style={styles.summaryBody}>
-            <Text style={styles.summaryLabel}>Published listing</Text>
+            <Text style={styles.summaryLabel}>published listing</Text>
             <Text style={styles.summaryTitle} numberOfLines={2}>
               {listingTitle}
             </Text>
             <Text style={styles.summaryMeta}>
-              {listingPrice || 'Price pending'}
+              {listingPrice || 'price pending'}
               {listingCategory ? ` • ${listingCategory}` : ''}
             </Text>
           </View>
@@ -123,11 +124,11 @@ export default function ListingSuccessScreen({ navigation, route }: Props) {
         <View style={styles.promoCard}>
           <View style={styles.promoBadge}>
             <Ionicons name="flash" size={12} color={BADGE_TEXT} />
-            <Text style={styles.promoBadgeText}>Sell 3x Faster</Text>
+            <Text style={styles.promoBadgeText}>sell 3x faster</Text>
           </View>
-          <Text style={styles.promoTitle}>Bump your listing</Text>
+          <Text style={styles.promoTitle}>bump your listing</Text>
           <Text style={styles.promoDesc}>
-            Push your item to the top of the feed and search results for 3 days.
+            push your item to the top of feed and search for 3 days.
           </Text>
 
           <AnimatedPressable
@@ -135,7 +136,7 @@ export default function ListingSuccessScreen({ navigation, route }: Props) {
             activeOpacity={0.9}
             onPress={() => navigation.navigate('CreatePoster')}
           >
-            <Text style={styles.bumpBtnText}>Promote for {bumpFeeLabel}</Text>
+            <Text style={styles.bumpBtnText}>promote for {bumpFeeLabel}</Text>
           </AnimatedPressable>
         </View>
 
@@ -149,7 +150,7 @@ export default function ListingSuccessScreen({ navigation, route }: Props) {
             <View style={styles.actionIconBox}>
               <Ionicons name="eye-outline" size={20} color={Colors.textPrimary} />
             </View>
-            <Text style={styles.actionText}>View my listing</Text>
+            <Text style={styles.actionText}>view my listing</Text>
           </View>
           <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
         </AnimatedPressable>
@@ -163,7 +164,7 @@ export default function ListingSuccessScreen({ navigation, route }: Props) {
             <View style={styles.actionIconBox}>
               <Ionicons name="home-outline" size={20} color={Colors.textPrimary} />
             </View>
-            <Text style={styles.actionText}>Back to Home</Text>
+            <Text style={styles.actionText}>back to feed</Text>
           </View>
           <Ionicons name="arrow-forward" size={16} color={Colors.textMuted} />
         </AnimatedPressable>
@@ -183,27 +184,35 @@ const styles = StyleSheet.create({
     marginBottom: 48,
   },
   iconCircle: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
+    width: 104,
+    height: 104,
+    borderRadius: 52,
     backgroundColor: PANEL_ALT_BG,
     borderWidth: 1,
     borderColor: PANEL_BORDER,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 24,
+    marginBottom: 18,
   },
   heroBigText: {
-    fontSize: 48,
-    fontFamily: 'Inter_700Bold',
+    fontSize: 72,
+    lineHeight: 74,
+    fontFamily: 'Inter_800ExtraBold',
     color: Colors.textPrimary,
-    letterSpacing: -2,
-    marginBottom: 8,
+    letterSpacing: -2.8,
+    marginBottom: 6,
   },
   heroSubText: {
-    fontSize: 16,
-    fontFamily: 'Inter_500Medium',
+    fontSize: 14,
+    fontFamily: 'Inter_300Light',
     color: Colors.textMuted,
+    letterSpacing: 0.14,
+  },
+  heroMicroCopy: {
+    marginTop: 8,
+    fontSize: 12,
+    color: Colors.textSecondary,
+    fontFamily: 'Inter_500Medium',
   },
   syncCard: {
     marginBottom: 18,

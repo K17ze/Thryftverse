@@ -184,7 +184,7 @@ const styles = StyleSheet.create({
   },
   primaryBtn: {
     borderRadius: 14,
-    backgroundColor: Colors.accent,
+    backgroundColor: Colors.accentGold,
     paddingVertical: 14,
     flexDirection: 'row',
     alignItems: 'center',

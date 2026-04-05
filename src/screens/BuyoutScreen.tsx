@@ -19,6 +19,8 @@ import { useStore } from '../store/useStore';
 import { resolveAssetMarketState } from '../data/mockSyndicateData';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useToast } from '../context/ToastContext';
+import { parseApiError } from '../lib/apiClient';
+import { createSyndicateBuyoutOffer } from '../services/marketApi';
 
 type RouteT = RouteProp<RootStackParamList, 'Buyout'>;
 type NavT = StackNavigationProp<RootStackParamList>;
@@ -35,6 +37,7 @@ export default function BuyoutScreen() {
 
   const customSyndicates = useStore((state) => state.customSyndicates);
   const syndicateRuntime = useStore((state) => state.syndicateRuntime);
+  const currentUser = useStore((state) => state.currentUser);
   const { formatFromFiat } = useFormattedPrice();
 
   const baseAssets = React.useMemo(() => getSyndicateMarket(customSyndicates), [customSyndicates]);
@@ -70,7 +73,7 @@ export default function BuyoutScreen() {
   const offerPricePerShare = Number((asset.unitPriceGBP * 1.08).toFixed(2));
   const totalCost = sharesNeeded * offerPricePerShare;
 
-  const handleBuyout = () => {
+  const handleBuyout = async () => {
     if (isSubmitting) {
       return;
     }
@@ -82,13 +85,36 @@ export default function BuyoutScreen() {
     }
 
     setIsSubmitting(true);
-    show('Submitting buyout offer to remaining holders...', 'info');
 
-    setTimeout(() => {
-      setIsSubmitting(false);
+    try {
+      const bidderUserId = currentUser?.id ?? 'u1';
+      const response = await createSyndicateBuyoutOffer(asset.id, {
+        bidderUserId,
+        offerPriceGbp: offerPricePerShare,
+        targetUnits: sharesNeeded,
+        expiresInHours: 24,
+        metadata: {
+          source: 'buyout_screen',
+        },
+      });
+
       show('Buyout offer submitted. Track progress in order history.', 'success');
+
+      if (response.aml?.alertId) {
+        show('Buyout offer is flagged for AML review.', 'info');
+      }
+
       navigation.navigate('SyndicateOrderHistory');
-    }, 700);
+    } catch (error) {
+      const parsedError = parseApiError(error, 'Unable to submit buyout offer');
+      if (parsedError.isNetworkError) {
+        show('Network unavailable. Could not submit buyout offer.', 'error');
+      } else {
+        show(parsedError.message, 'error');
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -237,7 +263,7 @@ const styles = StyleSheet.create({
   submitBtn: {
     marginTop: 14,
     borderRadius: 12,
-    backgroundColor: Colors.accent,
+    backgroundColor: Colors.accentGold,
     paddingVertical: 12,
     alignItems: 'center',
     justifyContent: 'center',

@@ -13,6 +13,7 @@ import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { ActiveTheme, Colors } from '../constants/colors';
+import { requestPasswordReset } from '../services/authApi';
 
 export default function ForgotPasswordScreen() {
   const navigation = useNavigation<any>();
@@ -21,7 +22,13 @@ export default function ForgotPasswordScreen() {
   const [errorMsg, setErrorMsg] = useState('');
   const canSendReset = email.trim().length > 0;
 
-  const handleReset = () => {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleReset = async () => {
+    if (isSubmitting) {
+      return;
+    }
+
     const normalizedEmail = email.trim().toLowerCase();
     if (!normalizedEmail) {
       setErrorMsg('Please enter your email address.');
@@ -34,7 +41,16 @@ export default function ForgotPasswordScreen() {
     }
 
     setErrorMsg('');
-    setIsSent(true);
+    setIsSubmitting(true);
+
+    try {
+      await requestPasswordReset(normalizedEmail);
+      setIsSent(true);
+    } catch (error) {
+      setErrorMsg((error as Error).message || 'Unable to send reset link right now.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -89,9 +105,9 @@ export default function ForgotPasswordScreen() {
                 style={[styles.primaryBtn, !canSendReset && styles.primaryBtnDisabled]}
                 onPress={handleReset}
                 activeOpacity={0.9}
-                disabled={!canSendReset}
+                disabled={!canSendReset || isSubmitting}
               >
-                <Text style={styles.primaryText}>Send Reset Link</Text>
+                <Text style={styles.primaryText}>{isSubmitting ? 'Sending...' : 'Send Reset Link'}</Text>
               </AnimatedPressable>
             </View>
           </View>

@@ -50,7 +50,7 @@ export default function AuthLandingScreen() {
       <SafeAreaView style={styles.safeArea}>
         {/* Top - animated brand wordmark */}
         <Reanimated.View entering={FadeIn.delay(200).duration(600)} style={styles.topSection}>
-          <Text style={styles.logo}>THRYFTVERSE</Text>
+          <Text style={styles.logo}>entry 01</Text>
         </Reanimated.View>
 
         {/* Middle - main copy */}
@@ -59,29 +59,15 @@ export default function AuthLandingScreen() {
             entering={FadeInDown.delay(400).duration(600).springify()}
             style={styles.title}
           >
-            Thrift smarter.{'\n'}Trade sharper.
+            THRYFT
           </Reanimated.Text>
 
           <Reanimated.Text
             entering={FadeInDown.delay(600).duration(500)}
             style={styles.subtitle}
           >
-            Shop pre-loved pieces, launch listings, and access Trade Hub from one account.
+            buy, sell, trade. no noise.
           </Reanimated.Text>
-
-          {/* Feature pills */}
-          <Reanimated.View entering={FadeIn.delay(900).duration(500)} style={styles.featurePills}>
-            {[
-              { icon: 'pricetag-outline' as const, label: 'Zero listing fees' },
-              { icon: 'shield-checkmark-outline' as const, label: 'Buyer protection' },
-              { icon: 'stats-chart-outline' as const, label: 'Trade Hub access' },
-            ].map((f, i) => (
-              <View key={f.label} style={styles.featurePill}>
-                <Ionicons name={f.icon} size={13} color="#e8dcc8" />
-                <Text style={styles.featurePillText}>{f.label}</Text>
-              </View>
-            ))}
-          </Reanimated.View>
         </View>
 
         {/* Bottom - CTAs */}
@@ -91,7 +77,7 @@ export default function AuthLandingScreen() {
             activeOpacity={0.9}
             onPress={() => navigation.navigate('SignUp')}
           >
-            <Text style={styles.primaryText}>Create Account</Text>
+            <Text style={styles.primaryText}>create account</Text>
           </AnimatedPressable>
 
           <AnimatedPressable
@@ -99,7 +85,7 @@ export default function AuthLandingScreen() {
             activeOpacity={0.8}
             onPress={() => navigation.navigate('Login')}
           >
-            <Text style={styles.secondaryText}>I already have an account</Text>
+            <Text style={styles.secondaryText}>i already have an account</Text>
           </AnimatedPressable>
 
           {/* Social login row */}
@@ -121,7 +107,7 @@ export default function AuthLandingScreen() {
           </View>
 
           <Text style={styles.termsText}>
-            By continuing, you agree to our Terms of Service and Privacy Policy.
+            by continuing, you agree to our terms of service and privacy policy.
           </Text>
         </Reanimated.View>
       </SafeAreaView>
@@ -150,51 +136,30 @@ const styles = StyleSheet.create({
     paddingTop: 12,
   },
   logo: {
-    fontSize: 15,
-    fontFamily: Typography.family.bold,
+    fontSize: 11,
+    fontFamily: Typography.family.medium,
     color: 'rgba(232,220,200,0.9)',
-    letterSpacing: 3.5,
+    letterSpacing: 2.8,
+    textTransform: 'uppercase',
   },
   content: {
     paddingHorizontal: 22,
+    paddingBottom: 18,
   },
   title: {
-    fontSize: 38,
-    fontFamily: Typography.family.bold,
+    fontSize: 72,
+    fontFamily: Typography.family.extrabold,
     color: '#f6f2ea',
-    lineHeight: 44,
-    letterSpacing: -0.8,
-    marginBottom: 16,
+    lineHeight: 74,
+    letterSpacing: -2.4,
+    marginBottom: 12,
   },
   subtitle: {
-    fontSize: 15,
-    fontFamily: Typography.family.regular,
-    color: 'rgba(245,239,230,0.75)',
-    lineHeight: 23,
-    letterSpacing: 0.08,
-    marginBottom: 20,
-  },
-  featurePills: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  featurePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(232,220,200,0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(232,220,200,0.18)',
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 20,
-  },
-  featurePillText: {
-    color: 'rgba(232,220,200,0.85)',
-    fontSize: 12,
-    fontFamily: Typography.family.medium,
-    letterSpacing: 0.1,
+    fontSize: 13,
+    fontFamily: Typography.family.light,
+    color: 'rgba(245,239,230,0.72)',
+    lineHeight: 18,
+    letterSpacing: 0.24,
   },
   footer: {
     paddingHorizontal: 22,

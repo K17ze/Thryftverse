@@ -16,7 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { Typography } from '../constants/typography';
 import { useStore } from '../store/useStore';
-import { MY_USER } from '../data/mockData';
+import { loginWithPassword } from '../services/authApi';
 
 const IS_LIGHT = ActiveTheme === 'light';
 const PANEL_BG = IS_LIGHT ? '#ffffff' : Colors.surface;
@@ -47,7 +47,7 @@ export default function LoginScreen() {
     transform: [{ translateX: shakeOffset.value }]
   }));
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     if (isSubmitting) {
       return;
     }
@@ -74,9 +74,21 @@ export default function LoginScreen() {
 
     setErrorMsg('');
     setIsSubmitting(true);
-    // Use local mock auth state, then continue to the main app shell.
-    login(MY_USER);
-    navigation.replace('MainTabs');
+
+    try {
+      const result = await loginWithPassword({
+        email: normalizedEmail,
+        password,
+      });
+
+      login(result.storeUser);
+      navigation.replace('MainTabs');
+    } catch (error) {
+      setErrorMsg((error as Error).message || 'Unable to log in right now.');
+      shake();
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (

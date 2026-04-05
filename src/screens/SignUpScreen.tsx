@@ -15,7 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { useStore } from '../store/useStore';
-import { MY_USER } from '../data/mockData';
+import { signupWithPassword } from '../services/authApi';
 
 export default function SignUpScreen() {
   const navigation = useNavigation<any>();
@@ -43,7 +43,7 @@ export default function SignUpScreen() {
     transform: [{ translateX: shakeOffset.value }]
   }));
 
-  const handleSignUp = () => {
+  const handleSignUp = async () => {
     if (isSubmitting) {
       return;
     }
@@ -77,8 +77,22 @@ export default function SignUpScreen() {
 
     setErrorMsg('');
     setIsSubmitting(true);
-    login({ ...MY_USER, username: normalizedUsername });
-    navigation.replace('MainTabs');
+
+    try {
+      const result = await signupWithPassword({
+        username: normalizedUsername,
+        email: normalizedEmail,
+        password,
+      });
+
+      login(result.storeUser);
+      navigation.replace('MainTabs');
+    } catch (error) {
+      setErrorMsg((error as Error).message || 'Unable to create account right now.');
+      shake();
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
