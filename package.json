@@ -14,8 +14,8 @@
     "typecheck": "tsc --noEmit",
     "check": "npm run typecheck",
     "doctor": "npx expo-doctor",
-    "test": "vitest run",
-    "test:watch": "vitest",
+    "test": "vitest run --dir src",
+    "test:watch": "vitest --dir src",
     "test:smoke": "vitest run src/__tests__/smoke-flows.test.ts"
   },
   "dependencies": {
