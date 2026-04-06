@@ -77,6 +77,7 @@ export default function AuctionsScreen() {
   const [syncError, setSyncError] = React.useState<string | null>(null);
   const [isSubmittingBid, setIsSubmittingBid] = React.useState(false);
   const [buyNowAuctionId, setBuyNowAuctionId] = React.useState<string | null>(null);
+  const [watchedAuctionIds, setWatchedAuctionIds] = React.useState<Set<string>>(() => new Set());
 
   const syncAuctions = React.useCallback(async () => {
     setIsSyncingAuctions(true);
@@ -226,6 +227,24 @@ export default function AuctionsScreen() {
     setSelectedBidAuction(auction);
     setBidInput(suggestedDisplayBid.toFixed(2));
     setBidComposerVisible(true);
+  };
+
+  const handleToggleWatch = (auction: AuctionViewModel) => {
+    const isWatching = watchedAuctionIds.has(auction.id);
+    setWatchedAuctionIds((current) => {
+      const next = new Set(current);
+      if (next.has(auction.id)) {
+        next.delete(auction.id);
+      } else {
+        next.add(auction.id);
+      }
+      return next;
+    });
+
+    show(
+      isWatching ? `Removed ${auction.title} from watchlist` : `Watching ${auction.title}`,
+      'info'
+    );
   };
 
   const closeBidComposer = () => {
@@ -534,7 +553,10 @@ export default function AuctionsScreen() {
     </View>
   );
 
-  const renderLiveAuction = ({ item }: { item: AuctionViewModel }) => (
+  const renderLiveAuction = ({ item }: { item: AuctionViewModel }) => {
+    const isWatching = watchedAuctionIds.has(item.id);
+
+    return (
     <AnimatedPressable
       style={styles.liveCard}
       activeOpacity={0.95}
@@ -593,14 +615,21 @@ export default function AuctionsScreen() {
               <Text style={styles.buyBtnText}>{buyNowAuctionId === item.id ? 'Buying...' : 'Buy Now'}</Text>
             </AnimatedPressable>
           ) : (
-            <AnimatedPressable style={styles.watchBtn} onPress={() => show('Watching auction', 'info')} activeOpacity={0.9}>
-              <Text style={styles.watchBtnText}>Watch</Text>
+            <AnimatedPressable
+              style={[styles.watchBtn, isWatching && styles.watchBtnActive]}
+              onPress={() => handleToggleWatch(item)}
+              activeOpacity={0.9}
+            >
+              <Text style={[styles.watchBtnText, isWatching && styles.watchBtnTextActive]}>
+                {isWatching ? 'Watching' : 'Watch'}
+              </Text>
             </AnimatedPressable>
           )}
         </View>
       </View>
     </AnimatedPressable>
-  );
+    );
+  };
 
   const renderBidComposer = () => {
     if (!selectedBidAuction) {
@@ -1086,10 +1115,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  watchBtnActive: {
+    backgroundColor: PANEL_TINT_BG,
+    borderColor: PANEL_TINT_BORDER,
+  },
   watchBtnText: {
     color: Colors.textSecondary,
     fontSize: 13,
     fontFamily: 'Inter_600SemiBold',
+  },
+  watchBtnTextActive: {
+    color: BRAND,
+    fontFamily: 'Inter_700Bold',
   },
   bidModalOverlay: {
     flex: 1,

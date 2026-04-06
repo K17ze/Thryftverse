@@ -340,6 +340,7 @@ function isPublicRoute(method: string, path: string) {
   const signature = `${method} ${path}`;
   const fixedPublicRoutes = new Set<string>([
     'GET /health',
+    'GET /health/deep',
     'GET /metrics',
     'GET /listings',
     'GET /search/listings',
@@ -350,6 +351,7 @@ function isPublicRoute(method: string, path: string) {
     'POST /auth/refresh',
     'POST /auth/password-reset/request',
     'POST /auth/password-reset/confirm',
+    'POST /compliance/kyc/webhook',
   ]);
 
   if (fixedPublicRoutes.has(signature)) {
@@ -425,6 +427,45 @@ function resolveActorUserId(requestPath: string, request: { params?: unknown; bo
   return null;
 }
 
+function resolveAuthenticatedUserId(
+  request: { authUser?: AuthenticatedUser },
+  requestedUserId?: string
+): string {
+  const authUser = request.authUser;
+  if (!authUser) {
+    throw createApiError('UNAUTHORIZED', 'Unauthorized');
+  }
+
+  if (requestedUserId && authUser.role !== 'admin' && requestedUserId !== authUser.userId) {
+    throw createApiError('FORBIDDEN_USER_CONTEXT', 'Forbidden: user context mismatch', {
+      authUserId: authUser.userId,
+      requestedUserId,
+    });
+  }
+
+  return requestedUserId ?? authUser.userId;
+}
+
+function statusCodeForApiError(code: string): number {
+  if (code === 'UNAUTHORIZED') {
+    return 401;
+  }
+
+  if (code === 'FORBIDDEN_USER_CONTEXT') {
+    return 403;
+  }
+
+  if (code.endsWith('_NOT_FOUND') || code === 'USER_NOT_FOUND') {
+    return 404;
+  }
+
+  if (code.endsWith('_INVALID') || code.endsWith('_MISMATCH') || code.endsWith('_REQUIRED')) {
+    return 400;
+  }
+
+  return 409;
+}
+
 app.addHook('onRequest', async (request) => {
   request.metricsStartNs = process.hrtime.bigint();
 
@@ -475,22 +516,22 @@ app.addHook('preHandler', async (request, reply) => {
 
   const authUser = await authenticateRequest(requestPath, request.headers.authorization);
   if (!authUser) {
-    reply.code(401);
-    return {
+    reply.code(401).send({
       ok: false,
       error: 'Unauthorized',
-    };
+    });
+    return reply;
   }
 
   request.authUser = authUser;
 
   const actorUserId = resolveActorUserId(requestPath, request);
   if (actorUserId && authUser.role !== 'admin' && actorUserId !== authUser.userId) {
-    reply.code(403);
-    return {
+    reply.code(403).send({
       ok: false,
       error: 'Forbidden: user context mismatch',
-    };
+    });
+    return reply;
   }
 });
 
@@ -518,6 +559,16 @@ app.setErrorHandler((error, request, reply) => {
   );
 
   if (reply.sent) {
+    return;
+  }
+
+  if (error instanceof z.ZodError) {
+    reply.code(400);
+    reply.send({
+      ok: false,
+      error: 'Invalid request payload',
+      details: error.issues,
+    });
     return;
   }
 
@@ -637,6 +688,138 @@ function toPayoutRequestPayload(row: PayoutRequestRow) {
     metadata: row.metadata,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+
+async function assertSettledWalletTopupIntent(
+  client: DbQueryable,
+  input: {
+    paymentIntentId: string;
+    userId: string;
+    fiatAmount: number;
+    fiatCurrency: string;
+  }
+): Promise<{ gatewayId: string }> {
+  const result = await client.query<{
+    id: string;
+    user_id: string;
+    gateway_id: string;
+    channel: PaymentIntentChannel;
+    status: PaymentIntentStatus;
+    amount_gbp: number | string;
+    amount_currency: string;
+  }>(
+    `
+      SELECT id, user_id, gateway_id, channel, status, amount_gbp, amount_currency
+      FROM payment_intents
+      WHERE id = $1
+      LIMIT 1
+    `,
+    [input.paymentIntentId]
+  );
+
+  const intent = result.rows[0];
+  if (!intent) {
+    throw createApiError('PAYMENT_INTENT_NOT_FOUND', 'Payment intent not found for 1ze mint');
+  }
+
+  if (intent.user_id !== input.userId) {
+    throw createApiError('PAYMENT_INTENT_USER_MISMATCH', 'Payment intent does not belong to this user', {
+      paymentIntentId: input.paymentIntentId,
+      expectedUserId: input.userId,
+      actualUserId: intent.user_id,
+    });
+  }
+
+  if (intent.channel !== 'wallet_topup') {
+    throw createApiError('PAYMENT_INTENT_CHANNEL_INVALID', 'Payment intent channel must be wallet_topup', {
+      paymentIntentId: input.paymentIntentId,
+      channel: intent.channel,
+    });
+  }
+
+  if (intent.status !== 'succeeded') {
+    throw createApiError('PAYMENT_INTENT_NOT_SETTLED', 'Payment intent must be succeeded before minting 1ze', {
+      paymentIntentId: input.paymentIntentId,
+      status: intent.status,
+    });
+  }
+
+  if (intent.amount_currency.toUpperCase() !== input.fiatCurrency.toUpperCase()) {
+    throw createApiError('PAYMENT_INTENT_CURRENCY_MISMATCH', 'Payment intent currency does not match mint currency', {
+      paymentIntentId: input.paymentIntentId,
+      intentCurrency: intent.amount_currency,
+      mintCurrency: input.fiatCurrency,
+    });
+  }
+
+  const intentAmount = Number(intent.amount_gbp);
+  const expectedAmount = roundTo(input.fiatAmount, 2);
+  const tolerance = Math.max(0.5, expectedAmount * 0.02);
+  if (Math.abs(intentAmount - expectedAmount) > tolerance) {
+    throw createApiError('PAYMENT_INTENT_AMOUNT_MISMATCH', 'Payment intent amount does not match mint request', {
+      paymentIntentId: input.paymentIntentId,
+      intentAmount,
+      expectedAmount,
+      tolerance,
+    });
+  }
+
+  return {
+    gatewayId: intent.gateway_id,
+  };
+}
+
+async function assertRedeemablePayoutRequest(
+  client: DbQueryable,
+  input: {
+    payoutRequestId: string;
+    userId: string;
+  }
+): Promise<{ gatewayId: string; status: PayoutRequestStatus; amountCurrency: string; amountGbp: number }> {
+  const result = await client.query<{
+    id: string;
+    user_id: string;
+    status: PayoutRequestStatus;
+    gateway_id: string;
+    amount_currency: string;
+    amount_gbp: number | string;
+  }>(
+    `
+      SELECT pr.id, pr.user_id, pr.status, pa.gateway_id, pr.amount_currency, pr.amount_gbp
+      FROM payout_requests pr
+      INNER JOIN payout_accounts pa ON pa.id = pr.payout_account_id
+      WHERE pr.id = $1
+      LIMIT 1
+    `,
+    [input.payoutRequestId]
+  );
+
+  const payoutRequest = result.rows[0];
+  if (!payoutRequest) {
+    throw createApiError('PAYOUT_REQUEST_NOT_FOUND', 'Payout request not found for 1ze redemption');
+  }
+
+  if (payoutRequest.user_id !== input.userId) {
+    throw createApiError('PAYOUT_REQUEST_USER_MISMATCH', 'Payout request does not belong to this user', {
+      payoutRequestId: input.payoutRequestId,
+      expectedUserId: input.userId,
+      actualUserId: payoutRequest.user_id,
+    });
+  }
+
+  if (payoutRequest.status === 'failed' || payoutRequest.status === 'cancelled') {
+    throw createApiError('PAYOUT_REQUEST_INVALID', 'Payout request is not redeemable in its current status', {
+      payoutRequestId: input.payoutRequestId,
+      status: payoutRequest.status,
+    });
+  }
+
+  return {
+    gatewayId: payoutRequest.gateway_id,
+    status: payoutRequest.status,
+    amountCurrency: payoutRequest.amount_currency,
+    amountGbp: Number(payoutRequest.amount_gbp),
   };
 }
 
@@ -5917,6 +6100,136 @@ app.get('/oracle/gold/latest', async (request, reply) => {
   }
 });
 
+app.get('/wallet/1ze/quote', async (request, reply) => {
+  const querySchema = z.object({
+    fiatCurrency: z.string().length(3).default('GBP'),
+    fiatAmount: z.coerce.number().positive().optional(),
+    izeAmount: z.coerce.number().positive().optional(),
+    forceRefresh: z.coerce.boolean().default(false),
+  });
+
+  const payload = querySchema.parse(request.query);
+  const providedCount = Number(payload.fiatAmount !== undefined) + Number(payload.izeAmount !== undefined);
+  if (providedCount !== 1) {
+    reply.code(400);
+    return {
+      ok: false,
+      error: 'Provide exactly one of fiatAmount or izeAmount for quote resolution',
+    };
+  }
+
+  if (!(await onezeTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze money-layer tables are unavailable. Run migrations first.',
+    };
+  }
+
+  try {
+    const rate = await resolveGoldRate(db, payload.fiatCurrency, {
+      forceRefresh: payload.forceRefresh,
+    });
+
+    const direction = payload.fiatAmount !== undefined ? 'mint' : 'burn';
+    const fiatAmount =
+      payload.fiatAmount !== undefined
+        ? Number(payload.fiatAmount.toFixed(6))
+        : Number(((payload.izeAmount ?? 0) * rate.ratePerGram).toFixed(6));
+    const izeAmount =
+      payload.izeAmount !== undefined
+        ? Number(payload.izeAmount.toFixed(6))
+        : Number(((payload.fiatAmount ?? 0) / rate.ratePerGram).toFixed(6));
+
+    return {
+      ok: true,
+      quote: {
+        direction,
+        fiatCurrency: payload.fiatCurrency.toUpperCase(),
+        fiatAmount,
+        izeAmount,
+        ratePerGram: rate.ratePerGram,
+        rateSource: rate.source,
+      },
+    };
+  } catch (error) {
+    request.log.error({ err: error, payload }, 'Failed to resolve 1ze quote');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to resolve 1ze quote',
+    };
+  }
+});
+
+app.get('/wallet/1ze/fx-quote', async (request, reply) => {
+  const querySchema = z.object({
+    fromCurrency: z.string().length(3),
+    toCurrency: z.string().length(3),
+    amount: z.coerce.number().positive(),
+    forceRefresh: z.coerce.boolean().default(false),
+  });
+
+  const payload = querySchema.parse(request.query);
+
+  if (!(await onezeTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze money-layer tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const fromCurrency = payload.fromCurrency.toUpperCase();
+  const toCurrency = payload.toCurrency.toUpperCase();
+  if (fromCurrency === toCurrency) {
+    return {
+      ok: true,
+      quote: {
+        fromCurrency,
+        toCurrency,
+        inputAmount: Number(payload.amount.toFixed(6)),
+        fxRate: 1,
+        convertedAmount: Number(payload.amount.toFixed(6)),
+        source: 'identity',
+      },
+    };
+  }
+
+  try {
+    const [fromRate, toRate] = await Promise.all([
+      resolveGoldRate(db, fromCurrency, { forceRefresh: payload.forceRefresh }),
+      resolveGoldRate(db, toCurrency, { forceRefresh: payload.forceRefresh }),
+    ]);
+
+    const fxRate = Number((toRate.ratePerGram / fromRate.ratePerGram).toFixed(8));
+    const convertedAmount = Number((payload.amount * fxRate).toFixed(6));
+
+    return {
+      ok: true,
+      quote: {
+        fromCurrency,
+        toCurrency,
+        inputAmount: Number(payload.amount.toFixed(6)),
+        fxRate,
+        convertedAmount,
+        source: 'xau_cross',
+        referenceRates: {
+          from: fromRate,
+          to: toRate,
+        },
+      },
+    };
+  } catch (error) {
+    request.log.error({ err: error, payload }, 'Failed to resolve 1ze FX quote');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to resolve FX quote',
+    };
+  }
+});
+
 app.post('/oracle/gold/override', async (request, reply) => {
   const bodySchema = z.object({
     currency: z.string().length(3),
@@ -5983,7 +6296,7 @@ app.post('/oracle/gold/override', async (request, reply) => {
 
 app.post('/wallet/1ze/mint', async (request, reply) => {
   const bodySchema = z.object({
-    userId: z.string().min(2),
+    userId: z.string().min(2).optional(),
     fiatAmount: z.number().positive(),
     fiatCurrency: z.string().length(3).default('GBP'),
     paymentIntentId: z.string().min(4).max(120).optional(),
@@ -5991,6 +6304,7 @@ app.post('/wallet/1ze/mint', async (request, reply) => {
   });
 
   const payload = bodySchema.parse(request.body ?? {});
+  const actorUserId = resolveAuthenticatedUserId(request, payload.userId);
 
   if (!(await onezeTablesAvailable(db))) {
     reply.code(503);
@@ -6003,7 +6317,26 @@ app.post('/wallet/1ze/mint', async (request, reply) => {
   const client = await db.connect();
   try {
     await client.query('BEGIN');
-    await ensureUserExists(payload.userId);
+    await ensureUserExists(actorUserId);
+
+    if (config.nodeEnv === 'production' && !payload.paymentIntentId) {
+      throw createApiError(
+        'IZE_MINT_BACKING_REQUIRED',
+        'A settled wallet_topup paymentIntentId is required to mint 1ze in production'
+      );
+    }
+
+    let fundingGatewayId: string | null = null;
+    if (payload.paymentIntentId) {
+      const settledIntent = await assertSettledWalletTopupIntent(client, {
+        paymentIntentId: payload.paymentIntentId,
+        userId: actorUserId,
+        fiatAmount: payload.fiatAmount,
+        fiatCurrency: payload.fiatCurrency,
+      });
+
+      fundingGatewayId = settledIntent.gatewayId;
+    }
 
     const quote = await resolveGoldRate(client, payload.fiatCurrency, {
       forceRefresh: false,
@@ -6017,7 +6350,7 @@ app.post('/wallet/1ze/mint', async (request, reply) => {
     const operationId = createRuntimeId('ize_mint');
     await recordIzeMint(client, {
       operationId,
-      userId: payload.userId,
+      userId: actorUserId,
       fiatAmount: payload.fiatAmount,
       fiatCurrency: payload.fiatCurrency.toUpperCase(),
       izeAmount,
@@ -6027,7 +6360,7 @@ app.post('/wallet/1ze/mint', async (request, reply) => {
     });
 
     const [walletBalanceIze, reserveSnapshot] = await Promise.all([
-      getLedgerAccountBalance(client, 'user', payload.userId, 'ize_wallet', 'IZE'),
+      getLedgerAccountBalance(client, 'user', actorUserId, 'ize_wallet', 'IZE'),
       getPlatformIzeReserveSnapshot(client),
     ]);
 
@@ -6038,12 +6371,13 @@ app.post('/wallet/1ze/mint', async (request, reply) => {
       operation: {
         id: operationId,
         type: 'mint',
-        userId: payload.userId,
+        userId: actorUserId,
         fiatAmount: payload.fiatAmount,
         fiatCurrency: payload.fiatCurrency.toUpperCase(),
         izeAmount,
         ratePerGram: quote.ratePerGram,
         rateSource: quote.source,
+        fundingGatewayId,
       },
       balances: {
         userIze: walletBalanceIze,
@@ -6055,7 +6389,7 @@ app.post('/wallet/1ze/mint', async (request, reply) => {
     await client.query('ROLLBACK');
     const apiError = getApiError(error);
     if (apiError) {
-      reply.code(409);
+      reply.code(statusCodeForApiError(apiError.code));
       return {
         ok: false,
         error: apiError.message,
@@ -6063,7 +6397,7 @@ app.post('/wallet/1ze/mint', async (request, reply) => {
       };
     }
 
-    request.log.error({ err: error, userId: payload.userId }, 'Failed to mint 1ze');
+    request.log.error({ err: error, userId: actorUserId }, 'Failed to mint 1ze');
     reply.code(500);
     return {
       ok: false,
@@ -6076,7 +6410,7 @@ app.post('/wallet/1ze/mint', async (request, reply) => {
 
 app.post('/wallet/1ze/burn', async (request, reply) => {
   const bodySchema = z.object({
-    userId: z.string().min(2),
+    userId: z.string().min(2).optional(),
     izeAmount: z.number().positive(),
     fiatCurrency: z.string().length(3).default('GBP'),
     payoutRequestId: z.string().min(4).max(140).optional(),
@@ -6084,6 +6418,7 @@ app.post('/wallet/1ze/burn', async (request, reply) => {
   });
 
   const payload = bodySchema.parse(request.body ?? {});
+  const actorUserId = resolveAuthenticatedUserId(request, payload.userId);
 
   if (!(await onezeTablesAvailable(db))) {
     reply.code(503);
@@ -6096,17 +6431,76 @@ app.post('/wallet/1ze/burn', async (request, reply) => {
   const client = await db.connect();
   try {
     await client.query('BEGIN');
-    await ensureUserExists(payload.userId);
+    await ensureUserExists(actorUserId);
+
+    if (config.nodeEnv === 'production' && !payload.payoutRequestId) {
+      throw createApiError(
+        'IZE_BURN_BACKING_REQUIRED',
+        'A requested/processing/paid payoutRequestId is required to redeem 1ze in production'
+      );
+    }
+
+    let payoutGatewayId: string | null = null;
+    let payoutStatus: PayoutRequestStatus | null = null;
+    let payoutAmountCurrency: string | null = null;
+    let payoutAmountGbp: number | null = null;
+    if (payload.payoutRequestId) {
+      const payout = await assertRedeemablePayoutRequest(client, {
+        payoutRequestId: payload.payoutRequestId,
+        userId: actorUserId,
+      });
+
+      payoutGatewayId = payout.gatewayId;
+      payoutStatus = payout.status;
+      payoutAmountCurrency = payout.amountCurrency.toUpperCase();
+      payoutAmountGbp = payout.amountGbp;
+    }
 
     const quote = await resolveGoldRate(client, payload.fiatCurrency, {
       forceRefresh: false,
     });
     const fiatAmount = Number((payload.izeAmount * quote.ratePerGram).toFixed(6));
 
+    if (payoutAmountCurrency && payoutAmountCurrency !== payload.fiatCurrency.toUpperCase()) {
+      throw createApiError(
+        'PAYOUT_REQUEST_CURRENCY_MISMATCH',
+        'Payout request currency does not match requested 1ze burn currency',
+        {
+          payoutRequestId: payload.payoutRequestId,
+          payoutAmountCurrency,
+          burnCurrency: payload.fiatCurrency.toUpperCase(),
+        }
+      );
+    }
+
+    if (payoutAmountGbp !== null) {
+      let redemptionAmountGbp = fiatAmount;
+      if (payload.fiatCurrency.toUpperCase() !== 'GBP') {
+        const gbpQuote = await resolveGoldRate(client, 'GBP', {
+          forceRefresh: false,
+        });
+        redemptionAmountGbp = Number((payload.izeAmount * gbpQuote.ratePerGram).toFixed(6));
+      }
+
+      const tolerance = Math.max(0.5, payoutAmountGbp * 0.03);
+      if (Math.abs(redemptionAmountGbp - payoutAmountGbp) > tolerance) {
+        throw createApiError(
+          'PAYOUT_REQUEST_AMOUNT_MISMATCH',
+          'Computed redemption value does not match payout request amount',
+          {
+            payoutRequestId: payload.payoutRequestId,
+            payoutAmountGbp,
+            redemptionAmountGbp,
+            tolerance,
+          }
+        );
+      }
+    }
+
     const operationId = createRuntimeId('ize_burn');
     await recordIzeBurn(client, {
       operationId,
-      userId: payload.userId,
+      userId: actorUserId,
       fiatAmount,
       fiatCurrency: payload.fiatCurrency.toUpperCase(),
       izeAmount: Number(payload.izeAmount.toFixed(6)),
@@ -6116,7 +6510,7 @@ app.post('/wallet/1ze/burn', async (request, reply) => {
     });
 
     const [walletBalanceIze, reserveSnapshot] = await Promise.all([
-      getLedgerAccountBalance(client, 'user', payload.userId, 'ize_wallet', 'IZE'),
+      getLedgerAccountBalance(client, 'user', actorUserId, 'ize_wallet', 'IZE'),
       getPlatformIzeReserveSnapshot(client),
     ]);
 
@@ -6127,12 +6521,16 @@ app.post('/wallet/1ze/burn', async (request, reply) => {
       operation: {
         id: operationId,
         type: 'burn',
-        userId: payload.userId,
+        userId: actorUserId,
         fiatAmount,
         fiatCurrency: payload.fiatCurrency.toUpperCase(),
         izeAmount: Number(payload.izeAmount.toFixed(6)),
         ratePerGram: quote.ratePerGram,
         rateSource: quote.source,
+        payoutGatewayId,
+        payoutStatus,
+        payoutAmountCurrency,
+        payoutAmountGbp,
       },
       balances: {
         userIze: walletBalanceIze,
@@ -6143,8 +6541,8 @@ app.post('/wallet/1ze/burn', async (request, reply) => {
   } catch (error) {
     await client.query('ROLLBACK');
     const apiError = getApiError(error);
-    if (apiError?.code === 'IZE_INSUFFICIENT_BALANCE') {
-      reply.code(409);
+    if (apiError) {
+      reply.code(statusCodeForApiError(apiError.code));
       return {
         ok: false,
         error: apiError.message,
@@ -6152,7 +6550,7 @@ app.post('/wallet/1ze/burn', async (request, reply) => {
       };
     }
 
-    request.log.error({ err: error, userId: payload.userId }, 'Failed to burn 1ze');
+    request.log.error({ err: error, userId: actorUserId }, 'Failed to burn 1ze');
     reply.code(500);
     return {
       ok: false,
@@ -7235,7 +7633,9 @@ app.post('/users/:userId/payout-requests', async (request, reply) => {
   const paramsSchema = z.object({ userId: z.string().min(2) });
   const bodySchema = z.object({
     payoutAccountId: z.coerce.number().int().positive(),
-    amountGbp: z.number().positive(),
+    amountGbp: z.number().positive().optional(),
+    amount: z.number().positive().optional(),
+    amountCurrency: z.string().length(3).default('GBP'),
     metadata: z.record(z.unknown()).optional(),
   });
 
@@ -7262,9 +7662,10 @@ app.post('/users/:userId/payout-requests', async (request, reply) => {
       user_id: string;
       gateway_id: string;
       status: 'pending' | 'active' | 'disabled';
+      currency: string;
     }>(
       `
-        SELECT id, user_id, gateway_id, status
+        SELECT id, user_id, gateway_id, status, currency
         FROM payout_accounts
         WHERE id = $1 AND user_id = $2
         LIMIT 1
@@ -7292,7 +7693,71 @@ app.post('/users/:userId/payout-requests', async (request, reply) => {
       };
     }
 
-    const amountGbp = roundTo(payload.amountGbp, 2);
+    const payoutCurrency = payload.amountCurrency.toUpperCase();
+    if (payoutAccountRow.currency.toUpperCase() !== payoutCurrency) {
+      await client.query('ROLLBACK');
+      reply.code(400);
+      return {
+        ok: false,
+        error: 'Payout request currency must match payout account currency',
+      };
+    }
+
+    const usingAmountGbp = payload.amountGbp !== undefined;
+    const usingAmount = payload.amount !== undefined;
+    if (usingAmountGbp === usingAmount) {
+      await client.query('ROLLBACK');
+      reply.code(400);
+      return {
+        ok: false,
+        error: 'Provide exactly one of amountGbp or amount for payout request',
+      };
+    }
+
+    const requestedAmount = roundTo((payload.amount ?? payload.amountGbp) as number, 6);
+    let amountGbp = 0;
+    let conversionFxRate: number | null = null;
+
+    if (payload.amountGbp !== undefined) {
+      amountGbp = roundTo(payload.amountGbp, 2);
+    } else if (payoutCurrency === 'GBP') {
+      amountGbp = roundTo(requestedAmount, 2);
+    } else {
+      if (!(await onezeTablesAvailable(client))) {
+        await client.query('ROLLBACK');
+        reply.code(503);
+        return {
+          ok: false,
+          error: 'Gold oracle tables are unavailable for payout currency conversion. Run migrations first.',
+        };
+      }
+
+      const [sourceRate, gbpRate] = await Promise.all([
+        resolveGoldRate(client, payoutCurrency, { forceRefresh: false }),
+        resolveGoldRate(client, 'GBP', { forceRefresh: false }),
+      ]);
+
+      const gbpPerUnit = gbpRate.ratePerGram / sourceRate.ratePerGram;
+      conversionFxRate = Number(gbpPerUnit.toFixed(8));
+      amountGbp = roundTo(requestedAmount * gbpPerUnit, 2);
+    }
+
+    if (!Number.isFinite(amountGbp) || amountGbp <= 0) {
+      await client.query('ROLLBACK');
+      reply.code(400);
+      return {
+        ok: false,
+        error: 'Unable to derive a valid GBP amount for payout request',
+      };
+    }
+
+    const payoutRequestMetadata = {
+      ...(payload.metadata ?? {}),
+      amountSource: payload.amountGbp !== undefined ? 'amount_gbp' : 'amount_currency',
+      requestedAmount,
+      requestedAmountCurrency: payoutCurrency,
+      conversionFxRate,
+    };
 
     let sellerPayableBalanceBefore = 0;
     if (await ledgerTablesAvailable(client)) {
@@ -7321,7 +7786,7 @@ app.post('/users/:userId/payout-requests', async (request, reply) => {
           status,
           metadata
         )
-        VALUES ($1, $2, $3, $4, 'GBP', 'requested', $5::jsonb)
+        VALUES ($1, $2, $3, $4, $5, 'requested', $6::jsonb)
         RETURNING
           id,
           user_id,
@@ -7335,7 +7800,14 @@ app.post('/users/:userId/payout-requests', async (request, reply) => {
           created_at,
           updated_at
       `,
-      [requestId, userId, payload.payoutAccountId, amountGbp, toJsonString(payload.metadata ?? {})]
+      [
+        requestId,
+        userId,
+        payload.payoutAccountId,
+        amountGbp,
+        payoutCurrency,
+        toJsonString(payoutRequestMetadata),
+      ]
     );
 
     if (await ledgerTablesAvailable(client)) {
@@ -7479,7 +7951,7 @@ app.post('/users/:userId/payout-requests/:requestId/status', async (request, rep
 
 app.post('/payments/intents', async (request, reply) => {
   const bodySchema = z.object({
-    userId: z.string().min(2),
+    userId: z.string().min(2).optional(),
     gatewayId: z.string().min(2).max(80).optional(),
     instrumentId: z.coerce.number().int().positive().optional(),
     orderId: z.string().min(4).max(64).optional(),
@@ -7494,6 +7966,7 @@ app.post('/payments/intents', async (request, reply) => {
   });
 
   const payload = bodySchema.parse(request.body);
+  const actorUserId = resolveAuthenticatedUserId(request, payload.userId);
 
   if (!(await paymentTablesAvailable(db))) {
     reply.code(503);
@@ -7545,9 +8018,10 @@ app.post('/payments/intents', async (request, reply) => {
           updated_at
         FROM payment_intents
         WHERE idempotency_key = $1
+          AND user_id = $2
         LIMIT 1
       `,
-      [payload.idempotencyKey]
+      [payload.idempotencyKey, actorUserId]
     );
 
     if (existing.rowCount) {
@@ -7562,7 +8036,7 @@ app.post('/payments/intents', async (request, reply) => {
   const client = await db.connect();
   try {
     await client.query('BEGIN');
-    await ensureUserExists(payload.userId);
+    await ensureUserExists(actorUserId);
 
     let channel: PaymentIntentChannel;
     let amountGbp: number;
@@ -7591,7 +8065,7 @@ app.post('/payments/intents', async (request, reply) => {
         };
       }
 
-      if (orderRow.buyer_id !== payload.userId) {
+      if (orderRow.buyer_id !== actorUserId) {
         await client.query('ROLLBACK');
         reply.code(400);
         return {
@@ -7633,7 +8107,7 @@ app.post('/payments/intents', async (request, reply) => {
         };
       }
 
-      if (syndicateOrderRow.user_id !== payload.userId) {
+      if (syndicateOrderRow.user_id !== actorUserId) {
         await client.query('ROLLBACK');
         reply.code(400);
         return {
@@ -7683,7 +8157,7 @@ app.post('/payments/intents', async (request, reply) => {
           WHERE id = $1 AND user_id = $2
           LIMIT 1
         `,
-        [payload.instrumentId, payload.userId]
+        [payload.instrumentId, actorUserId]
       );
 
       if (!instrument.rowCount) {
@@ -7707,7 +8181,7 @@ app.post('/payments/intents', async (request, reply) => {
       webhookUrl: payload.webhookUrl,
       metadata: {
         ...(payload.metadata ?? {}),
-        userId: payload.userId,
+        userId: actorUserId,
         orderId,
         syndicateOrderId,
       },
@@ -7759,7 +8233,7 @@ app.post('/payments/intents', async (request, reply) => {
       `,
       [
         intentId,
-        payload.userId,
+        actorUserId,
         gatewayId,
         channel,
         orderId,
@@ -7849,6 +8323,14 @@ app.get('/payments/intents/:intentId', async (request, reply) => {
     };
   }
 
+  if (!request.authUser || (request.authUser.role !== 'admin' && request.authUser.userId !== row.user_id)) {
+    reply.code(403);
+    return {
+      ok: false,
+      error: 'Forbidden: payment intent access denied',
+    };
+  }
+
   return {
     ok: true,
     intent: toPaymentIntentPayload(row),
@@ -7883,6 +8365,36 @@ app.post('/payments/intents/:intentId/confirm', async (request, reply) => {
   const client = await db.connect();
   try {
     await client.query('BEGIN');
+
+    const ownerCheck = await client.query<{ user_id: string }>(
+      `
+        SELECT user_id
+        FROM payment_intents
+        WHERE id = $1
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [intentId]
+    );
+
+    const ownerRow = ownerCheck.rows[0];
+    if (!ownerRow) {
+      await client.query('ROLLBACK');
+      reply.code(404);
+      return {
+        ok: false,
+        error: 'Payment intent not found',
+      };
+    }
+
+    if (!request.authUser || (request.authUser.role !== 'admin' && request.authUser.userId !== ownerRow.user_id)) {
+      await client.query('ROLLBACK');
+      reply.code(403);
+      return {
+        ok: false,
+        error: 'Forbidden: payment intent access denied',
+      };
+    }
 
     if (payload.simulateStatus === 'processing') {
       const transitioned = await transitionPaymentIntentStatus(client, {
@@ -8022,6 +8534,15 @@ app.post('/payments/intents/:intentId/refunds', async (request, reply) => {
       };
     }
 
+    if (!request.authUser || (request.authUser.role !== 'admin' && request.authUser.userId !== intent.user_id)) {
+      await client.query('ROLLBACK');
+      reply.code(403);
+      return {
+        ok: false,
+        error: 'Forbidden: payment intent access denied',
+      };
+    }
+
     if (intent.status !== 'succeeded') {
       await client.query('ROLLBACK');
       reply.code(409);
@@ -8111,6 +8632,28 @@ app.get('/payments/intents/:intentId/refunds', async (request, reply) => {
     return {
       ok: false,
       error: 'Payment settlement tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const intentOwner = await db.query<{ user_id: string }>(
+    'SELECT user_id FROM payment_intents WHERE id = $1 LIMIT 1',
+    [intentId]
+  );
+
+  const ownerRow = intentOwner.rows[0];
+  if (!ownerRow) {
+    reply.code(404);
+    return {
+      ok: false,
+      error: 'Payment intent not found',
+    };
+  }
+
+  if (!request.authUser || (request.authUser.role !== 'admin' && request.authUser.userId !== ownerRow.user_id)) {
+    reply.code(403);
+    return {
+      ok: false,
+      error: 'Forbidden: payment intent access denied',
     };
   }
 

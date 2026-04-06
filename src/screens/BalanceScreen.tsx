@@ -21,7 +21,13 @@ import { formatIzeAmount, toIze } from '../utils/currency';
 import { convertDisplayToGbpAmount } from '../utils/currencyAuthoringFlows';
 import { OnezeCoinIcon } from '../components/icons/OnezeCoinIcon';
 import { useStore } from '../store/useStore';
-import { mintIze } from '../services/walletApi';
+import { parseApiError } from '../lib/apiClient';
+import {
+  confirmPaymentIntent,
+  createPaymentIntent,
+  getIzeQuote,
+  mintIze,
+} from '../services/walletApi';
 
 type Props = StackScreenProps<RootStackParamList, 'Balance' | 'Wallet'>;
 type TxFilter = 'all' | 'sale' | 'purchase' | 'withdrawal';
@@ -36,6 +42,7 @@ const TINT_TEXT = IS_LIGHT ? '#2f251b' : '#e8dcc8';
 export default function BalanceScreen({ navigation }: Props) {
   const [activeTxFilter, setActiveTxFilter] = useState<TxFilter>('all');
   const [loadFiatInput, setLoadFiatInput] = useState('');
+  const [isLoadingIze, setIsLoadingIze] = useState(false);
   const [availableBalance, setAvailableBalance] = useState(120.5);
   const scrollRef = useRef<ScrollView>(null);
   const loadInputRef = useRef<TextInput>(null);
@@ -55,6 +62,7 @@ export default function BalanceScreen({ navigation }: Props) {
   const loadFeeIze = loadGrossIze * LOAD_IZE_FEE_RATE;
   const loadNetIze = Math.max(0, loadGrossIze - loadFeeIze);
   const loadFeeFiat = loadFiatValue * LOAD_IZE_FEE_RATE;
+  const canLoadIze = Number.isFinite(loadFiatValue) && loadFiatValue > 0 && !isLoadingIze;
 
   const transactions = [
     { id: '1', type: 'sale', amount: 45.0, title: 'Item sold: Y2K Hoodie', date: 'Today, 14:30', status: 'pending' },
@@ -75,38 +83,93 @@ export default function BalanceScreen({ navigation }: Props) {
   };
 
   const handleLoadIze = async () => {
-    if (!Number.isFinite(loadFiatValue) || loadFiatValue <= 0) {
+    if (!canLoadIze) {
       show('Enter a valid amount to convert into 1ze.', 'error');
       return;
     }
 
-    const loadAmountGbp = convertDisplayToGbpAmount(loadFiatValue, currencyCode, goldRates);
+    if (!currentUser?.id) {
+      show('Please sign in to load 1ze.', 'error');
+      navigation.navigate('AuthLanding');
+      return;
+    }
+
+    const loadAmountGbpRaw = convertDisplayToGbpAmount(loadFiatValue, currencyCode, goldRates);
+    const loadAmountGbp = Number(loadAmountGbpRaw.toFixed(2));
     if (!Number.isFinite(loadAmountGbp) || loadAmountGbp <= 0) {
       show('Unable to convert that amount right now.', 'error');
       return;
     }
 
     const netCreditGbp = Number((loadAmountGbp * (1 - LOAD_IZE_FEE_RATE)).toFixed(2));
-    const actingUserId = currentUser?.id ?? 'u1';
+    if (!Number.isFinite(netCreditGbp) || netCreditGbp <= 0) {
+      show('Enter a larger amount to cover conversion rules.', 'error');
+      return;
+    }
 
+    setIsLoadingIze(true);
     try {
-      await mintIze({
-        userId: actingUserId,
-        fiatAmount: netCreditGbp,
+      const quote = await getIzeQuote({
         fiatCurrency: 'GBP',
+        fiatAmount: netCreditGbp,
+      });
+
+      const intentResponse = await createPaymentIntent({
+        userId: currentUser.id,
+        channel: 'wallet_topup',
+        amountGbp: quote.quote.fiatAmount,
+        amountCurrency: 'GBP',
+        idempotencyKey: `wallet_topup_${currentUser.id}_${Date.now()}`,
         metadata: {
-          source: 'balance_screen_load',
+          source: 'balance_screen_topup_intent',
           displayCurrency: currencyCode,
           enteredDisplayAmount: loadFiatValue,
+          enteredGbpAmount: loadAmountGbp,
           uiFeeRate: LOAD_IZE_FEE_RATE,
         },
       });
 
-      setAvailableBalance((prev) => Number((prev + netCreditGbp).toFixed(2)));
+      let settledIntent = intentResponse.intent;
+      if (settledIntent.status !== 'succeeded') {
+        const confirmation = await confirmPaymentIntent(settledIntent.id, {
+          simulateStatus: 'succeeded',
+          payload: {
+            source: 'balance_screen_manual_confirm',
+          },
+        });
+
+        settledIntent = confirmation.intent;
+      }
+
+      if (settledIntent.status !== 'succeeded') {
+        throw new Error('Payment intent could not be settled. Please try again.');
+      }
+
+      const mintResult = await mintIze({
+        userId: currentUser.id,
+        fiatAmount: quote.quote.fiatAmount,
+        fiatCurrency: 'GBP',
+        paymentIntentId: settledIntent.id,
+        metadata: {
+          source: 'balance_screen_load',
+          displayCurrency: currencyCode,
+          enteredDisplayAmount: loadFiatValue,
+          enteredGbpAmount: loadAmountGbp,
+          uiFeeRate: LOAD_IZE_FEE_RATE,
+          paymentIntentId: settledIntent.id,
+        },
+      });
+
+      setAvailableBalance((prev) =>
+        Number((prev + Number(mintResult.operation.fiatAmount.toFixed(2))).toFixed(2))
+      );
       setLoadFiatInput('');
-      show(`Loaded ${formatIzeAmount(loadNetIze)} into your wallet.`, 'success');
-    } catch {
-      show('Unable to load 1ze right now. Please try again shortly.', 'error');
+      show(`Loaded ${formatIzeAmount(mintResult.operation.izeAmount)} into your wallet.`, 'success');
+    } catch (error) {
+      const parsed = parseApiError(error, 'Unable to load 1ze right now. Please try again shortly.');
+      show(parsed.message, 'error');
+    } finally {
+      setIsLoadingIze(false);
     }
   };
 
@@ -198,8 +261,13 @@ export default function BalanceScreen({ navigation }: Props) {
             <Text style={styles.loadSummaryTotalValue}>{formatIzeAmount(loadNetIze)} · {formatFromIze(loadNetIze, { displayMode: 'fiat' })}</Text>
           </View>
 
-          <AnimatedPressable style={styles.loadBtn} activeOpacity={0.9} onPress={handleLoadIze}>
-            <Text style={styles.loadBtnText}>Load 1ze</Text>
+          <AnimatedPressable
+            style={[styles.loadBtn, !canLoadIze && styles.loadBtnDisabled]}
+            activeOpacity={0.9}
+            onPress={handleLoadIze}
+            disabled={!canLoadIze}
+          >
+            <Text style={styles.loadBtnText}>{isLoadingIze ? 'Loading...' : 'Load 1ze'}</Text>
           </AnimatedPressable>
         </View>
 
@@ -357,6 +425,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 12,
   },
+  loadBtnDisabled: { opacity: 0.55 },
   loadBtnText: { color: Colors.textInverse, fontSize: 13, fontFamily: 'Inter_700Bold' },
 
   historyCard: { backgroundColor: Colors.card, borderRadius: 20, borderWidth: 1, borderColor: Colors.border, padding: 18, marginBottom: 22 },

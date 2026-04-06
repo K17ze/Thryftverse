@@ -125,7 +125,7 @@ export default function ManageListingScreen() {
         <AnimatedPressable 
           style={styles.actionBlock} 
           activeOpacity={0.8}
-          onPress={() => navigation.navigate('Sell')}
+          onPress={() => navigation.navigate('MainTabs', { screen: 'Sell' })}
         >
           <View style={styles.blockLeft}>
             <View style={[styles.iconBox, { backgroundColor: '#111' }]}>

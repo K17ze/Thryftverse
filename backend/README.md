@@ -52,6 +52,11 @@ $env:EXPO_PUBLIC_API_BASE_URL="http://192.168.1.10:4000"; npx expo start
 - `GET /health`
 - `GET /health/deep` (checks Postgres + optional read replica + Redis + key service + ML + S3 bucket connectivity)
 - `GET /metrics` (Prometheus metrics export)
+- `POST /auth/signup`
+- `POST /auth/login`
+- `POST /auth/refresh`
+- `GET /auth/me`
+- `POST /auth/logout`
 - `GET /listings`
 - `GET /search/listings?q=<query>`
 - `POST /listings`
@@ -69,6 +74,40 @@ $env:EXPO_PUBLIC_API_BASE_URL="http://192.168.1.10:4000"; npx expo start
 - `POST /wallets/:userId/snapshot` and `GET /wallets/:userId/snapshot`
 - `POST /security/keys/:keyName/rotate` (admin-maintenance route, optional bulk rewrap)
 - `POST /ops/auctions/sweep` (admin maintenance trigger for auction settlement job)
+
+Payments and treasury:
+
+- `GET /payments/gateways`
+- `GET /payments/platform/summary`
+- `POST /payments/intents`
+- `GET /payments/intents/:intentId`
+- `POST /payments/intents/:intentId/confirm`
+- `POST /payments/intents/:intentId/refunds`
+- `GET /payments/intents/:intentId/refunds`
+- `GET /payments/disputes`
+- `POST /webhooks/:provider`
+- `POST /payments/webhooks/mock` (admin-maintenance + `API_ENABLE_MOCK_WEBHOOKS`)
+- `POST /payouts/webhooks/mock` (admin-maintenance + `API_ENABLE_MOCK_WEBHOOKS`)
+
+Payout operations:
+
+- `GET /users/:userId/payout-accounts`
+- `POST /users/:userId/payout-accounts`
+- `GET /users/:userId/payout-requests`
+- `GET /users/:userId/payout-requests/:requestId`
+- `POST /users/:userId/payout-requests`
+- `POST /users/:userId/payout-requests/:requestId/status`
+
+1ze money layer:
+
+- `GET /oracle/gold/latest`
+- `POST /oracle/gold/override` (gold operator token required)
+- `GET /wallet/1ze/quote`
+- `GET /wallet/1ze/fx-quote`
+- `POST /wallet/1ze/mint`
+- `POST /wallet/1ze/burn`
+- `GET /wallet/1ze/:userId/position`
+- `POST /wallet/1ze/reconcile` (gold operator token required)
 
 Compliance and regulatory:
 
@@ -124,6 +163,15 @@ Market history pagination:
 - Cursor pagination uses `cursorTs` and `cursorId` together:
 	- Example next page: `GET /users/:userId/market-history?channel=all&limit=80&cursorTs=2026-04-03T01:11:00.000Z&cursorId=auction_bid_123`
 - Response includes `pageInfo.hasMore` and `pageInfo.nextCursor`.
+
+Money-layer request notes:
+
+- `POST /wallet/1ze/mint` accepts `fiatAmount` + `fiatCurrency` and optional `paymentIntentId`.
+- `POST /wallet/1ze/burn` accepts `izeAmount` + `fiatCurrency` and optional `payoutRequestId`.
+- In production, `paymentIntentId` is required for mint and `payoutRequestId` is required for burn.
+- `POST /users/:userId/payout-requests` accepts exactly one of:
+	- `amountGbp` (explicit internal settlement amount), or
+	- `amount` (in payout account currency; converted to GBP internally via XAU cross rates).
 
 From project root, run full local connectivity check:
 

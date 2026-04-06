@@ -78,10 +78,74 @@ async function main() {
   assert(Boolean(listingSeed1?.id), 'Missing listing to run smoke checks');
   assert(Boolean(listingSeed2?.id), 'Missing second listing to run smoke checks');
 
-  console.log('[check] Commerce lifecycle (address/payment/order/pay)');
-  const address = await requestJson(`${API_BASE}/users/u1/addresses`, {
+  console.log('[check] Auth signup for smoke actor');
+  const smokeSuffix = `${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+  const smokeAuth = await requestJson(`${API_BASE}/auth/signup`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      email: `docker_smoke_${smokeSuffix}@thryftverse.local`,
+      username: `smoke_${smokeSuffix}`,
+      password: 'SmokePass123!',
+    }),
+  });
+  assert(smokeAuth.ok === true, 'Smoke auth signup failed');
+  assert(typeof smokeAuth.accessToken === 'string' && smokeAuth.accessToken.length > 20, 'Missing smoke auth token');
+  assert(typeof smokeAuth.user?.id === 'string' && smokeAuth.user.id.length > 2, 'Missing smoke auth user id');
+
+  const smokeUserId = smokeAuth.user.id;
+  const authHeaders = {
+    authorization: `Bearer ${smokeAuth.accessToken}`,
+  };
+
+  const sellerAuth = await requestJson(`${API_BASE}/auth/signup`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      email: `docker_smoke_seller_${smokeSuffix}@thryftverse.local`,
+      username: `seller_${smokeSuffix}`,
+      password: 'SmokePass123!',
+    }),
+  });
+  assert(sellerAuth.ok === true, 'Seller smoke auth signup failed');
+  assert(typeof sellerAuth.accessToken === 'string' && sellerAuth.accessToken.length > 20, 'Missing seller auth token');
+  assert(typeof sellerAuth.user?.id === 'string' && sellerAuth.user.id.length > 2, 'Missing seller auth user id');
+
+  const sellerUserId = sellerAuth.user.id;
+  const sellerAuthHeaders = {
+    authorization: `Bearer ${sellerAuth.accessToken}`,
+  };
+
+  console.log('[check] Compliance unlock for buyer/seller trading');
+  for (const userId of [smokeUserId, sellerUserId]) {
+    const compliance = await requestJson(`${API_BASE}/compliance/kyc/webhook`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-security-admin-token': API_SECURITY_ADMIN_TOKEN,
+      },
+      body: JSON.stringify({
+        userId,
+        vendor: 'mock_kyc_vendor',
+        kycStatus: 'verified',
+        kycLevel: 'enhanced',
+        documentStatus: 'approved',
+        livenessStatus: 'passed',
+        sanctionsStatus: 'clear',
+        pepStatus: 'clear',
+        amlRiskTier: 'low',
+        tradingEnabled: true,
+      }),
+    });
+
+    assert(compliance.ok === true, `Compliance webhook failed for user ${userId}`);
+    assert(compliance.profile?.tradingEnabled === true, `Trading was not enabled for user ${userId}`);
+  }
+
+  console.log('[check] Commerce lifecycle (address/payment/order/pay)');
+  const address = await requestJson(`${API_BASE}/users/${encodeURIComponent(smokeUserId)}/addresses`, {
+    method: 'POST',
+    headers: { ...authHeaders, 'content-type': 'application/json' },
     body: JSON.stringify({
       name: 'Smoke Buyer',
       street: '1 Smoke Test Street',
@@ -93,9 +157,9 @@ async function main() {
   assert(address.ok === true, 'Address creation failed');
   assert(address.item?.id !== undefined && address.item?.id !== null, 'Address response missing id');
 
-  const paymentMethod = await requestJson(`${API_BASE}/users/u1/payment-methods`, {
+  const paymentMethod = await requestJson(`${API_BASE}/users/${encodeURIComponent(smokeUserId)}/payment-methods`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { ...authHeaders, 'content-type': 'application/json' },
     body: JSON.stringify({
       type: 'card',
       label: 'Smoke Visa',
@@ -112,10 +176,10 @@ async function main() {
   const smokeOrderId = createSmokeId('ord_smoke');
   const orderCreate = await requestJson(`${API_BASE}/orders`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { ...authHeaders, 'content-type': 'application/json' },
     body: JSON.stringify({
       orderId: smokeOrderId,
-      buyerId: 'u1',
+      buyerId: smokeUserId,
       listingId: listingSeed1.id,
       addressId: address.item.id,
       paymentMethodId: paymentMethod.item.id,
@@ -127,15 +191,20 @@ async function main() {
 
   const orderPay = await requestJson(`${API_BASE}/orders/${smokeOrderId}/pay`, {
     method: 'POST',
+    headers: authHeaders,
   });
   assert(orderPay.ok === true, 'Order payment failed');
   assert(orderPay.status === 'paid', 'Expected order status to be paid after payment');
 
-  const orderRead = await requestJson(`${API_BASE}/orders/${smokeOrderId}`);
+  const orderRead = await requestJson(`${API_BASE}/orders/${smokeOrderId}`, {
+    headers: authHeaders,
+  });
   assert(orderRead.ok === true, 'Order read failed');
   assert(orderRead.order?.status === 'paid', 'Paid order readback mismatch');
 
-  const buyerOrders = await requestJson(`${API_BASE}/users/u1/orders?role=buyer&limit=20`);
+  const buyerOrders = await requestJson(`${API_BASE}/users/${encodeURIComponent(smokeUserId)}/orders?role=buyer&limit=20`, {
+    headers: authHeaders,
+  });
   assert(Array.isArray(buyerOrders.items), 'Buyer orders endpoint did not return items array');
   assert(
     buyerOrders.items.some((item) => item.id === smokeOrderId),
@@ -146,14 +215,44 @@ async function main() {
   const now = Date.now();
   const smokeAuctionId = createSmokeId('a_smoke');
   const smokeAssetId = createSmokeId('s_smoke');
+  const smokeAuctionListingId = createSmokeId('l_smoke_auction');
+  const smokeSyndicateListingId = createSmokeId('l_smoke_syndicate');
+
+  const smokeAuctionListing = await requestJson(`${API_BASE}/listings`, {
+    method: 'POST',
+    headers: { ...sellerAuthHeaders, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      id: smokeAuctionListingId,
+      sellerId: sellerUserId,
+      title: 'Smoke Auction Listing',
+      description: 'Smoke listing used for docker market auction validation.',
+      priceGbp: 135,
+      imageUrl: 'https://picsum.photos/seed/docker-smoke-auction/800/1000',
+    }),
+  });
+  assert(smokeAuctionListing.ok === true, 'Smoke auction listing creation failed');
+
+  const smokeSyndicateListing = await requestJson(`${API_BASE}/listings`, {
+    method: 'POST',
+    headers: { ...sellerAuthHeaders, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      id: smokeSyndicateListingId,
+      sellerId: sellerUserId,
+      title: 'Smoke Syndicate Listing',
+      description: 'Smoke listing used for docker syndicate asset validation.',
+      priceGbp: 189,
+      imageUrl: 'https://picsum.photos/seed/docker-smoke-syndicate/800/1000',
+    }),
+  });
+  assert(smokeSyndicateListing.ok === true, 'Smoke syndicate listing creation failed');
 
   const auctionCreate = await requestJson(`${API_BASE}/auctions`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { ...sellerAuthHeaders, 'content-type': 'application/json' },
     body: JSON.stringify({
       id: smokeAuctionId,
-      listingId: listingSeed1.id,
-      sellerId: 'u2',
+      listingId: smokeAuctionListingId,
+      sellerId: sellerUserId,
       startsAt: new Date(now - 60_000).toISOString(),
       endsAt: new Date(now + 6 * 60 * 60 * 1000).toISOString(),
       startingBidGbp: 95,
@@ -164,9 +263,9 @@ async function main() {
 
   const bidOne = await requestJson(`${API_BASE}/auctions/${smokeAuctionId}/bids`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { ...authHeaders, 'content-type': 'application/json' },
     body: JSON.stringify({
-      bidderId: 'u1',
+      bidderId: smokeUserId,
       amountGbp: 100,
     }),
   });
@@ -174,29 +273,31 @@ async function main() {
 
   const bidTwo = await requestJson(`${API_BASE}/auctions/${smokeAuctionId}/bids`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { ...authHeaders, 'content-type': 'application/json' },
     body: JSON.stringify({
-      bidderId: 'u1',
+      bidderId: smokeUserId,
       amountGbp: 110,
     }),
   });
   assert(bidTwo.ok === true, 'Second auction bid failed');
 
-  const auctionBids = await requestJson(`${API_BASE}/auctions/${smokeAuctionId}/bids?limit=10`);
+  const auctionBids = await requestJson(`${API_BASE}/auctions/${smokeAuctionId}/bids?limit=10`, {
+    headers: authHeaders,
+  });
   assert(Array.isArray(auctionBids.items), 'Auction bids endpoint did not return items array');
   assert(
-    auctionBids.items.filter((item) => item.bidderId === 'u1').length >= 2,
-    'Expected at least two smoke bids for bidder u1'
+    auctionBids.items.filter((item) => item.bidderId === smokeUserId).length >= 2,
+    'Expected at least two smoke bids for smoke user'
   );
 
   const assetCreate = await requestJson(`${API_BASE}/syndicate/assets`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { ...sellerAuthHeaders, 'content-type': 'application/json' },
     body: JSON.stringify({
       id: smokeAssetId,
-      listingId: listingSeed2.id,
-      issuerId: 'u2',
-      totalUnits: 250,
+      listingId: smokeSyndicateListingId,
+      issuerId: sellerUserId,
+      totalUnits: 20,
       unitPriceGbp: 1.5,
       unitPriceStable: 1.9,
       settlementMode: 'HYBRID',
@@ -207,9 +308,9 @@ async function main() {
 
   const syndicateOrderOne = await requestJson(`${API_BASE}/syndicate/assets/${smokeAssetId}/orders`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { ...authHeaders, 'content-type': 'application/json' },
     body: JSON.stringify({
-      userId: 'u1',
+      userId: smokeUserId,
       side: 'buy',
       units: 8,
     }),
@@ -218,23 +319,27 @@ async function main() {
 
   const syndicateOrderTwo = await requestJson(`${API_BASE}/syndicate/assets/${smokeAssetId}/orders`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { ...authHeaders, 'content-type': 'application/json' },
     body: JSON.stringify({
-      userId: 'u1',
+      userId: smokeUserId,
       side: 'buy',
       units: 5,
     }),
   });
   assert(syndicateOrderTwo.ok === true, 'Second syndicate order failed');
 
-  const assetOrders = await requestJson(`${API_BASE}/syndicate/assets/${smokeAssetId}/orders?limit=10`);
+  const assetOrders = await requestJson(`${API_BASE}/syndicate/assets/${smokeAssetId}/orders?limit=10`, {
+    headers: authHeaders,
+  });
   assert(Array.isArray(assetOrders.items), 'Syndicate orders endpoint did not return items array');
   assert(
-    assetOrders.items.filter((item) => item.userId === 'u1').length >= 2,
-    'Expected at least two smoke syndicate orders for user u1'
+    assetOrders.items.filter((item) => item.userId === smokeUserId).length >= 2,
+    'Expected at least two smoke syndicate orders for smoke user'
   );
 
-  const marketHistoryPageOne = await requestJson(`${API_BASE}/users/u1/market-history?channel=all&limit=2`);
+  const marketHistoryPageOne = await requestJson(`${API_BASE}/users/${encodeURIComponent(smokeUserId)}/market-history?channel=all&limit=2`, {
+    headers: authHeaders,
+  });
   assert(Array.isArray(marketHistoryPageOne.items), 'Market-history page one missing items array');
   assert(marketHistoryPageOne.items.length === 2, 'Market-history page one limit was not respected');
   assert(marketHistoryPageOne.pageInfo?.hasMore === true, 'Expected market-history page one to indicate hasMore=true');
@@ -246,7 +351,10 @@ async function main() {
 
   const pageOneCursor = marketHistoryPageOne.pageInfo.nextCursor;
   const marketHistoryPageTwo = await requestJson(
-    `${API_BASE}/users/u1/market-history?channel=all&limit=2&cursorTs=${encodeURIComponent(pageOneCursor.cursorTs)}&cursorId=${encodeURIComponent(pageOneCursor.cursorId)}`
+    `${API_BASE}/users/${encodeURIComponent(smokeUserId)}/market-history?channel=all&limit=2&cursorTs=${encodeURIComponent(pageOneCursor.cursorTs)}&cursorId=${encodeURIComponent(pageOneCursor.cursorId)}`,
+    {
+      headers: authHeaders,
+    }
   );
   assert(Array.isArray(marketHistoryPageTwo.items), 'Market-history page two missing items array');
   assert(marketHistoryPageTwo.items.length >= 1, 'Expected market-history page two to include at least one item');
@@ -267,14 +375,18 @@ async function main() {
     'Market-history did not include smoke syndicate entries'
   );
 
-  const auctionHistory = await requestJson(`${API_BASE}/users/u1/market-history?channel=auction&limit=10`);
+  const auctionHistory = await requestJson(`${API_BASE}/users/${encodeURIComponent(smokeUserId)}/market-history?channel=auction&limit=10`, {
+    headers: authHeaders,
+  });
   assert(Array.isArray(auctionHistory.items), 'Auction-only market-history missing items array');
   assert(
     auctionHistory.items.every((item) => item.channel === 'auction'),
     'Auction-only market-history contained non-auction entries'
   );
 
-  const syndicateHistory = await requestJson(`${API_BASE}/users/u1/market-history?channel=syndicate&limit=10`);
+  const syndicateHistory = await requestJson(`${API_BASE}/users/${encodeURIComponent(smokeUserId)}/market-history?channel=syndicate&limit=10`, {
+    headers: authHeaders,
+  });
   assert(Array.isArray(syndicateHistory.items), 'Syndicate-only market-history missing items array');
   assert(
     syndicateHistory.items.every((item) => item.channel === 'syndicate'),
@@ -284,9 +396,9 @@ async function main() {
   console.log('[check] Secure profile encrypt/decrypt roundtrip');
   const profileUpsert = await requestJson(`${API_BASE}/secure-profiles`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { ...authHeaders, 'content-type': 'application/json' },
     body: JSON.stringify({
-      userId: 'u1',
+      userId: smokeUserId,
       fullName: 'Encrypted User',
       email: 'encrypted.user@example.com',
       phone: '+44000000001',
@@ -296,24 +408,29 @@ async function main() {
   });
   assert(profileUpsert.ok === true, 'Secure profile upsert failed');
 
-  const profileRead = await requestJson(`${API_BASE}/secure-profiles/u1`);
+  const profileRead = await requestJson(`${API_BASE}/secure-profiles/${encodeURIComponent(smokeUserId)}`, {
+    headers: authHeaders,
+  });
   assert(profileRead.ok === true, 'Secure profile read failed');
   assert(profileRead.profile.email === 'encrypted.user@example.com', 'Secure profile decrypt mismatch');
 
   console.log('[check] Secure message encrypt/decrypt roundtrip');
+  const smokeConversationId = `conv_smoke_${smokeUserId}_u2`;
   const msgCreate = await requestJson(`${API_BASE}/secure-messages`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { ...authHeaders, 'content-type': 'application/json' },
     body: JSON.stringify({
-      conversationId: 'conv_smoke_u1_u2',
-      senderId: 'u1',
+      conversationId: smokeConversationId,
+      senderId: smokeUserId,
       recipientId: 'u2',
       message: 'hello from encrypted smoke check',
     }),
   });
   assert(msgCreate.ok === true, 'Secure message creation failed');
 
-  const msgRead = await requestJson(`${API_BASE}/secure-messages/conv_smoke_u1_u2?limit=5`);
+  const msgRead = await requestJson(`${API_BASE}/secure-messages/${encodeURIComponent(smokeConversationId)}?limit=5`, {
+    headers: authHeaders,
+  });
   assert(msgRead.ok === true, 'Secure message read failed');
   assert(
     msgRead.items.some((item) => item.message === 'hello from encrypted smoke check'),
@@ -321,9 +438,9 @@ async function main() {
   );
 
   console.log('[check] Wallet snapshot encrypt/decrypt roundtrip');
-  const walletUpsert = await requestJson(`${API_BASE}/wallets/u1/snapshot`, {
+  const walletUpsert = await requestJson(`${API_BASE}/wallets/${encodeURIComponent(smokeUserId)}/snapshot`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { ...authHeaders, 'content-type': 'application/json' },
     body: JSON.stringify({
       balanceGbp: 2450.5,
       availableGbp: 2200.0,
@@ -333,7 +450,9 @@ async function main() {
   });
   assert(walletUpsert.ok === true, 'Wallet snapshot upsert failed');
 
-  const walletRead = await requestJson(`${API_BASE}/wallets/u1/snapshot`);
+  const walletRead = await requestJson(`${API_BASE}/wallets/${encodeURIComponent(smokeUserId)}/snapshot`, {
+    headers: authHeaders,
+  });
   assert(walletRead.ok === true, 'Wallet snapshot read failed');
   assert(walletRead.snapshot.balanceGbp === 2450.5, 'Wallet snapshot decrypt mismatch');
 
@@ -353,8 +472,12 @@ async function main() {
   assert(Number.isInteger(rotate.keyVersion) && rotate.keyVersion > 0, 'Invalid rotated key version');
 
   console.log('[check] Recommendations roundtrip + Redis cache');
-  const rec1 = await requestJson(`${API_BASE}/recommendations/u1`);
-  const rec2 = await requestJson(`${API_BASE}/recommendations/u1`);
+  const rec1 = await requestJson(`${API_BASE}/recommendations/${encodeURIComponent(smokeUserId)}`, {
+    headers: authHeaders,
+  });
+  const rec2 = await requestJson(`${API_BASE}/recommendations/${encodeURIComponent(smokeUserId)}`, {
+    headers: authHeaders,
+  });
   assert(Array.isArray(rec1.items), 'Recommendations response missing items array');
   assert(Array.isArray(rec2.items), 'Recommendations cache response missing items array');
   assert(rec2.source === 'cache' || rec1.source === 'cache', 'Expected at least one cached recommendation response');
@@ -362,7 +485,7 @@ async function main() {
   console.log('[check] MinIO presign + upload + public fetch');
   const presign = await requestJson(`${API_BASE}/uploads/presign`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { ...authHeaders, 'content-type': 'application/json' },
     body: JSON.stringify({
       fileName: 'smoke.txt',
       contentType: 'text/plain',
