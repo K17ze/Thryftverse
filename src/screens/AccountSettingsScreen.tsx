@@ -8,7 +8,9 @@ import { View,
   StatusBar,
   ScrollView,
   Switch,
-  Alert
+  Alert,
+  ActivityIndicator,
+  Modal
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ActiveTheme, Colors } from '../constants/colors';
@@ -18,9 +20,14 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
 import { useStore } from '../store/useStore';
 import { useToast } from '../context/ToastContext';
+import { parseApiError } from '../lib/apiClient';
+import { requestMyDataExport, deleteMyAccount } from '../services/accountApi';
+import { disableTwoFactor, logoutFromSession } from '../services/authApi';
 
 export default function AccountSettingsScreen() {
   const navigation = useNavigation<StackNavigationProp<RootStackParamList>>();
+  const currentUser = useStore((state) => state.currentUser);
+  const logout = useStore((state) => state.logout);
   const twoFactorEnabled = useStore((state) => state.twoFactorEnabled);
   const setTwoFactorEnabled = useStore((state) => state.setTwoFactorEnabled);
   const { show } = useToast();
@@ -32,33 +39,89 @@ export default function AccountSettingsScreen() {
   const [birthday, setBirthday] = useState('14/05/1996');
   const [holidayMode, setHolidayMode] = useState(false);
   const [privateProfile, setPrivateProfile] = useState(false);
-  const [facebookLinked, setFacebookLinked] = useState(true);
-  const [googleLinked, setGoogleLinked] = useState(false);
+  const facebookLinked = false;
+  const googleLinked = false;
+  const [isExporting, setIsExporting] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isTogglingTwoFactor, setIsTogglingTwoFactor] = useState(false);
+  const [disableTwoFactorModalVisible, setDisableTwoFactorModalVisible] = useState(false);
+  const [disableTwoFactorCode, setDisableTwoFactorCode] = useState('');
+  const [disableTwoFactorRecoveryCode, setDisableTwoFactorRecoveryCode] = useState('');
 
-  const handleToggleTwoFactor = (enabled: boolean) => {
+  const handleToggleTwoFactor = async (enabled: boolean) => {
+    if (isTogglingTwoFactor) {
+      return;
+    }
+
     if (enabled) {
       navigation.navigate('TwoFactorSetup');
       return;
     }
 
-    setTwoFactorEnabled(false);
-    show('Two-factor authentication disabled', 'info');
+    setDisableTwoFactorCode('');
+    setDisableTwoFactorRecoveryCode('');
+    setDisableTwoFactorModalVisible(true);
+  };
+
+  const closeDisableTwoFactorModal = () => {
+    if (isTogglingTwoFactor) {
+      return;
+    }
+
+    setDisableTwoFactorModalVisible(false);
+  };
+
+  const confirmDisableTwoFactor = async () => {
+    const normalizedCode = disableTwoFactorCode.replace(/\s+/g, '').trim();
+    const normalizedRecoveryCode = disableTwoFactorRecoveryCode.trim().toUpperCase();
+
+    if (!normalizedCode && !normalizedRecoveryCode) {
+      show('Enter your authenticator code or a recovery code to disable 2FA.', 'error');
+      return;
+    }
+
+    setIsTogglingTwoFactor(true);
+    try {
+      await disableTwoFactor({
+        code: normalizedCode || undefined,
+        recoveryCode: normalizedRecoveryCode || undefined,
+      });
+      setTwoFactorEnabled(false);
+      setDisableTwoFactorModalVisible(false);
+      show('Two-factor authentication disabled', 'info');
+    } catch (error) {
+      const parsed = parseApiError(error, 'Unable to disable two-factor authentication right now.');
+      show(parsed.message, 'error');
+    } finally {
+      setIsTogglingTwoFactor(false);
+    }
   };
 
   const handleFacebookLink = () => {
-    const next = !facebookLinked;
-    setFacebookLinked(next);
-    show(next ? 'Facebook linked' : 'Facebook unlinked', next ? 'success' : 'info');
+    show('Facebook account linking is not available yet. Use Help Centre for support.', 'info');
   };
 
   const handleGoogleLink = () => {
-    const next = !googleLinked;
-    setGoogleLinked(next);
-    show(next ? 'Google linked' : 'Google unlinked', next ? 'success' : 'info');
+    show('Google sign-in is available from the auth landing screen.', 'info');
   };
 
-  const handleDownloadData = () => {
-    show('Data export requested. Check your email within 24 hours.', 'success');
+  const handleDownloadData = async () => {
+    if (!currentUser?.id) {
+      show('Please sign in before requesting a data export.', 'error');
+      return;
+    }
+
+    setIsExporting(true);
+    try {
+      const result = await requestMyDataExport();
+      const recordText = result.estimatedRecords > 0 ? ` (${result.estimatedRecords} records)` : '';
+      show(`Data export generated${recordText}. Request ID: ${result.requestId}`, 'success');
+    } catch (error) {
+      const parsed = parseApiError(error, 'Unable to export account data right now.');
+      show(parsed.message, 'error');
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const handleDeleteAccountSupport = () => {
@@ -66,10 +129,35 @@ export default function AccountSettingsScreen() {
     show('Contact support to complete your account deletion request.', 'info');
   };
 
+  const confirmDeleteAccount = async () => {
+    if (!currentUser?.id) {
+      show('Please sign in before deleting your account.', 'error');
+      return;
+    }
+
+    setIsDeleting(true);
+    try {
+      const result = await deleteMyAccount('User initiated account deletion from mobile settings');
+      await logoutFromSession();
+      logout();
+      show(`Account deleted. Request ID: ${result.requestId}`, 'success');
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'AuthLanding' }],
+      });
+    } catch (error) {
+      const parsed = parseApiError(error, 'Unable to delete account right now.');
+      show(parsed.message, 'error');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const handleDeleteAccount = () => {
-    Alert.alert('Delete account', 'This action cannot be undone. Contact support to complete account deletion.', [
+    Alert.alert('Delete account', 'This action cannot be undone. Do you want to delete this account now?', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Contact support', style: 'destructive', onPress: handleDeleteAccountSupport },
+      { text: 'Contact support', style: 'default', onPress: handleDeleteAccountSupport },
+      { text: 'Delete now', style: 'destructive', onPress: () => void confirmDeleteAccount() },
     ]);
   };
 
@@ -168,9 +256,10 @@ export default function AccountSettingsScreen() {
             </View>
             <Switch 
               value={twoFactorEnabled} 
-              onValueChange={handleToggleTwoFactor}
+              onValueChange={(value) => void handleToggleTwoFactor(value)}
               trackColor={{ false: Colors.border, true: Colors.success }}
               thumbColor="#fff"
+              disabled={isTogglingTwoFactor}
             />
           </View>
         </View>
@@ -215,15 +304,105 @@ export default function AccountSettingsScreen() {
         </AnimatedPressable>
 
         {/* Footer Actions */}
-        <AnimatedPressable style={styles.supportRow} onPress={handleDownloadData} activeOpacity={0.8}>
+        <AnimatedPressable
+          style={[styles.supportRow, (isExporting || isDeleting) && styles.actionDisabled]}
+          onPress={() => void handleDownloadData()}
+          activeOpacity={0.8}
+          disabled={isExporting || isDeleting}
+        >
           <Ionicons name="download-outline" size={20} color={Colors.textPrimary} style={{ marginRight: 12 }} />
-          <Text style={styles.rowTitle}>Download my data</Text>
+          {isExporting ? (
+            <View style={styles.inlineLoadingRow}>
+              <ActivityIndicator color={Colors.textPrimary} size="small" style={{ marginRight: 8 }} />
+              <Text style={styles.rowTitle}>Preparing export...</Text>
+            </View>
+          ) : (
+            <Text style={styles.rowTitle}>Download my data</Text>
+          )}
         </AnimatedPressable>
 
-        <AnimatedPressable style={styles.dangerBtn} onPress={handleDeleteAccount} activeOpacity={0.9}>
-          <Text style={styles.dangerText}>Delete Account</Text>
+        <AnimatedPressable
+          style={[styles.dangerBtn, (isDeleting || isExporting) && styles.actionDisabled]}
+          onPress={handleDeleteAccount}
+          activeOpacity={0.9}
+          disabled={isDeleting || isExporting}
+        >
+          {isDeleting ? (
+            <View style={styles.inlineLoadingRow}>
+              <ActivityIndicator color={Colors.danger} size="small" style={{ marginRight: 8 }} />
+              <Text style={styles.dangerText}>Deleting account...</Text>
+            </View>
+          ) : (
+            <Text style={styles.dangerText}>Delete Account</Text>
+          )}
         </AnimatedPressable>
       </ScrollView>
+
+      <Modal
+        visible={disableTwoFactorModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={closeDisableTwoFactorModal}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Disable 2FA</Text>
+            <Text style={styles.modalCopy}>
+              Confirm with your authenticator code or a recovery code.
+            </Text>
+
+            <View style={styles.modalInputWrap}>
+              <Text style={styles.modalLabel}>Authenticator code</Text>
+              <TextInput
+                style={styles.modalInput}
+                value={disableTwoFactorCode}
+                onChangeText={setDisableTwoFactorCode}
+                keyboardType="number-pad"
+                placeholder="123456"
+                placeholderTextColor={Colors.textMuted}
+                editable={!isTogglingTwoFactor}
+                maxLength={12}
+              />
+            </View>
+
+            <View style={styles.modalInputWrap}>
+              <Text style={styles.modalLabel}>Recovery code</Text>
+              <TextInput
+                style={styles.modalInput}
+                value={disableTwoFactorRecoveryCode}
+                onChangeText={setDisableTwoFactorRecoveryCode}
+                autoCapitalize="characters"
+                placeholder="ABCD-EFGH"
+                placeholderTextColor={Colors.textMuted}
+                editable={!isTogglingTwoFactor}
+                maxLength={32}
+              />
+            </View>
+
+            <View style={styles.modalActionRow}>
+              <AnimatedPressable
+                style={[styles.modalBtn, styles.modalBtnMuted]}
+                onPress={closeDisableTwoFactorModal}
+                disabled={isTogglingTwoFactor}
+              >
+                <Text style={styles.modalBtnMutedText}>Cancel</Text>
+              </AnimatedPressable>
+
+              <AnimatedPressable
+                style={[styles.modalBtn, styles.modalBtnDanger, isTogglingTwoFactor && styles.actionDisabled]}
+                onPress={() => void confirmDisableTwoFactor()}
+                disabled={isTogglingTwoFactor}
+              >
+                {isTogglingTwoFactor ? (
+                  <ActivityIndicator color={Colors.background} size="small" />
+                ) : (
+                  <Text style={styles.modalBtnDangerText}>Disable</Text>
+                )}
+              </AnimatedPressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
     </SafeAreaView>
   );
@@ -257,6 +436,82 @@ const styles = StyleSheet.create({
   saveBtnText: { color: Colors.textInverse, fontSize: 16, fontFamily: 'Inter_700Bold' },
 
   supportRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 24, marginTop: 16 },
+  inlineLoadingRow: { flexDirection: 'row', alignItems: 'center' },
+  actionDisabled: { opacity: 0.55 },
+
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  modalCard: {
+    backgroundColor: Colors.card,
+    borderRadius: 20,
+    padding: 18,
+    gap: 10,
+  },
+  modalTitle: {
+    color: Colors.textPrimary,
+    fontFamily: 'Inter_700Bold',
+    fontSize: 20,
+  },
+  modalCopy: {
+    color: Colors.textSecondary,
+    fontFamily: 'Inter_400Regular',
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  modalInputWrap: {
+    marginTop: 4,
+  },
+  modalLabel: {
+    color: Colors.textSecondary,
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 12,
+    marginBottom: 6,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  modalInput: {
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: Colors.background,
+    color: Colors.textPrimary,
+    paddingHorizontal: 14,
+    fontFamily: 'Inter_500Medium',
+    fontSize: 16,
+  },
+  modalActionRow: {
+    marginTop: 6,
+    flexDirection: 'row',
+    gap: 10,
+  },
+  modalBtn: {
+    flex: 1,
+    height: 46,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalBtnMuted: {
+    backgroundColor: Colors.background,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  modalBtnMutedText: {
+    color: Colors.textPrimary,
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 14,
+  },
+  modalBtnDanger: {
+    backgroundColor: Colors.danger,
+  },
+  modalBtnDangerText: {
+    color: Colors.background,
+    fontFamily: 'Inter_700Bold',
+    fontSize: 14,
+  },
 
   dangerBtn: { borderWidth: 1, borderColor: 'rgba(255, 60, 60, 0.2)', backgroundColor: 'rgba(255, 60, 60, 0.08)', borderRadius: 30, height: 56, alignItems: 'center', justifyContent: 'center', marginTop: 16 },
   dangerText: { color: Colors.danger, fontSize: 16, fontFamily: 'Inter_700Bold' },

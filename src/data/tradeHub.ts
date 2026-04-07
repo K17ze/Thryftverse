@@ -1,4 +1,5 @@
 import { MOCK_LISTINGS, MOCK_USERS } from './mockData';
+import { ENABLE_RUNTIME_MOCKS } from '../constants/runtimeFlags';
 
 export type AuctionLifecycle = 'upcoming' | 'live' | 'ended';
 
@@ -121,16 +122,16 @@ export const MOCK_SYNDICATE_ASSETS: SyndicateAsset[] = [
     issuerId: 'u2',
     title: 'AMI Shirt Fraction Pool',
     image: MOCK_LISTINGS[1]?.images[0] ?? 'https://picsum.photos/seed/synd1/500/700',
-    totalUnits: 1200,
-    availableUnits: 485,
+    totalUnits: 20,
+    availableUnits: 8,
     unitPriceGBP: 1.52,
     unitPriceStable: 1.95,
     settlementMode: 'HYBRID',
     issuerJurisdiction: 'GB',
     marketMovePct24h: 6.4,
-    holders: 93,
+    holders: 9,
     volume24hGBP: 2140,
-    yourUnits: 32,
+    yourUnits: 2,
     isOpen: true,
   },
   {
@@ -139,14 +140,14 @@ export const MOCK_SYNDICATE_ASSETS: SyndicateAsset[] = [
     issuerId: 'u1',
     title: 'Stussy Tee Syndicate',
     image: MOCK_LISTINGS[3]?.images[0] ?? 'https://picsum.photos/seed/synd2/500/700',
-    totalUnits: 850,
-    availableUnits: 130,
+    totalUnits: 20,
+    availableUnits: 3,
     unitPriceGBP: 2.08,
     unitPriceStable: 2.66,
     settlementMode: 'TVUSD',
     issuerJurisdiction: 'EU',
     marketMovePct24h: -2.1,
-    holders: 121,
+    holders: 12,
     volume24hGBP: 3180,
     yourUnits: 0,
     isOpen: true,
@@ -157,16 +158,16 @@ export const MOCK_SYNDICATE_ASSETS: SyndicateAsset[] = [
     issuerId: 'u3',
     title: 'Air Max 90 Split',
     image: MOCK_LISTINGS[5]?.images[0] ?? 'https://picsum.photos/seed/synd3/500/700',
-    totalUnits: 1500,
-    availableUnits: 932,
+    totalUnits: 20,
+    availableUnits: 11,
     unitPriceGBP: 0.96,
     unitPriceStable: 1.23,
     settlementMode: 'GBP',
     issuerJurisdiction: 'GB',
     marketMovePct24h: 4.2,
-    holders: 56,
+    holders: 6,
     volume24hGBP: 1088,
-    yourUnits: 120,
+    yourUnits: 4,
     isOpen: true,
   },
   {
@@ -175,16 +176,16 @@ export const MOCK_SYNDICATE_ASSETS: SyndicateAsset[] = [
     issuerId: 'u3',
     title: 'Represent Hoodie Block',
     image: MOCK_LISTINGS[8]?.images[0] ?? 'https://picsum.photos/seed/synd4/500/700',
-    totalUnits: 920,
+    totalUnits: 20,
     availableUnits: 0,
     unitPriceGBP: 2.74,
     unitPriceStable: 3.50,
     settlementMode: 'HYBRID',
     issuerJurisdiction: 'SG',
     marketMovePct24h: 11.8,
-    holders: 149,
+    holders: 13,
     volume24hGBP: 6220,
-    yourUnits: 20,
+    yourUnits: 5,
     isOpen: false,
   },
 ];
@@ -193,7 +194,9 @@ export function getAuctionMarket(
   now = Date.now(),
   runtimeAuctions: AuctionMarketItem[] = []
 ): AuctionViewModel[] {
-  return [...runtimeAuctions, ...MOCK_AUCTIONS]
+  const seedAuctions = ENABLE_RUNTIME_MOCKS ? MOCK_AUCTIONS : [];
+
+  return [...runtimeAuctions, ...seedAuctions]
     .map((auction) => {
       const startsAtMs = new Date(auction.startsAt).getTime();
       const endsAtMs = new Date(auction.endsAt).getTime();
@@ -242,7 +245,9 @@ export function getAuctionMarket(
 }
 
 export function getSyndicateMarket(runtimeAssets: SyndicateAsset[] = []) {
-  return [...runtimeAssets, ...MOCK_SYNDICATE_ASSETS].sort(
+  const seedAssets = ENABLE_RUNTIME_MOCKS ? MOCK_SYNDICATE_ASSETS : [];
+
+  return [...runtimeAssets, ...seedAssets].sort(
     (a, b) => b.totalUnits * b.unitPriceGBP - a.totalUnits * a.unitPriceGBP
   );
 }

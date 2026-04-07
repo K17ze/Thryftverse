@@ -28,6 +28,7 @@ import {
   isTradeSubmitEnabled,
   sanitizeTradePriceInput,
   sanitizeTradeQuantityInput,
+  SYNDICATE_FEE_RATE,
   TradeSide,
 } from '../utils/tradeFlow';
 import { parseApiError } from '../lib/apiClient';
@@ -46,6 +47,7 @@ const ALERT_BG = IS_LIGHT ? '#f4e0e0' : '#221515';
 const ALERT_BORDER = IS_LIGHT ? '#d9b5b5' : '#4a2d2d';
 
 const COMPLIANCE_BLOCK_CODES = new Set([
+  'RISK_DISCLOSURE_REQUIRED',
   'KYC_REQUIRED',
   'KYC_LEVEL_INSUFFICIENT',
   'JURISDICTION_BLOCKED',
@@ -71,8 +73,6 @@ export default function TradeScreen() {
   const customSyndicates = useStore((state) => state.customSyndicates);
   const syndicateRuntime = useStore((state) => state.syndicateRuntime);
   const currentUser = useStore((state) => state.currentUser);
-  const buySyndicateUnits = useStore((state) => state.buySyndicateUnits);
-  const sellSyndicateUnits = useStore((state) => state.sellSyndicateUnits);
   const checkSyndicateEligibility = useStore((state) => state.checkSyndicateEligibility);
   const { goldRates } = useCurrencyContext();
 
@@ -145,7 +145,6 @@ export default function TradeScreen() {
     try {
       const actingUserId = currentUser?.id ?? 'u1';
       let remoteOrder: Awaited<ReturnType<typeof placeSyndicateOrder>> | null = null;
-      let canFallbackLocal = false;
 
       try {
         remoteOrder = await placeSyndicateOrder(asset.id, {
@@ -167,7 +166,8 @@ export default function TradeScreen() {
           return;
         }
 
-        canFallbackLocal = true;
+        show('Trading engine unavailable. Please retry once connection is restored.', 'error');
+        return;
       }
 
       if (remoteOrder) {
@@ -190,34 +190,7 @@ export default function TradeScreen() {
         return;
       }
 
-      if (!canFallbackLocal) {
-        show('Unable to submit order', 'error');
-        return;
-      }
-
-      if (expectedQueue) {
-        show(decision.message, 'info');
-        navigation.goBack();
-        return;
-      }
-
-      const result = side === 'buy'
-        ? buySyndicateUnits(asset, actingUserId, quote.quantity)
-        : sellSyndicateUnits(asset, actingUserId, quote.quantity);
-
-      if (!result.ok) {
-        show(result.message ?? 'Order failed', 'error');
-        return;
-      }
-
-      show(`${result.message ?? 'Order filled'}. Backend sync unavailable.`, 'info');
-
-      if (result.deliveryTriggered && result.deliveryListingId) {
-        navigation.navigate('Checkout', { itemId: result.deliveryListingId });
-        return;
-      }
-
-      navigation.goBack();
+      show(expectedQueue ? decision.message : 'Unable to submit order', 'error');
     } finally {
       setIsSubmittingOrder(false);
     }
@@ -321,7 +294,7 @@ export default function TradeScreen() {
             <Text style={styles.summaryValue}>{formatIzeAmount(quote.grossValue)} · {formatFromIze(quote.grossValue, { displayMode: 'fiat' })}</Text>
           </View>
           <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Fee (0.5%)</Text>
+            <Text style={styles.summaryLabel}>Fee ({(SYNDICATE_FEE_RATE * 100).toFixed(0)}%)</Text>
             <Text style={styles.summaryValue}>{formatIzeAmount(quote.fee)} · {formatFromIze(quote.fee, { displayMode: 'fiat' })}</Text>
           </View>
           <View style={[styles.summaryRow, styles.summaryRowTotal]}>

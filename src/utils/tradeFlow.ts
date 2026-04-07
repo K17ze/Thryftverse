@@ -1,5 +1,8 @@
 import { sanitizeDecimalInput, sanitizeIntegerInput } from './currencyAuthoringFlows';
 
+export const SYNDICATE_FEE_RATE = 0.01;
+export const SYNDICATE_MAX_UNITS = 20;
+
 export type TradeOrderMode = 'market' | 'limit';
 export type TradeSide = 'buy' | 'sell';
 
@@ -41,7 +44,17 @@ export interface TradeSubmitDecision {
 }
 
 export function sanitizeTradeQuantityInput(rawValue: string) {
-  return sanitizeIntegerInput(rawValue);
+  const sanitized = sanitizeIntegerInput(rawValue);
+  if (!sanitized) {
+    return '';
+  }
+
+  const parsed = Math.floor(Number(sanitized));
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return '1';
+  }
+
+  return String(Math.min(SYNDICATE_MAX_UNITS, parsed));
 }
 
 export function sanitizeTradePriceInput(rawValue: string) {
@@ -61,7 +74,7 @@ export function buildTradeQuote(input: TradeQuoteInput): TradeQuote {
       : input.marketPrice * (input.side === 'buy' ? 1.003 : 0.997);
 
   const grossValue = isValidQty ? quantity * executionPrice : 0;
-  const fee = grossValue * 0.005;
+  const fee = grossValue * SYNDICATE_FEE_RATE;
   const netValue = input.side === 'buy' ? grossValue + fee : grossValue - fee;
 
   return {
@@ -86,6 +99,7 @@ export function isTradeSubmitEnabled(input: {
     input.assetFound
     && input.eligibility.ok
     && input.quote.isValidQty
+    && input.quote.quantity <= SYNDICATE_MAX_UNITS
     && (input.quote.orderMode === 'market' || input.quote.hasLimitPrice)
   );
 }
@@ -114,6 +128,14 @@ export function evaluateTradeSubmit(input: TradeSubmitInput): TradeSubmitDecisio
       ok: false,
       kind: 'error',
       message: 'Enter a valid quantity',
+    };
+  }
+
+  if (quote.quantity > SYNDICATE_MAX_UNITS) {
+    return {
+      ok: false,
+      kind: 'error',
+      message: `Quantity must be between 1 and ${SYNDICATE_MAX_UNITS}`,
     };
   }
 

@@ -1,5 +1,6 @@
 import { MOCK_USERS } from '../data/mockData';
 import { fetchJson } from '../lib/apiClient';
+import { ENABLE_RUNTIME_MOCKS } from '../constants/runtimeFlags';
 
 export interface FeedLook {
   id: string;
@@ -100,6 +101,14 @@ export async function fetchFeedLooksWithFallback(): Promise<{
     const rows = Array.isArray(payload.items) ? payload.items : [];
 
     if (rows.length === 0) {
+      if (!ENABLE_RUNTIME_MOCKS) {
+        return {
+          looks: [],
+          source: 'api',
+          error: 'API returned zero feed looks.',
+        };
+      }
+
       return {
         looks: DEFAULT_FEED_LOOKS,
         source: 'stub',
@@ -112,6 +121,14 @@ export async function fetchFeedLooksWithFallback(): Promise<{
       source: 'api',
     };
   } catch (error) {
+    if (!ENABLE_RUNTIME_MOCKS) {
+      return {
+        looks: [],
+        source: 'api',
+        error: (error as Error).message,
+      };
+    }
+
     return {
       looks: DEFAULT_FEED_LOOKS,
       source: 'stub',

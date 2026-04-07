@@ -8,8 +8,8 @@ const SAMPLE_ASSET: SyndicateAsset = {
   issuerId: 'u_issuer',
   title: 'Smoke Asset',
   image: 'https://picsum.photos/seed/smoke-asset/400/400',
-  totalUnits: 100,
-  availableUnits: 100,
+  totalUnits: 20,
+  availableUnits: 20,
   unitPriceGBP: 2,
   unitPriceStable: 2.56,
   settlementMode: 'HYBRID',
@@ -46,14 +46,14 @@ describe('syndicate trade lifecycle smoke', () => {
 
     const runtimeAfterBuy = useStore.getState().syndicateRuntime[SAMPLE_ASSET.id];
     expect(runtimeAfterBuy).toBeDefined();
-    expect(runtimeAfterBuy.availableUnits).toBe(88);
+    expect(runtimeAfterBuy.availableUnits).toBe(8);
     expect(runtimeAfterBuy.yourUnits).toBe(12);
 
     const sellResult = useStore.getState().sellSyndicateUnits(SAMPLE_ASSET, 'u_seller', 5);
     expect(sellResult.ok).toBe(true);
 
     const runtimeAfterSell = useStore.getState().syndicateRuntime[SAMPLE_ASSET.id];
-    expect(runtimeAfterSell.availableUnits).toBe(93);
+    expect(runtimeAfterSell.availableUnits).toBe(13);
     expect(runtimeAfterSell.yourUnits).toBe(7);
     expect(runtimeAfterSell.realizedProfitGBP).toBeGreaterThan(0);
 

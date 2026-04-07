@@ -90,10 +90,27 @@ export interface Message {
   offer?: { originalPrice: number; offerPrice: number; status: 'pending' | 'accepted' | 'declined' };
 }
 
+export type ConversationType = 'dm' | 'group';
+
+export interface ChatBot {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  commandHint: string;
+  category: 'moderation' | 'commerce' | 'automation';
+}
+
 export interface Conversation {
   id: string;
-  sellerId: string;
-  itemId: string;
+  type: ConversationType;
+  title?: string;
+  avatar?: string;
+  sellerId?: string;
+  itemId?: string;
+  ownerId?: string;
+  participantIds?: string[];
+  botIds?: string[];
   lastMessage: string;
   lastMessageTime: string;
   unread: boolean;
@@ -370,10 +387,39 @@ export const MOCK_LISTINGS: Listing[] = [
   },
 ];
 
+// ─── CHAT BOTS ───────────────────────────────────────────────────────────────
+export const MOCK_CHAT_BOTS: ChatBot[] = [
+  {
+    id: 'bot_guard',
+    slug: 'guard',
+    name: 'Guard Bot',
+    description: 'Moderation helper for rules, join messages, and spam guardrails.',
+    commandHint: '/guard status',
+    category: 'moderation',
+  },
+  {
+    id: 'bot_trade',
+    slug: 'tradeops',
+    name: 'TradeOps Bot',
+    description: 'Posts auction and syndicate market alerts into your group.',
+    commandHint: '/tradeops alerts on',
+    category: 'commerce',
+  },
+  {
+    id: 'bot_brief',
+    slug: 'brief',
+    name: 'Daily Brief Bot',
+    description: 'Sends timed digest updates and pinned reminders.',
+    commandHint: '/brief now',
+    category: 'automation',
+  },
+];
+
 // ─── MOCK CONVERSATIONS ───────────────────────────────────────────────────────
 export const MOCK_CONVERSATIONS: Conversation[] = [
   {
     id: 'c1',
+    type: 'dm',
     sellerId: 'u1',
     itemId: 'l2',
     lastMessage: "Sorry, I'm tied up at the moment – I'll p...",
@@ -421,12 +467,46 @@ export const MOCK_CONVERSATIONS: Conversation[] = [
   },
   {
     id: 'c2',
+    type: 'dm',
     sellerId: 'u3',
     itemId: 'l6',
     lastMessage: 'Shout if you want more pics or questio...',
     lastMessageTime: 'a day ago',
     unread: false,
     messages: [],
+  },
+  {
+    id: 'g1',
+    type: 'group',
+    title: 'Thryft Snipers',
+    ownerId: 'me',
+    participantIds: ['me', 'u1', 'u3'],
+    botIds: ['bot_trade'],
+    lastMessage: 'TradeOps Bot: New auction watchlist for tonight is live.',
+    lastMessageTime: '20m ago',
+    unread: true,
+    messages: [
+      {
+        id: 'g1m1',
+        senderId: 'system',
+        isSystem: true,
+        systemTitle: 'Group created',
+        text: 'Thryft Snipers was created by @thryftuser.',
+        timestamp: 'Today',
+      },
+      {
+        id: 'g1m2',
+        senderId: 'u3',
+        text: 'Let us coordinate bids for tonight drops.',
+        timestamp: '22m ago',
+      },
+      {
+        id: 'g1m3',
+        senderId: 'bot_trade',
+        text: 'TradeOps Bot: New auction watchlist for tonight is live.',
+        timestamp: '20m ago',
+      },
+    ],
   },
 ];
 

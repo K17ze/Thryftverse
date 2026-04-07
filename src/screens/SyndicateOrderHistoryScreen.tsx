@@ -26,6 +26,7 @@ import {
   MarketHistoryItem,
   listUserMarketHistory,
 } from '../services/marketApi';
+import { SYNDICATE_FEE_RATE } from '../utils/tradeFlow';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 
@@ -150,7 +151,7 @@ function mapRemoteHistoryToEntries(history: MarketHistoryItem[]): HistoryEntry[]
         quantity,
         pricePerShare,
         totalAmount: item.amountGbp,
-        fee: item.feeGbp ?? Number((item.amountGbp * 0.005).toFixed(2)),
+        fee: item.feeGbp ?? Number((item.amountGbp * SYNDICATE_FEE_RATE).toFixed(2)),
         status,
         filledQuantity: status === 'filled' ? quantity : 0,
         createdAt: item.timestamp,
@@ -258,7 +259,7 @@ export default function SyndicateOrderHistoryScreen() {
           quantity,
           pricePerShare,
           totalAmount,
-          fee: Number((totalAmount * 0.005).toFixed(2)),
+          fee: Number((totalAmount * SYNDICATE_FEE_RATE).toFixed(2)),
           status: 'filled',
           filledQuantity: quantity,
           createdAt: entry.timestamp,

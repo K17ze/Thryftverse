@@ -1,7 +1,8 @@
+import crypto from 'node:crypto';
 import { shutdownTelemetry } from './telemetry.js';
 import Fastify from 'fastify';
 import * as Sentry from '@sentry/node';
-import type { PoolClient } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import rateLimit from '@fastify/rate-limit';
 import websocket from '@fastify/websocket';
 import fastifyRawBody from 'fastify-raw-body';
@@ -23,6 +24,7 @@ import {
   verifyAccessToken,
   verifyPassword,
 } from './lib/auth.js';
+import { sendAuthEmail } from './lib/authEmail.js';
 import {
   assertGoldOperatorToken,
   createGoldReserveAttestation,
@@ -75,6 +77,17 @@ import {
   resolveClientIp,
   resolveJurisdictionRule,
 } from './lib/compliance.js';
+import {
+  verifyAppleIdentityToken,
+  verifyGoogleIdentityToken,
+  type VerifiedSocialIdentity,
+} from './lib/identityProviders.js';
+import {
+  createOtpauthUrl,
+  generateRecoveryCodes,
+  generateTotpSecret,
+  verifyTotp,
+} from './lib/totp.js';
 
 const app = Fastify({ logger: true });
 
@@ -100,6 +113,8 @@ void app.register(rateLimit, {
   global: true,
   max: config.apiRateLimitMax,
   timeWindow: config.apiRateLimitWindow,
+  redis,
+  nameSpace: 'thryftverse:rate-limit',
 });
 
 function toJsonString(value: unknown): string {
@@ -163,6 +178,47 @@ function ensureSecurityAdminAccess(
 function roundTo(value: number, decimals: number): number {
   const factor = 10 ** decimals;
   return Math.round(value * factor) / factor;
+}
+
+const COMMERCE_PLATFORM_CHARGE_RATE = 0.05;
+const COMMERCE_PLATFORM_CHARGE_FIXED_GBP = 0.7;
+const COMMERCE_PLATFORM_CHARGE_MIN_RATE = 0.02;
+const SYNDICATE_TRADE_FEE_RATE = 0.01;
+const AUCTION_PLATFORM_FEE_RATE = 0.03;
+const WALLET_TOPUP_PLATFORM_FEE_RATE = 0.01;
+
+function calculateCommercePlatformChargeGbp(subtotalGbp: number): number {
+  const normalizedSubtotal = roundTo(Math.max(0, subtotalGbp), 2);
+  if (normalizedSubtotal <= 0) {
+    return 0;
+  }
+
+  const formulaCharge =
+    normalizedSubtotal * COMMERCE_PLATFORM_CHARGE_RATE + COMMERCE_PLATFORM_CHARGE_FIXED_GBP;
+  const minimumCharge = normalizedSubtotal * COMMERCE_PLATFORM_CHARGE_MIN_RATE;
+  return roundTo(Math.max(formulaCharge, minimumCharge), 2);
+}
+
+function calculateAuctionPlatformFeeGbp(winningBidGbp: number): number {
+  return roundTo(Math.max(0, winningBidGbp) * AUCTION_PLATFORM_FEE_RATE, 2);
+}
+
+function calculateWalletTopupFeeBreakdown(grossFiatAmount: number): {
+  grossFiatAmount: number;
+  platformFeeRate: number;
+  platformFeeAmount: number;
+  netFiatAmount: number;
+} {
+  const gross = roundTo(Math.max(0, grossFiatAmount), 6);
+  const platformFeeAmount = roundTo(gross * WALLET_TOPUP_PLATFORM_FEE_RATE, 6);
+  const netFiatAmount = roundTo(Math.max(0, gross - platformFeeAmount), 6);
+
+  return {
+    grossFiatAmount: gross,
+    platformFeeRate: WALLET_TOPUP_PLATFORM_FEE_RATE,
+    platformFeeAmount,
+    netFiatAmount,
+  };
 }
 
 function resolveAuctionStatus(startsAt: Date, endsAt: Date): 'upcoming' | 'live' | 'ended' {
@@ -349,6 +405,12 @@ function isPublicRoute(method: string, path: string) {
     'POST /auth/signup',
     'POST /auth/login',
     'POST /auth/refresh',
+    'POST /auth/oauth/google',
+    'POST /auth/oauth/apple',
+    'POST /auth/magic-link/request',
+    'POST /auth/magic-link/consume',
+    'POST /auth/otp/request',
+    'POST /auth/otp/verify',
     'POST /auth/password-reset/request',
     'POST /auth/password-reset/confirm',
     'POST /compliance/kyc/webhook',
@@ -578,9 +640,10 @@ app.setErrorHandler((error, request, reply) => {
       : 500;
 
   reply.code(statusCode >= 400 ? statusCode : 500);
+  const errorMessage = error instanceof Error ? error.message : 'Request failed';
   reply.send({
     ok: false,
-    error: statusCode >= 500 ? 'Internal server error' : error.message,
+    error: statusCode >= 500 ? 'Internal server error' : errorMessage,
   });
 });
 
@@ -648,6 +711,127 @@ interface PayoutRequestRow {
 
 function createRuntimeId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1_000_000)}`;
+}
+
+type ChatConversationType = 'dm' | 'group';
+type ChatSenderType = 'user' | 'bot' | 'system';
+
+interface ChatConversationAccessRow {
+  id: string;
+  type: ChatConversationType;
+  title: string | null;
+  owner_id: string;
+  item_id: string | null;
+}
+
+async function ensureChatConversationAccess(
+  client: DbQueryable,
+  conversationId: string,
+  userId: string
+): Promise<ChatConversationAccessRow> {
+  const result = await client.query<ChatConversationAccessRow>(
+    `
+      SELECT c.id, c.type, c.title, c.owner_id, c.item_id
+      FROM chat_conversations c
+      INNER JOIN chat_members cm
+        ON cm.conversation_id = c.id
+      WHERE c.id = $1
+        AND cm.user_id = $2
+      LIMIT 1
+    `,
+    [conversationId, userId]
+  );
+
+  if (!result.rowCount) {
+    throw createApiError('CHAT_CONVERSATION_NOT_FOUND', 'Conversation not found', {
+      conversationId,
+      userId,
+    });
+  }
+
+  return result.rows[0];
+}
+
+async function ensureGroupConversationAccess(
+  client: DbQueryable,
+  conversationId: string,
+  userId: string
+): Promise<ChatConversationAccessRow> {
+  const conversation = await ensureChatConversationAccess(client, conversationId, userId);
+
+  if (conversation.type !== 'group') {
+    throw createApiError('CHAT_CONVERSATION_INVALID', 'This action is available only for group conversations', {
+      conversationId,
+      conversationType: conversation.type,
+    });
+  }
+
+  return conversation;
+}
+
+async function listChatParticipantIds(client: DbQueryable, conversationId: string): Promise<string[]> {
+  const result = await client.query<{ user_id: string }>(
+    `
+      SELECT user_id
+      FROM chat_members
+      WHERE conversation_id = $1
+      ORDER BY joined_at ASC
+    `,
+    [conversationId]
+  );
+
+  return result.rows.map((row) => row.user_id);
+}
+
+async function listChatBotIds(client: DbQueryable, conversationId: string): Promise<string[]> {
+  const result = await client.query<{ bot_id: string }>(
+    `
+      SELECT bot_id
+      FROM chat_bot_installs
+      WHERE conversation_id = $1
+      ORDER BY installed_at ASC
+    `,
+    [conversationId]
+  );
+
+  return result.rows.map((row) => row.bot_id);
+}
+
+async function appendSystemChatMessage(
+  client: DbQueryable,
+  input: {
+    conversationId: string;
+    text: string;
+    metadata?: Record<string, unknown>;
+  }
+): Promise<{ id: string; createdAt: string }> {
+  const messageId = createRuntimeId('chatmsg');
+  const result = await client.query<{ id: string; created_at: string }>(
+    `
+      INSERT INTO chat_messages (
+        id,
+        conversation_id,
+        sender_type,
+        sender_user_id,
+        sender_bot_id,
+        body,
+        metadata
+      )
+      VALUES ($1, $2, 'system', NULL, NULL, $3, $4::jsonb)
+      RETURNING id, created_at::text
+    `,
+    [
+      messageId,
+      input.conversationId,
+      input.text,
+      toJsonString(input.metadata ?? {}),
+    ]
+  );
+
+  return {
+    id: result.rows[0].id,
+    createdAt: result.rows[0].created_at,
+  };
 }
 
 function toPaymentIntentPayload(row: PaymentIntentRow) {
@@ -1276,13 +1460,13 @@ async function postCommerceOrderLedgerEntries(
     buyerId: string;
     sellerId: string;
     subtotalGbp: number;
-    buyerProtectionFeeGbp: number;
+    platformChargeGbp: number;
     totalGbp: number;
   }
 ): Promise<void> {
   const totalGbp = roundTo(input.totalGbp, 2);
   const subtotalGbp = roundTo(input.subtotalGbp, 2);
-  const buyerProtectionFeeGbp = roundTo(input.buyerProtectionFeeGbp, 2);
+  const platformChargeGbp = roundTo(input.platformChargeGbp, 2);
 
   if (totalGbp <= 0) {
     return;
@@ -1298,7 +1482,8 @@ async function postCommerceOrderLedgerEntries(
     client,
     'user',
     input.sellerId,
-    'seller_payable'
+    'ize_wallet',
+    'IZE'
   );
   const escrowAccountId = await ensureLedgerAccount(
     client,
@@ -1369,17 +1554,17 @@ async function postCommerceOrderLedgerEntries(
     });
   }
 
-  if (buyerProtectionFeeGbp > 0) {
+  if (platformChargeGbp > 0) {
     await appendLedgerEntry(client, {
       accountId: escrowAccountId,
       counterpartyAccountId: platformRevenueAccountId,
       direction: 'debit',
-      amountGbp: buyerProtectionFeeGbp,
+      amountGbp: platformChargeGbp,
       sourceType: 'order_payment',
       sourceId: input.orderId,
       lineType: 'platform_commission_credit',
       metadata: {
-        component: 'buyer_protection_fee',
+        component: 'platform_charge',
       },
     });
 
@@ -1387,12 +1572,146 @@ async function postCommerceOrderLedgerEntries(
       accountId: platformRevenueAccountId,
       counterpartyAccountId: escrowAccountId,
       direction: 'credit',
-      amountGbp: buyerProtectionFeeGbp,
+      amountGbp: platformChargeGbp,
       sourceType: 'order_payment',
       sourceId: input.orderId,
       lineType: 'platform_commission_credit',
       metadata: {
-        component: 'buyer_protection_fee',
+        component: 'platform_charge',
+      },
+    });
+  }
+}
+
+async function postAuctionSettlementLedgerEntries(
+  client: DbQueryable,
+  input: {
+    auctionId: string;
+    buyerId: string;
+    sellerId: string;
+    winningBidGbp: number;
+    platformFeeGbp: number;
+  }
+): Promise<void> {
+  const winningBidGbp = roundTo(Math.max(0, input.winningBidGbp), 2);
+  const platformFeeGbp = roundTo(Math.max(0, input.platformFeeGbp), 2);
+  if (winningBidGbp <= 0) {
+    return;
+  }
+
+  const sellerNetGbp = roundTo(Math.max(0, winningBidGbp - platformFeeGbp), 2);
+  const sourceId = `auction:${input.auctionId}`;
+
+  const buyerSpendAccountId = await ensureLedgerAccount(
+    client,
+    'user',
+    input.buyerId,
+    'buyer_spend'
+  );
+  const sellerPayableAccountId = await ensureLedgerAccount(
+    client,
+    'user',
+    input.sellerId,
+    'ize_wallet',
+    'IZE'
+  );
+  const escrowAccountId = await ensureLedgerAccount(
+    client,
+    'platform',
+    'platform',
+    'escrow_liability'
+  );
+  const platformRevenueAccountId = await ensureLedgerAccount(
+    client,
+    'platform',
+    'platform',
+    'platform_revenue'
+  );
+
+  await appendLedgerEntry(client, {
+    accountId: buyerSpendAccountId,
+    counterpartyAccountId: escrowAccountId,
+    direction: 'debit',
+    amountGbp: winningBidGbp,
+    sourceType: 'order_payment',
+    sourceId,
+    lineType: 'auction_buyer_charge',
+    metadata: {
+      auctionId: input.auctionId,
+      buyerId: input.buyerId,
+      sellerId: input.sellerId,
+    },
+  });
+
+  await appendLedgerEntry(client, {
+    accountId: escrowAccountId,
+    counterpartyAccountId: buyerSpendAccountId,
+    direction: 'credit',
+    amountGbp: winningBidGbp,
+    sourceType: 'order_payment',
+    sourceId,
+    lineType: 'auction_buyer_charge',
+    metadata: {
+      auctionId: input.auctionId,
+      buyerId: input.buyerId,
+      sellerId: input.sellerId,
+    },
+  });
+
+  if (sellerNetGbp > 0) {
+    await appendLedgerEntry(client, {
+      accountId: escrowAccountId,
+      counterpartyAccountId: sellerPayableAccountId,
+      direction: 'debit',
+      amountGbp: sellerNetGbp,
+      sourceType: 'order_payment',
+      sourceId,
+      lineType: 'auction_seller_payable_credit',
+      metadata: {
+        auctionId: input.auctionId,
+        sellerId: input.sellerId,
+      },
+    });
+
+    await appendLedgerEntry(client, {
+      accountId: sellerPayableAccountId,
+      counterpartyAccountId: escrowAccountId,
+      direction: 'credit',
+      amountGbp: sellerNetGbp,
+      sourceType: 'order_payment',
+      sourceId,
+      lineType: 'auction_seller_payable_credit',
+      metadata: {
+        auctionId: input.auctionId,
+        sellerId: input.sellerId,
+      },
+    });
+  }
+
+  if (platformFeeGbp > 0) {
+    await appendLedgerEntry(client, {
+      accountId: escrowAccountId,
+      counterpartyAccountId: platformRevenueAccountId,
+      direction: 'debit',
+      amountGbp: platformFeeGbp,
+      sourceType: 'order_payment',
+      sourceId,
+      lineType: 'auction_platform_fee_credit',
+      metadata: {
+        component: 'auction_platform_charge',
+      },
+    });
+
+    await appendLedgerEntry(client, {
+      accountId: platformRevenueAccountId,
+      counterpartyAccountId: escrowAccountId,
+      direction: 'credit',
+      amountGbp: platformFeeGbp,
+      sourceType: 'order_payment',
+      sourceId,
+      lineType: 'auction_platform_fee_credit',
+      metadata: {
+        component: 'auction_platform_charge',
       },
     });
   }
@@ -1678,6 +1997,7 @@ async function settlePaymentIntent(
     buyerChargedGbp: number;
     sellerPayableCreditedGbp: number;
     platformCommissionCreditedGbp: number;
+    platformChargeCreditedGbp: number;
   };
 }> {
   const intentResult = await client.query<PaymentIntentRow>(
@@ -1813,6 +2133,7 @@ async function settlePaymentIntent(
         buyerChargedGbp: number;
         sellerPayableCreditedGbp: number;
         platformCommissionCreditedGbp: number;
+        platformChargeCreditedGbp: number;
       }
     | undefined;
 
@@ -1848,16 +2169,18 @@ async function settlePaymentIntent(
           buyerId: paidOrder.buyer_id,
           sellerId: paidOrder.seller_id,
           subtotalGbp: Number(paidOrder.subtotal_gbp),
-          buyerProtectionFeeGbp: Number(paidOrder.buyer_protection_fee_gbp),
+          platformChargeGbp: Number(paidOrder.buyer_protection_fee_gbp),
           totalGbp: Number(paidOrder.total_gbp),
         });
       }
 
+      const platformChargeCreditedGbp = Number(paidOrder.buyer_protection_fee_gbp);
       orderSettlement = {
         orderId: paidOrder.id,
         buyerChargedGbp: Number(paidOrder.total_gbp),
         sellerPayableCreditedGbp: Number(paidOrder.subtotal_gbp),
-        platformCommissionCreditedGbp: Number(paidOrder.buyer_protection_fee_gbp),
+        platformCommissionCreditedGbp: platformChargeCreditedGbp,
+        platformChargeCreditedGbp,
       };
     }
   }
@@ -2777,6 +3100,8 @@ async function sweepExpiredAuctions(reason: 'interval' | 'manual'): Promise<numb
       return 0;
     }
 
+    const canPostAuctionLedger = await ledgerTablesAvailable(client);
+
     for (const auction of expiring.rows) {
       const winner = await client.query<{
         id: number;
@@ -2794,6 +3119,9 @@ async function sweepExpiredAuctions(reason: 'interval' | 'manual'): Promise<numb
       );
 
       const topBid = winner.rows[0];
+      const winningBidGbp = topBid ? Number(topBid.amount_gbp) : 0;
+      const platformFeeGbp = topBid ? calculateAuctionPlatformFeeGbp(winningBidGbp) : 0;
+      const sellerNetGbp = topBid ? roundTo(Math.max(0, winningBidGbp - platformFeeGbp), 2) : 0;
 
       await client.query(
         `
@@ -2809,6 +3137,16 @@ async function sweepExpiredAuctions(reason: 'interval' | 'manual'): Promise<numb
         [auction.id, topBid?.id ?? null, topBid?.bidder_id ?? null]
       );
 
+      if (topBid?.bidder_id && canPostAuctionLedger) {
+        await postAuctionSettlementLedgerEntries(client, {
+          auctionId: auction.id,
+          buyerId: topBid.bidder_id,
+          sellerId: auction.seller_id,
+          winningBidGbp,
+          platformFeeGbp,
+        });
+      }
+
       publishRealtimeEvent({
         topic: `auction:${auction.id}`,
         type: 'auction.settled',
@@ -2816,7 +3154,10 @@ async function sweepExpiredAuctions(reason: 'interval' | 'manual'): Promise<numb
           auctionId: auction.id,
           listingId: auction.listing_id,
           winnerBidderId: topBid?.bidder_id ?? null,
-          winnerAmountGbp: topBid ? Number(topBid.amount_gbp) : null,
+          winnerAmountGbp: topBid ? winningBidGbp : null,
+          platformFeeRate: topBid ? AUCTION_PLATFORM_FEE_RATE : null,
+          platformFeeGbp: topBid ? platformFeeGbp : null,
+          sellerNetGbp: topBid ? sellerNetGbp : null,
           reason,
         },
       });
@@ -2907,7 +3248,12 @@ app.get('/health', async () => {
   };
 });
 
-app.get('/metrics', async (_request, reply) => {
+app.get('/metrics', async (request, reply) => {
+  const securityAdminError = ensureSecurityAdminAccess(request, reply);
+  if (securityAdminError) {
+    return securityAdminError;
+  }
+
   reply.header('Content-Type', metricsContentType());
   return renderMetrics();
 });
@@ -2925,7 +3271,12 @@ app.post('/ops/auctions/sweep', async (request, reply) => {
   };
 });
 
-app.get('/health/deep', async (_request, reply) => {
+app.get('/health/deep', async (request, reply) => {
+  const securityAdminError = ensureSecurityAdminAccess(request, reply);
+  if (securityAdminError) {
+    return securityAdminError;
+  }
+
   const status = {
     api: 'ok',
     postgres: 'unknown',
@@ -3026,6 +3377,10 @@ app.get('/health/deep', async (_request, reply) => {
     return result;
   }
 
+  if (config.nodeEnv === 'production') {
+    delete result.details;
+  }
+
   reply.code(503);
   return result;
 });
@@ -3079,6 +3434,442 @@ type AuthUserRow = {
   email_verified_at: string | null;
   two_factor_enabled: boolean;
 };
+
+type OAuthIdentityLookupRow = {
+  user_id: string;
+};
+
+type MagicLinkTokenRow = {
+  id: number;
+  user_id: string | null;
+  email: string;
+  expires_at: string;
+  consumed_at: string | null;
+};
+
+type OtpChallengeRow = {
+  id: string;
+  user_id: string | null;
+  email: string;
+  code_hash: string;
+  attempts: number;
+  max_attempts: number;
+  expires_at: string;
+  consumed_at: string | null;
+};
+
+type TotpFactorRow = {
+  user_id: string;
+  secret_ciphertext: string;
+  enabled: boolean;
+};
+
+type RecoveryCodeRow = {
+  id: number;
+  code_hash: string;
+  consumed_at: string | null;
+};
+
+function normalizeAuthEmail(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function createUsernameSeed(email: string | null, fallback = 'member'): string {
+  const source = (email ? email.split('@')[0] : fallback).toLowerCase();
+  const normalized = source.replace(/[^a-z0-9_]/g, '').slice(0, 22);
+  const base = normalized.length >= 3 ? normalized : fallback;
+  const suffix = crypto.randomBytes(3).toString('hex');
+  return `${base}_${suffix}`.slice(0, 32);
+}
+
+function createFutureIsoTimestamp(ttlSeconds: number): string {
+  return new Date(Date.now() + ttlSeconds * 1000).toISOString();
+}
+
+function createOtpCode(): string {
+  return crypto.randomInt(0, 1_000_000).toString().padStart(6, '0');
+}
+
+function normalizeOtpCode(value: string): string {
+  return value.replace(/\s+/g, '').trim();
+}
+
+function normalizeRecoveryCode(value: string): string {
+  return value.trim().toUpperCase();
+}
+
+function buildMagicLinkUrl(token: string, email: string): string {
+  const separator = config.authMagicLinkBaseUrl.includes('?') ? '&' : '?';
+  return `${config.authMagicLinkBaseUrl}${separator}token=${encodeURIComponent(token)}&email=${encodeURIComponent(email)}`;
+}
+
+function buildMagicLinkEmail(url: string) {
+  return {
+    subject: 'Your Thryftverse login link',
+    text: `Use this secure login link to access your Thryftverse account: ${url}\n\nThis link expires in ${Math.round(config.authMagicLinkTtlSeconds / 60)} minutes.`,
+    html: `
+      <div style="font-family: Inter, Arial, sans-serif; line-height: 1.5; color: #171717;">
+        <h2 style="margin-bottom: 12px;">Sign in to Thryftverse</h2>
+        <p style="margin-bottom: 16px;">Use the secure link below to continue:</p>
+        <p style="margin-bottom: 20px;"><a href="${url}" style="display:inline-block;padding:10px 16px;background:#111;color:#fff;border-radius:999px;text-decoration:none;">Sign in now</a></p>
+        <p style="margin-bottom: 0; color: #525252;">This link expires in ${Math.round(config.authMagicLinkTtlSeconds / 60)} minutes.</p>
+      </div>
+    `.trim(),
+  };
+}
+
+function buildOtpEmail(code: string) {
+  return {
+    subject: 'Your Thryftverse verification code',
+    text: `Your Thryftverse one-time code is ${code}. It expires in ${Math.round(config.authOtpTtlSeconds / 60)} minutes.`,
+    html: `
+      <div style="font-family: Inter, Arial, sans-serif; line-height: 1.5; color: #171717;">
+        <h2 style="margin-bottom: 12px;">Your one-time code</h2>
+        <p style="margin-bottom: 12px;">Enter this code to continue signing in:</p>
+        <p style="font-size: 30px; letter-spacing: 6px; font-weight: 700; margin: 0 0 16px;">${code}</p>
+        <p style="margin-bottom: 0; color: #525252;">This code expires in ${Math.round(config.authOtpTtlSeconds / 60)} minutes.</p>
+      </div>
+    `.trim(),
+  };
+}
+
+function resolveTotpAccountLabel(user: Pick<AuthUserRow, 'email' | 'username'>): string {
+  if (user.email && user.email.trim().length > 0) {
+    return user.email;
+  }
+
+  return user.username;
+}
+
+async function loadTotpFactor(client: Pool | PoolClient, userId: string, forUpdate = false): Promise<TotpFactorRow | null> {
+  const lockClause = forUpdate ? 'FOR UPDATE' : '';
+  const result = await client.query<TotpFactorRow>(
+    `
+      SELECT user_id, secret_ciphertext, enabled
+      FROM user_totp_factors
+      WHERE user_id = $1
+      LIMIT 1
+      ${lockClause}
+    `,
+    [userId]
+  );
+
+  return result.rows[0] ?? null;
+}
+
+async function readTotpSecret(client: Pool | PoolClient, userId: string): Promise<string | null> {
+  const factor = await loadTotpFactor(client, userId, false);
+  if (!factor) {
+    return null;
+  }
+
+  const decrypted = await decryptJsonPayload<{ secret: string }>(
+    factor.secret_ciphertext,
+    `totp-factor:${userId}`
+  );
+
+  if (!decrypted?.secret || typeof decrypted.secret !== 'string') {
+    return null;
+  }
+
+  return decrypted.secret;
+}
+
+async function validateTwoFactorTokenForUser(
+  client: Pool | PoolClient,
+  user: AuthUserRow,
+  token: string
+): Promise<{ ok: boolean; error?: string; status?: number; code?: string }> {
+  const normalizedToken = normalizeOtpCode(token);
+  if (normalizedToken.length < 6) {
+    return {
+      ok: false,
+      error: 'Two-factor authentication code is required',
+      status: 400,
+      code: 'TWO_FACTOR_CODE_REQUIRED',
+    };
+  }
+
+  const secret = await readTotpSecret(client, user.id);
+  if (!secret) {
+    return {
+      ok: false,
+      error: 'Two-factor authentication is not fully configured for this account',
+      status: 409,
+      code: 'TWO_FACTOR_NOT_CONFIGURED',
+    };
+  }
+
+  const tokenValid = verifyTotp(secret, normalizedToken, {
+    stepSeconds: 30,
+    digits: 6,
+    window: 1,
+  });
+
+  if (tokenValid) {
+    return { ok: true };
+  }
+
+  return {
+    ok: false,
+    error: 'Invalid two-factor authentication code',
+    status: 401,
+    code: 'TWO_FACTOR_CODE_INVALID',
+  };
+}
+
+async function validateRecoveryCodeForUser(
+  client: Pool | PoolClient,
+  userId: string,
+  recoveryCode: string
+): Promise<{ ok: boolean; error?: string; status?: number; code?: string }> {
+  const normalizedCode = normalizeRecoveryCode(recoveryCode);
+  if (!normalizedCode) {
+    return {
+      ok: false,
+      error: 'Recovery code is required',
+      status: 400,
+      code: 'RECOVERY_CODE_REQUIRED',
+    };
+  }
+
+  const codeHash = hashOpaqueValue(normalizedCode);
+  const result = await client.query<RecoveryCodeRow>(
+    `
+      SELECT id, code_hash, consumed_at
+      FROM user_recovery_codes
+      WHERE user_id = $1
+        AND code_hash = $2
+      LIMIT 1
+      FOR UPDATE
+    `,
+    [userId, codeHash]
+  );
+
+  const row = result.rows[0];
+  if (!row || row.consumed_at) {
+    return {
+      ok: false,
+      error: 'Recovery code is invalid or already used',
+      status: 401,
+      code: 'RECOVERY_CODE_INVALID',
+    };
+  }
+
+  await client.query(
+    `
+      UPDATE user_recovery_codes
+      SET consumed_at = NOW()
+      WHERE id = $1
+    `,
+    [row.id]
+  );
+
+  return { ok: true };
+}
+
+async function loadAuthUserById(client: Pool | PoolClient, userId: string, forUpdate = false): Promise<AuthUserRow | null> {
+  const lockClause = forUpdate ? 'FOR UPDATE' : '';
+  const result = await client.query<AuthUserRow>(
+    `
+      SELECT id, username, email, role, password_hash, email_verified_at, two_factor_enabled
+      FROM users
+      WHERE id = $1
+      LIMIT 1
+      ${lockClause}
+    `,
+    [userId]
+  );
+
+  return result.rows[0] ?? null;
+}
+
+async function loadAuthUserByEmail(client: Pool | PoolClient, email: string, forUpdate = false): Promise<AuthUserRow | null> {
+  const lockClause = forUpdate ? 'FOR UPDATE' : '';
+  const result = await client.query<AuthUserRow>(
+    `
+      SELECT id, username, email, role, password_hash, email_verified_at, two_factor_enabled
+      FROM users
+      WHERE LOWER(email) = LOWER($1)
+      LIMIT 1
+      ${lockClause}
+    `,
+    [email]
+  );
+
+  return result.rows[0] ?? null;
+}
+
+async function createAuthUserFromIdentity(
+  client: Pool | PoolClient,
+  input: {
+    email: string | null;
+    emailVerified: boolean;
+    usernameHint?: string | null;
+  }
+): Promise<AuthUserRow> {
+  const userId = createPublicToken('usr');
+  const emailVerifiedAt = input.email && input.emailVerified ? new Date().toISOString() : null;
+  const username = createUsernameSeed(input.email, input.usernameHint?.trim() || 'member');
+
+  const result = await client.query<AuthUserRow>(
+    `
+      INSERT INTO users (id, username, email, role, email_verified_at)
+      VALUES ($1, $2, $3, 'user', $4)
+      RETURNING id, username, email, role, password_hash, email_verified_at, two_factor_enabled
+    `,
+    [userId, username, input.email, emailVerifiedAt]
+  );
+
+  return result.rows[0];
+}
+
+function toAuthSuccessPayload(
+  user: AuthUserRow,
+  authSession: Awaited<ReturnType<typeof issueAuthSession>>
+) {
+  return {
+    ok: true,
+    user: toAuthUserPayload(user),
+    accessToken: authSession.accessToken,
+    refreshToken: authSession.refreshToken,
+    accessTokenExpiresInSeconds: authSession.accessTokenExpiresInSeconds,
+    refreshTokenExpiresAt: authSession.refreshTokenExpiresAt,
+  };
+}
+
+async function issueSessionForAuthUser(
+  user: AuthUserRow,
+  request: {
+    headers: Record<string, string | string[] | undefined>;
+    ip: string;
+  }
+) {
+  const authSession = await issueAuthSession(
+    {
+      userId: user.id,
+      role: normalizeAuthRole(user.role),
+    },
+    {
+      userAgent: resolveRequestUserAgent(request) ?? undefined,
+      ipAddress: request.ip,
+    }
+  );
+
+  return toAuthSuccessPayload(user, authSession);
+}
+
+async function resolveUserFromSocialIdentity(identity: VerifiedSocialIdentity): Promise<AuthUserRow> {
+  const normalizedEmail = identity.email && identity.emailVerified
+    ? normalizeAuthEmail(identity.email)
+    : null;
+  const client = await db.connect();
+  let createdUserId: string | null = null;
+
+  try {
+    await client.query('BEGIN');
+
+    const identityResult = await client.query<OAuthIdentityLookupRow>(
+      `
+        SELECT user_id
+        FROM auth_oauth_identities
+        WHERE provider = $1
+          AND provider_user_id = $2
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [identity.provider, identity.providerUserId]
+    );
+
+    let user: AuthUserRow | null = null;
+
+    if (identityResult.rowCount) {
+      user = await loadAuthUserById(client, identityResult.rows[0].user_id, true);
+    }
+
+    if (!user && normalizedEmail) {
+      user = await loadAuthUserByEmail(client, normalizedEmail, true);
+    }
+
+    if (!user) {
+      user = await createAuthUserFromIdentity(client, {
+        email: normalizedEmail,
+        emailVerified: identity.emailVerified,
+        usernameHint: identity.provider,
+      });
+      createdUserId = user.id;
+    } else if (normalizedEmail) {
+      const maybeUpdated = await client.query<AuthUserRow>(
+        `
+          UPDATE users
+          SET
+            email = COALESCE(email, $2),
+            email_verified_at = CASE
+              WHEN $3 THEN COALESCE(email_verified_at, NOW())
+              ELSE email_verified_at
+            END
+          WHERE id = $1
+          RETURNING id, username, email, role, password_hash, email_verified_at, two_factor_enabled
+        `,
+        [user.id, normalizedEmail, identity.emailVerified]
+      );
+      user = maybeUpdated.rows[0] ?? user;
+    }
+
+    const upsertIdentityResult = await client.query<OAuthIdentityLookupRow>(
+      `
+        INSERT INTO auth_oauth_identities (provider, provider_user_id, user_id, email, email_verified)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (provider, provider_user_id)
+        DO UPDATE
+          SET
+            user_id = auth_oauth_identities.user_id,
+            email = COALESCE(EXCLUDED.email, auth_oauth_identities.email),
+            email_verified = auth_oauth_identities.email_verified OR EXCLUDED.email_verified,
+            updated_at = NOW(),
+            last_login_at = NOW()
+        RETURNING user_id
+      `,
+      [identity.provider, identity.providerUserId, user.id, normalizedEmail, identity.emailVerified]
+    );
+
+    const resolvedUserId = upsertIdentityResult.rows[0]?.user_id;
+    if (!resolvedUserId) {
+      throw new Error('Unable to resolve social identity');
+    }
+
+    if (createdUserId && createdUserId !== resolvedUserId) {
+      await client.query(
+        `
+          DELETE FROM users
+          WHERE id = $1
+            AND NOT EXISTS (
+              SELECT 1
+              FROM auth_oauth_identities
+              WHERE user_id = $1
+            )
+        `,
+        [createdUserId]
+      );
+    }
+
+    if (user.id !== resolvedUserId) {
+      const resolvedUser = await loadAuthUserById(client, resolvedUserId, true);
+      if (!resolvedUser) {
+        throw new Error('Unable to load social account');
+      }
+      user = resolvedUser;
+    }
+
+    await client.query('COMMIT');
+    return user;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
 
 function normalizeAuthRole(role: string | null | undefined): AuthRole {
   if (role === 'seller' || role === 'moderator' || role === 'admin') {
@@ -3187,6 +3978,8 @@ app.post(
     const bodySchema = z.object({
       email: z.string().trim().email().max(320),
       password: z.string().min(1).max(128),
+      twoFactorCode: z.string().trim().min(4).max(12).optional(),
+      recoveryCode: z.string().trim().min(6).max(32).optional(),
     });
 
     const payload = bodySchema.parse(request.body ?? {});
@@ -3221,6 +4014,59 @@ app.post(
       };
     }
 
+    if (user.two_factor_enabled) {
+      const client = await db.connect();
+      try {
+        await client.query('BEGIN');
+
+        const lockedUser = await loadAuthUserById(client, user.id, true);
+        if (!lockedUser || !lockedUser.two_factor_enabled) {
+          await client.query('ROLLBACK');
+        } else if (payload.recoveryCode) {
+          const recoveryValidation = await validateRecoveryCodeForUser(
+            client,
+            lockedUser.id,
+            payload.recoveryCode
+          );
+
+          if (!recoveryValidation.ok) {
+            await client.query('ROLLBACK');
+            reply.code(recoveryValidation.status ?? 401);
+            return {
+              ok: false,
+              error: recoveryValidation.error ?? 'Two-factor authentication failed',
+              code: recoveryValidation.code,
+            };
+          }
+
+          await client.query('COMMIT');
+        } else {
+          const tokenValidation = await validateTwoFactorTokenForUser(
+            client,
+            lockedUser,
+            payload.twoFactorCode ?? ''
+          );
+
+          if (!tokenValidation.ok) {
+            await client.query('ROLLBACK');
+            reply.code(tokenValidation.status ?? 401);
+            return {
+              ok: false,
+              error: tokenValidation.error ?? 'Two-factor authentication failed',
+              code: tokenValidation.code,
+            };
+          }
+
+          await client.query('COMMIT');
+        }
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+    }
+
     const authSession = await issueAuthSession(
       {
         userId: user.id,
@@ -3240,6 +4086,838 @@ app.post(
       accessTokenExpiresInSeconds: authSession.accessTokenExpiresInSeconds,
       refreshTokenExpiresAt: authSession.refreshTokenExpiresAt,
     };
+  }
+);
+
+app.post(
+  '/auth/2fa/enroll',
+  {
+    config: {
+      rateLimit: {
+        max: 10,
+        timeWindow: '1 minute',
+      },
+    },
+  },
+  async (request, reply) => {
+    if (!request.authUser) {
+      reply.code(401);
+      return {
+        ok: false,
+        error: 'Unauthorized',
+      };
+    }
+
+    const user = await loadAuthUserById(db, request.authUser.userId, false);
+    if (!user) {
+      reply.code(404);
+      return {
+        ok: false,
+        error: 'User not found',
+      };
+    }
+
+    const secret = generateTotpSecret();
+    const encrypted = await encryptJsonPayload(
+      'profile',
+      { secret },
+      `totp-factor:${user.id}`
+    );
+
+    await db.query(
+      `
+        INSERT INTO user_totp_factors (user_id, secret_ciphertext, enabled, updated_at)
+        VALUES ($1, $2, FALSE, NOW())
+        ON CONFLICT (user_id)
+        DO UPDATE
+          SET secret_ciphertext = EXCLUDED.secret_ciphertext,
+              enabled = FALSE,
+              updated_at = NOW()
+      `,
+      [user.id, encrypted.ciphertext]
+    );
+
+    await db.query(
+      `
+        UPDATE users
+        SET two_factor_enabled = FALSE
+        WHERE id = $1
+      `,
+      [user.id]
+    );
+
+    const accountLabel = resolveTotpAccountLabel(user);
+    const issuer = 'Thryftverse';
+    const otpauthUrl = createOtpauthUrl({
+      secret,
+      issuer,
+      accountName: accountLabel,
+      digits: 6,
+      period: 30,
+    });
+
+    return {
+      ok: true,
+      issuer,
+      accountName: accountLabel,
+      secret,
+      otpauthUrl,
+    };
+  }
+);
+
+app.post(
+  '/auth/2fa/verify',
+  {
+    config: {
+      rateLimit: {
+        max: 20,
+        timeWindow: '1 minute',
+      },
+    },
+  },
+  async (request, reply) => {
+    if (!request.authUser) {
+      reply.code(401);
+      return {
+        ok: false,
+        error: 'Unauthorized',
+      };
+    }
+
+    const bodySchema = z.object({
+      code: z.string().trim().min(4).max(12),
+    });
+
+    const payload = bodySchema.parse(request.body ?? {});
+
+    const client = await db.connect();
+    try {
+      await client.query('BEGIN');
+
+      const user = await loadAuthUserById(client, request.authUser.userId, true);
+      if (!user) {
+        await client.query('ROLLBACK');
+        reply.code(404);
+        return {
+          ok: false,
+          error: 'User not found',
+        };
+      }
+
+      const factor = await loadTotpFactor(client, user.id, true);
+      if (!factor) {
+        await client.query('ROLLBACK');
+        reply.code(400);
+        return {
+          ok: false,
+          error: 'Start two-factor enrollment before verification',
+          code: 'TWO_FACTOR_ENROLLMENT_REQUIRED',
+        };
+      }
+
+      const tokenValidation = await validateTwoFactorTokenForUser(client, user, payload.code);
+      if (!tokenValidation.ok) {
+        await client.query('ROLLBACK');
+        reply.code(tokenValidation.status ?? 401);
+        return {
+          ok: false,
+          error: tokenValidation.error ?? 'Invalid two-factor authentication code',
+          code: tokenValidation.code,
+        };
+      }
+
+      const recoveryCodes = generateRecoveryCodes(8);
+      const recoveryCodeHashes = recoveryCodes.map((code) => hashOpaqueValue(code));
+
+      await client.query('DELETE FROM user_recovery_codes WHERE user_id = $1', [user.id]);
+      for (const hash of recoveryCodeHashes) {
+        await client.query(
+          `
+            INSERT INTO user_recovery_codes (user_id, code_hash)
+            VALUES ($1, $2)
+          `,
+          [user.id, hash]
+        );
+      }
+
+      await client.query(
+        `
+          UPDATE user_totp_factors
+          SET enabled = TRUE, updated_at = NOW()
+          WHERE user_id = $1
+        `,
+        [user.id]
+      );
+
+      await client.query(
+        `
+          UPDATE users
+          SET two_factor_enabled = TRUE
+          WHERE id = $1
+        `,
+        [user.id]
+      );
+
+      await client.query('COMMIT');
+
+      return {
+        ok: true,
+        message: 'Two-factor authentication enabled',
+        recoveryCodes,
+      };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+);
+
+app.post('/auth/2fa/disable', async (request, reply) => {
+  if (!request.authUser) {
+    reply.code(401);
+    return {
+      ok: false,
+      error: 'Unauthorized',
+    };
+  }
+
+  const bodySchema = z.object({
+    code: z.string().trim().min(4).max(12).optional(),
+    recoveryCode: z.string().trim().min(6).max(32).optional(),
+  });
+
+  const payload = bodySchema.parse(request.body ?? {});
+  const client = await db.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const user = await loadAuthUserById(client, request.authUser.userId, true);
+    if (!user) {
+      await client.query('ROLLBACK');
+      reply.code(404);
+      return {
+        ok: false,
+        error: 'User not found',
+      };
+    }
+
+    if (user.two_factor_enabled) {
+      if (!payload.code && !payload.recoveryCode) {
+        await client.query('ROLLBACK');
+        reply.code(400);
+        return {
+          ok: false,
+          error: 'Two-factor verification code is required to disable 2FA',
+          code: 'TWO_FACTOR_CODE_REQUIRED',
+        };
+      }
+
+      const validation = payload.recoveryCode
+        ? await validateRecoveryCodeForUser(client, user.id, payload.recoveryCode)
+        : await validateTwoFactorTokenForUser(client, user, payload.code ?? '');
+
+      if (!validation.ok) {
+        await client.query('ROLLBACK');
+        reply.code(validation.status ?? 401);
+        return {
+          ok: false,
+          error: validation.error ?? 'Two-factor authentication failed',
+          code: validation.code,
+        };
+      }
+    }
+
+    await client.query(
+      `
+        UPDATE users
+        SET two_factor_enabled = FALSE
+        WHERE id = $1
+      `,
+      [request.authUser.userId]
+    );
+
+    await client.query(
+      `
+        UPDATE user_totp_factors
+        SET enabled = FALSE, updated_at = NOW()
+        WHERE user_id = $1
+      `,
+      [request.authUser.userId]
+    );
+
+    await client.query('DELETE FROM user_recovery_codes WHERE user_id = $1', [request.authUser.userId]);
+
+    await client.query('COMMIT');
+
+    return {
+      ok: true,
+      message: 'Two-factor authentication disabled',
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+});
+
+app.post(
+  '/auth/oauth/google',
+  {
+    config: {
+      rateLimit: {
+        max: 20,
+        timeWindow: '1 minute',
+      },
+    },
+  },
+  async (request, reply) => {
+    const bodySchema = z.object({
+      idToken: z.string().min(20),
+    });
+
+    const payload = bodySchema.parse(request.body ?? {});
+
+    let identity: VerifiedSocialIdentity;
+    try {
+      identity = await verifyGoogleIdentityToken(payload.idToken);
+    } catch {
+      reply.code(401);
+      return {
+        ok: false,
+        error: 'Google identity token is invalid',
+      };
+    }
+
+    const user = await resolveUserFromSocialIdentity(identity);
+    return issueSessionForAuthUser(user, request);
+  }
+);
+
+app.post(
+  '/auth/oauth/apple',
+  {
+    config: {
+      rateLimit: {
+        max: 20,
+        timeWindow: '1 minute',
+      },
+    },
+  },
+  async (request, reply) => {
+    const bodySchema = z.object({
+      identityToken: z.string().min(20),
+    });
+
+    const payload = bodySchema.parse(request.body ?? {});
+
+    let identity: VerifiedSocialIdentity;
+    try {
+      identity = await verifyAppleIdentityToken(payload.identityToken);
+    } catch {
+      reply.code(401);
+      return {
+        ok: false,
+        error: 'Apple identity token is invalid',
+      };
+    }
+
+    const user = await resolveUserFromSocialIdentity(identity);
+    return issueSessionForAuthUser(user, request);
+  }
+);
+
+app.post(
+  '/auth/magic-link/request',
+  {
+    config: {
+      rateLimit: {
+        max: 12,
+        timeWindow: '1 minute',
+      },
+    },
+  },
+  async (request, reply) => {
+    const bodySchema = z.object({
+      email: z.string().trim().email().max(320),
+    });
+
+    const payload = bodySchema.parse(request.body ?? {});
+    const normalizedEmail = normalizeAuthEmail(payload.email);
+
+    const userLookup = await db.query<{ id: string }>(
+      `
+        SELECT id
+        FROM users
+        WHERE LOWER(email) = LOWER($1)
+        LIMIT 1
+      `,
+      [normalizedEmail]
+    );
+
+    const token = createPublicToken('mlk');
+    const tokenHash = hashOpaqueValue(token);
+    const expiresAt = createFutureIsoTimestamp(config.authMagicLinkTtlSeconds);
+
+    await db.query(
+      `
+        INSERT INTO auth_magic_links (
+          user_id,
+          email,
+          token_hash,
+          expires_at,
+          requested_ip,
+          requested_user_agent
+        )
+        VALUES ($1, $2, $3, $4, $5, $6)
+      `,
+      [
+        userLookup.rows[0]?.id ?? null,
+        normalizedEmail,
+        tokenHash,
+        expiresAt,
+        resolveRequestIpAddress(request),
+        resolveRequestUserAgent(request),
+      ]
+    );
+
+    const magicLinkUrl = buildMagicLinkUrl(token, normalizedEmail);
+    const magicEmail = buildMagicLinkEmail(magicLinkUrl);
+
+    try {
+      await sendAuthEmail({
+        to: normalizedEmail,
+        subject: magicEmail.subject,
+        html: magicEmail.html,
+        text: magicEmail.text,
+      });
+    } catch (error) {
+      request.log.error({ err: error }, 'Magic link email delivery failed');
+      reply.code(502);
+      return {
+        ok: false,
+        error: 'Unable to send magic link right now',
+      };
+    }
+
+    const response: {
+      ok: true;
+      message: string;
+      developmentMagicLink?: string;
+      developmentToken?: string;
+    } = {
+      ok: true,
+      message: 'If your email is valid, a sign-in link has been sent.',
+    };
+
+    if (config.nodeEnv !== 'production' && config.authExposeDevelopmentArtifacts) {
+      response.developmentMagicLink = magicLinkUrl;
+      response.developmentToken = token;
+    }
+
+    return response;
+  }
+);
+
+app.post(
+  '/auth/magic-link/consume',
+  {
+    config: {
+      rateLimit: {
+        max: 20,
+        timeWindow: '1 minute',
+      },
+    },
+  },
+  async (request, reply) => {
+    const bodySchema = z.object({
+      token: z.string().min(20),
+      email: z.string().trim().email().max(320).optional(),
+    });
+
+    const payload = bodySchema.parse(request.body ?? {});
+    const tokenHash = hashOpaqueValue(payload.token);
+    const normalizedRequestEmail = payload.email ? normalizeAuthEmail(payload.email) : null;
+
+    const client = await db.connect();
+    let user: AuthUserRow | null = null;
+    let failure:
+      | {
+          status: number;
+          body: { ok: false; error: string; code: string };
+        }
+      | null = null;
+
+    try {
+      await client.query('BEGIN');
+
+      const tokenResult = await client.query<MagicLinkTokenRow>(
+        `
+          SELECT id, user_id, email, expires_at, consumed_at
+          FROM auth_magic_links
+          WHERE token_hash = $1
+          LIMIT 1
+          FOR UPDATE
+        `,
+        [tokenHash]
+      );
+
+      const tokenRow = tokenResult.rows[0];
+      if (!tokenRow || tokenRow.consumed_at || new Date(tokenRow.expires_at).getTime() <= Date.now()) {
+        await client.query('ROLLBACK');
+        failure = {
+          status: 400,
+          body: {
+            ok: false,
+            error: 'Magic link is invalid or expired',
+            code: 'MAGIC_LINK_INVALID',
+          },
+        };
+      } else {
+        const tokenEmail = normalizeAuthEmail(tokenRow.email);
+        if (normalizedRequestEmail && normalizedRequestEmail !== tokenEmail) {
+          await client.query('ROLLBACK');
+          failure = {
+            status: 400,
+            body: {
+              ok: false,
+              error: 'Magic link email does not match',
+              code: 'MAGIC_LINK_EMAIL_MISMATCH',
+            },
+          };
+        } else {
+          if (tokenRow.user_id) {
+            user = await loadAuthUserById(client, tokenRow.user_id, true);
+          }
+
+          if (!user) {
+            user = await loadAuthUserByEmail(client, tokenEmail, true);
+          }
+
+          if (!user) {
+            user = await createAuthUserFromIdentity(client, {
+              email: tokenEmail,
+              emailVerified: true,
+              usernameHint: 'email',
+            });
+          } else {
+            const maybeVerified = await client.query<AuthUserRow>(
+              `
+                UPDATE users
+                SET
+                  email = COALESCE(email, $2),
+                  email_verified_at = COALESCE(email_verified_at, NOW())
+                WHERE id = $1
+                RETURNING id, username, email, role, password_hash, email_verified_at, two_factor_enabled
+              `,
+              [user.id, tokenEmail]
+            );
+            user = maybeVerified.rows[0] ?? user;
+          }
+
+          await client.query(
+            `
+              UPDATE auth_magic_links
+              SET
+                consumed_at = NOW(),
+                user_id = $2
+              WHERE id = $1
+            `,
+            [tokenRow.id, user.id]
+          );
+
+          await client.query('COMMIT');
+        }
+      }
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    if (failure) {
+      reply.code(failure.status);
+      return failure.body;
+    }
+
+    if (!user) {
+      reply.code(500);
+      return {
+        ok: false,
+        error: 'Unable to complete magic-link sign in',
+      };
+    }
+
+    return issueSessionForAuthUser(user, request);
+  }
+);
+
+app.post(
+  '/auth/otp/request',
+  {
+    config: {
+      rateLimit: {
+        max: 12,
+        timeWindow: '1 minute',
+      },
+    },
+  },
+  async (request, reply) => {
+    const bodySchema = z.object({
+      email: z.string().trim().email().max(320),
+    });
+
+    const payload = bodySchema.parse(request.body ?? {});
+    const normalizedEmail = normalizeAuthEmail(payload.email);
+
+    const userLookup = await db.query<{ id: string }>(
+      `
+        SELECT id
+        FROM users
+        WHERE LOWER(email) = LOWER($1)
+        LIMIT 1
+      `,
+      [normalizedEmail]
+    );
+
+    const challengeId = createPublicToken('otp');
+    const code = createOtpCode();
+    const codeHash = hashOpaqueValue(code);
+    const expiresAt = createFutureIsoTimestamp(config.authOtpTtlSeconds);
+
+    await db.query(
+      `
+        INSERT INTO auth_otp_challenges (
+          id,
+          user_id,
+          email,
+          code_hash,
+          max_attempts,
+          expires_at,
+          requested_ip,
+          requested_user_agent
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `,
+      [
+        challengeId,
+        userLookup.rows[0]?.id ?? null,
+        normalizedEmail,
+        codeHash,
+        config.authOtpMaxAttempts,
+        expiresAt,
+        resolveRequestIpAddress(request),
+        resolveRequestUserAgent(request),
+      ]
+    );
+
+    const otpEmail = buildOtpEmail(code);
+
+    try {
+      await sendAuthEmail({
+        to: normalizedEmail,
+        subject: otpEmail.subject,
+        html: otpEmail.html,
+        text: otpEmail.text,
+      });
+    } catch (error) {
+      request.log.error({ err: error }, 'OTP email delivery failed');
+      reply.code(502);
+      return {
+        ok: false,
+        error: 'Unable to send OTP right now',
+      };
+    }
+
+    const response: {
+      ok: true;
+      challengeId: string;
+      expiresInSeconds: number;
+      developmentCode?: string;
+    } = {
+      ok: true,
+      challengeId,
+      expiresInSeconds: config.authOtpTtlSeconds,
+    };
+
+    if (config.nodeEnv !== 'production' && config.authExposeDevelopmentArtifacts) {
+      response.developmentCode = code;
+    }
+
+    return response;
+  }
+);
+
+app.post(
+  '/auth/otp/verify',
+  {
+    config: {
+      rateLimit: {
+        max: 30,
+        timeWindow: '1 minute',
+      },
+    },
+  },
+  async (request, reply) => {
+    const bodySchema = z.object({
+      challengeId: z.string().min(20),
+      code: z.string().trim().min(4).max(10),
+    });
+
+    const payload = bodySchema.parse(request.body ?? {});
+
+    const client = await db.connect();
+    let user: AuthUserRow | null = null;
+    let failure:
+      | {
+          status: number;
+          body: { ok: false; error: string; code: string; attemptsRemaining?: number };
+        }
+      | null = null;
+
+    try {
+      await client.query('BEGIN');
+
+      const challengeResult = await client.query<OtpChallengeRow>(
+        `
+          SELECT id, user_id, email, code_hash, attempts, max_attempts, expires_at, consumed_at
+          FROM auth_otp_challenges
+          WHERE id = $1
+          LIMIT 1
+          FOR UPDATE
+        `,
+        [payload.challengeId]
+      );
+
+      const challenge = challengeResult.rows[0];
+      if (!challenge || challenge.consumed_at) {
+        await client.query('ROLLBACK');
+        failure = {
+          status: 400,
+          body: {
+            ok: false,
+            error: 'OTP challenge is invalid or already used',
+            code: 'OTP_CHALLENGE_INVALID',
+          },
+        };
+      } else if (new Date(challenge.expires_at).getTime() <= Date.now()) {
+        await client.query('ROLLBACK');
+        failure = {
+          status: 400,
+          body: {
+            ok: false,
+            error: 'OTP challenge has expired',
+            code: 'OTP_CHALLENGE_EXPIRED',
+          },
+        };
+      } else if (challenge.attempts >= challenge.max_attempts) {
+        await client.query('ROLLBACK');
+        failure = {
+          status: 429,
+          body: {
+            ok: false,
+            error: 'Maximum OTP attempts reached',
+            code: 'OTP_ATTEMPTS_EXCEEDED',
+            attemptsRemaining: 0,
+          },
+        };
+      } else {
+        const providedHash = hashOpaqueValue(payload.code.trim());
+        if (providedHash !== challenge.code_hash) {
+          const nextAttempts = challenge.attempts + 1;
+          const attemptsRemaining = Math.max(0, challenge.max_attempts - nextAttempts);
+
+          await client.query(
+            `
+              UPDATE auth_otp_challenges
+              SET attempts = $2
+              WHERE id = $1
+            `,
+            [challenge.id, nextAttempts]
+          );
+
+          await client.query('COMMIT');
+
+          failure = {
+            status: attemptsRemaining === 0 ? 429 : 400,
+            body: {
+              ok: false,
+              error: attemptsRemaining === 0 ? 'Maximum OTP attempts reached' : 'OTP code is invalid',
+              code: attemptsRemaining === 0 ? 'OTP_ATTEMPTS_EXCEEDED' : 'OTP_CODE_INVALID',
+              attemptsRemaining,
+            },
+          };
+        } else {
+          if (challenge.user_id) {
+            user = await loadAuthUserById(client, challenge.user_id, true);
+          }
+
+          if (!user) {
+            user = await loadAuthUserByEmail(client, challenge.email, true);
+          }
+
+          if (!user) {
+            user = await createAuthUserFromIdentity(client, {
+              email: normalizeAuthEmail(challenge.email),
+              emailVerified: true,
+              usernameHint: 'otp',
+            });
+          } else {
+            const maybeVerified = await client.query<AuthUserRow>(
+              `
+                UPDATE users
+                SET
+                  email = COALESCE(email, $2),
+                  email_verified_at = COALESCE(email_verified_at, NOW())
+                WHERE id = $1
+                RETURNING id, username, email, role, password_hash, email_verified_at, two_factor_enabled
+              `,
+              [user.id, normalizeAuthEmail(challenge.email)]
+            );
+            user = maybeVerified.rows[0] ?? user;
+          }
+
+          await client.query(
+            `
+              UPDATE auth_otp_challenges
+              SET
+                attempts = attempts + 1,
+                consumed_at = NOW(),
+                user_id = $2
+              WHERE id = $1
+            `,
+            [challenge.id, user.id]
+          );
+
+          await client.query('COMMIT');
+        }
+      }
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    if (failure) {
+      reply.code(failure.status);
+      return failure.body;
+    }
+
+    if (!user) {
+      reply.code(500);
+      return {
+        ok: false,
+        error: 'Unable to complete OTP sign in',
+      };
+    }
+
+    return issueSessionForAuthUser(user, request);
   }
 );
 
@@ -3398,7 +5076,7 @@ app.post('/auth/password-reset/request', async (request) => {
       [userId, resetTokenHash, expiresAt]
     );
 
-    if (config.nodeEnv !== 'production') {
+    if (config.nodeEnv !== 'production' && config.authExposeDevelopmentArtifacts) {
       developmentToken = resetToken;
     }
   }
@@ -3569,6 +5247,19 @@ app.patch('/compliance/profile/:userId', async (request, reply) => {
       : payload.residencyCountryCode === null
         ? null
         : normalizeCountryCode(payload.residencyCountryCode);
+
+  const countryChanged =
+    nextCountryCode !== current.countryCode
+    || nextResidencyCountryCode !== current.residencyCountryCode;
+  if (countryChanged && current.kycStatus === 'verified' && request.authUser?.role !== 'admin') {
+    reply.code(403);
+    return {
+      ok: false,
+      error: 'Country updates require compliance review once KYC is verified.',
+      code: 'COUNTRY_CHANGE_REVIEW_REQUIRED',
+    };
+  }
+
   const nextMaxSingleTradeGbp =
     payload.maxSingleTradeGbp === undefined ? current.maxSingleTradeGbp : payload.maxSingleTradeGbp;
   const nextMaxDailyVolumeGbp =
@@ -3628,7 +5319,7 @@ app.patch('/compliance/profile/:userId', async (request, reply) => {
 app.post('/compliance/kyc/sessions', async (request, reply) => {
   const bodySchema = z.object({
     userId: z.string().min(2),
-    vendor: z.string().trim().min(2).max(60).default('mock_kyc_vendor'),
+    vendor: z.string().trim().min(2).max(60).default(config.kycDefaultVendor),
     kycLevel: kycLevelSchema.default('basic'),
     requiredChecks: z.array(z.enum(['document', 'liveness', 'sanctions'])).min(1).max(6).default([
       'document',
@@ -3639,6 +5330,16 @@ app.post('/compliance/kyc/sessions', async (request, reply) => {
   });
 
   const payload = bodySchema.parse(request.body ?? {});
+
+  if (config.nodeEnv === 'production' && /^(mock|sandbox)[_\-]/i.test(payload.vendor)) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: 'KYC vendor is not configured for production',
+      code: 'KYC_VENDOR_NOT_CONFIGURED',
+    };
+  }
+
   await ensureUserExists(payload.userId);
 
   const caseId = createComplianceId('kyc_case');
@@ -3768,6 +5469,7 @@ app.post('/compliance/kyc/sessions', async (request, reply) => {
   });
 
   reply.code(201);
+  const verificationBaseUrl = config.kycVerificationBaseUrl.replace(/\/$/, '');
   return {
     ok: true,
     kycSession: {
@@ -3777,7 +5479,7 @@ app.post('/compliance/kyc/sessions', async (request, reply) => {
       status: 'pending',
       kycLevel: payload.kycLevel,
       requiredChecks: payload.requiredChecks,
-      verificationUrl: `https://mock-kyc.thryftverse.local/session/${caseId}`,
+      verificationUrl: `${verificationBaseUrl}/${encodeURIComponent(caseId)}`,
     },
   };
 });
@@ -3791,7 +5493,7 @@ app.post('/compliance/kyc/webhook', async (request, reply) => {
   const bodySchema = z.object({
     userId: z.string().min(2),
     caseId: z.string().min(6).optional(),
-    vendor: z.string().trim().min(2).max(60).default('mock_kyc_vendor'),
+    vendor: z.string().trim().min(2).max(60).default(config.kycDefaultVendor),
     kycStatus: kycStatusSchema.optional(),
     kycLevel: kycLevelSchema.optional(),
     documentStatus: documentStatusSchema.optional(),
@@ -3805,6 +5507,16 @@ app.post('/compliance/kyc/webhook', async (request, reply) => {
   });
 
   const payload = bodySchema.parse(request.body ?? {});
+
+  if (config.nodeEnv === 'production' && /^(mock|sandbox)[_\-]/i.test(payload.vendor)) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: 'KYC vendor is not configured for production',
+      code: 'KYC_VENDOR_NOT_CONFIGURED',
+    };
+  }
+
   await ensureUserExists(payload.userId);
 
   const userAgent = resolveRequestUserAgent(request);
@@ -5356,73 +7068,99 @@ app.get('/search/listings', async (request) => {
 });
 
 app.get('/feed/looks', async () => {
-  const rankedLooks = [
-    {
-      id: 'f1',
-      rank: 1,
+  const listingRows = await db.query<{
+    listing_id: string;
+    seller_id: string;
+    seller_username: string | null;
+    title: string;
+    image_url: string | null;
+    created_at: string;
+  }>(
+    `
+      SELECT
+        l.id AS listing_id,
+        l.seller_id,
+        u.username AS seller_username,
+        l.title,
+        l.image_url,
+        l.created_at::text
+      FROM listings l
+      LEFT JOIN users u ON u.id = l.seller_id
+      ORDER BY l.created_at DESC
+      LIMIT 18
+    `
+  );
+
+  const rows = listingRows.rows;
+  if (!rows.length) {
+    return {
+      items: [],
+    };
+  }
+
+  const now = Date.now();
+  const looks: Array<{
+    id: string;
+    rank: number;
+    creator: {
+      id: string;
+      name: string;
+      avatar: string;
+      isVerified: boolean;
+    };
+    title: string;
+    description: string;
+    coverImage: string;
+    items: Array<{ id: string; label: string }>;
+    likes: number;
+    comments: number;
+    timeAgo: string;
+  }> = [];
+
+  for (let index = 0; index < rows.length; index += 3) {
+    const chunk = rows.slice(index, index + 3);
+    if (!chunk.length) {
+      continue;
+    }
+
+    const lead = chunk[0];
+    const createdAtMs = new Date(lead.created_at).getTime();
+    const ageHours = Math.max(1, Math.floor((now - createdAtMs) / (60 * 60 * 1000)));
+    const timeAgo = ageHours < 24 ? `${ageHours}h ago` : `${Math.floor(ageHours / 24)}d ago`;
+    const coverImage =
+      chunk.find((item) => item.image_url && item.image_url.trim().length > 0)?.image_url
+      ?? `https://picsum.photos/seed/feed-${encodeURIComponent(lead.listing_id)}/800/800`;
+    const rank = looks.length + 1;
+    const likes = chunk.reduce((sum, item) => sum + Math.max(12, item.title.length * 2), 0);
+
+    looks.push({
+      id: `look_${lead.listing_id}`,
+      rank,
       creator: {
-        id: 'u1',
-        name: 'mariefullery',
-        avatar: 'https://picsum.photos/seed/u1/200/200',
+        id: lead.seller_id,
+        name: lead.seller_username ?? lead.seller_id,
+        avatar: `https://picsum.photos/seed/${encodeURIComponent(lead.seller_id)}/200/200`,
         isVerified: true,
       },
-      title: 'Winter Layers in the City',
-      description: 'Mixing high and low, keeping it cozy.',
-      coverImage: 'https://images.unsplash.com/photo-1509631179647-0177331693ae?w=800&q=80',
-      items: [
-        { id: 'l5', label: 'Off-White Hoodie' },
-        { id: 'l7', label: 'Cargo Trousers' },
-        { id: 'l6', label: 'Air Max 90' },
-      ],
-      likes: 245,
-      comments: 18,
-      timeAgo: '2h ago',
-    },
-    {
-      id: 'f2',
-      rank: 2,
-      creator: {
-        id: 'u2',
-        name: 'scott_art',
-        avatar: 'https://picsum.photos/seed/u2/200/200',
-        isVerified: false,
-      },
-      title: 'Minimal Monochrome',
-      description: 'Clean lines for the weekend.',
-      coverImage: 'https://images.unsplash.com/photo-1529139574466-a303027c1d8b?w=800&q=80',
-      items: [
-        { id: 'l2', label: 'AMI Striped Shirt' },
-        { id: 'l3', label: 'RL Harrington' },
-      ],
-      likes: 156,
-      comments: 12,
-      timeAgo: '5h ago',
-    },
-    {
-      id: 'f3',
-      rank: 3,
-      creator: {
-        id: 'u3',
-        name: 'dankdunksuk',
-        avatar: 'https://picsum.photos/seed/u3/200/200',
-        isVerified: true,
-      },
-      title: 'Streetwear Daily',
-      description: 'Latest pickups. Those Chucks never get old.',
-      coverImage: 'https://images.unsplash.com/photo-1552374196-1ab2a1c593e8?w=800&q=80',
-      items: [
-        { id: 'l4', label: 'Stussy Logo Tee' },
-        { id: 'l9', label: 'Represent Hoodie' },
-        { id: 'l10', label: 'Chuck Taylor' },
-      ],
-      likes: 89,
-      comments: 7,
-      timeAgo: '1d ago',
-    },
-  ];
+      title: lead.title,
+      description: `Curated from ${chunk.length} recent listings.`,
+      coverImage,
+      items: chunk.map((item) => ({
+        id: item.listing_id,
+        label: item.title,
+      })),
+      likes,
+      comments: Math.max(1, Math.round(likes / 10)),
+      timeAgo,
+    });
+
+    if (looks.length >= 6) {
+      break;
+    }
+  }
 
   return {
-    items: rankedLooks.sort((a, b) => a.rank - b.rank),
+    items: looks.sort((a, b) => a.rank - b.rank),
   };
 });
 
@@ -5957,6 +7695,867 @@ app.get('/secure-messages/:conversationId', async (request) => {
   };
 });
 
+app.post('/chat/groups', async (request, reply) => {
+  const bodySchema = z.object({
+    title: z.string().trim().min(2).max(80),
+    memberIds: z.array(z.string().trim().min(2)).min(1).max(48),
+    itemId: z.string().trim().min(2).max(120).optional(),
+  });
+
+  const actorUserId = resolveAuthenticatedUserId(request);
+  const payload = bodySchema.parse(request.body ?? {});
+  const title = payload.title.trim();
+
+  const normalizedMemberIds = [...new Set([actorUserId, ...payload.memberIds.map((value) => value.trim())])]
+    .filter((value) => value.length > 0);
+
+  await Promise.all(normalizedMemberIds.map((memberId) => ensureUserExists(memberId)));
+
+  if (payload.itemId) {
+    const listingResult = await db.query<{ id: string }>(
+      `
+        SELECT id
+        FROM listings
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [payload.itemId]
+    );
+
+    if (!listingResult.rowCount) {
+      throw createApiError('LISTING_NOT_FOUND', 'Listing not found for group context', {
+        itemId: payload.itemId,
+      });
+    }
+  }
+
+  const conversationId = createRuntimeId('chatgrp');
+  const client = await db.connect();
+  let createdMessage: { id: string; createdAt: string } | null = null;
+
+  try {
+    await client.query('BEGIN');
+
+    await client.query(
+      `
+        INSERT INTO chat_conversations (
+          id,
+          type,
+          title,
+          owner_id,
+          item_id,
+          metadata
+        )
+        VALUES ($1, 'group', $2, $3, $4, $5::jsonb)
+      `,
+      [
+        conversationId,
+        title,
+        actorUserId,
+        payload.itemId ?? null,
+        toJsonString({
+          createdVia: 'chat_groups_api',
+        }),
+      ]
+    );
+
+    for (const memberId of normalizedMemberIds) {
+      await client.query(
+        `
+          INSERT INTO chat_members (conversation_id, user_id, role)
+          VALUES ($1, $2, $3)
+          ON CONFLICT (conversation_id, user_id) DO NOTHING
+        `,
+        [conversationId, memberId, memberId === actorUserId ? 'owner' : 'member']
+      );
+    }
+
+    createdMessage = await appendSystemChatMessage(client, {
+      conversationId,
+      text: `${title} was created.`,
+      metadata: {
+        event: 'group_created',
+        actorUserId,
+      },
+    });
+
+    await client.query(
+      `
+        UPDATE chat_conversations
+        SET updated_at = NOW()
+        WHERE id = $1
+      `,
+      [conversationId]
+    );
+
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  const notifyMemberIds = normalizedMemberIds.filter((memberId) => memberId !== actorUserId);
+  await Promise.all(
+    notifyMemberIds.map(async (memberId) => {
+      try {
+        await queueUserNotification({
+          userId: memberId,
+          title: 'You were added to a group chat',
+          body: `${title} is now active in Thryftverse chat.`,
+          payload: {
+            conversationId,
+            event: 'chat_group_added',
+          },
+          metadata: {
+            source: 'chat.groups.create',
+          },
+        });
+      } catch (error) {
+        request.log.error(
+          {
+            err: error,
+            conversationId,
+            memberId,
+          },
+          'Failed to queue group add notification'
+        );
+      }
+    })
+  );
+
+  publishRealtimeEvent({
+    topic: `chat.conversation:${conversationId}`,
+    type: 'chat.group.created',
+    payload: {
+      conversationId,
+      title,
+      ownerId: actorUserId,
+      participantIds: normalizedMemberIds,
+    },
+  });
+
+  reply.code(201);
+  return {
+    ok: true,
+    conversation: {
+      id: conversationId,
+      type: 'group' as const,
+      title,
+      itemId: payload.itemId ?? null,
+      ownerId: actorUserId,
+      participantIds: normalizedMemberIds,
+      botIds: [] as string[],
+      lastMessage: createdMessage?.createdAt ? `${title} was created.` : 'Group created',
+      lastMessageTime: createdMessage?.createdAt ?? new Date().toISOString(),
+      unread: false,
+    },
+    initialMessage: createdMessage
+      ? {
+          id: createdMessage.id,
+          senderType: 'system' as const,
+          senderUserId: null,
+          senderBotId: null,
+          body: `${title} was created.`,
+          metadata: {
+            event: 'group_created',
+            actorUserId,
+          },
+          createdAt: createdMessage.createdAt,
+        }
+      : null,
+  };
+});
+
+app.get('/chat/conversations', async (request) => {
+  const querySchema = z.object({
+    limit: z.coerce.number().int().min(1).max(120).default(40),
+  });
+
+  const actorUserId = resolveAuthenticatedUserId(request);
+  const { limit } = querySchema.parse(request.query ?? {});
+
+  const conversationsResult = await db.query<{
+    id: string;
+    type: ChatConversationType;
+    title: string | null;
+    owner_id: string;
+    item_id: string | null;
+    updated_at: string;
+    last_message: string | null;
+    last_message_created_at: string | null;
+  }>(
+    `
+      SELECT
+        c.id,
+        c.type,
+        c.title,
+        c.owner_id,
+        c.item_id,
+        c.updated_at::text,
+        lm.body AS last_message,
+        lm.created_at::text AS last_message_created_at
+      FROM chat_conversations c
+      INNER JOIN chat_members cm
+        ON cm.conversation_id = c.id
+      LEFT JOIN LATERAL (
+        SELECT body, created_at
+        FROM chat_messages
+        WHERE conversation_id = c.id
+        ORDER BY created_at DESC
+        LIMIT 1
+      ) lm ON TRUE
+      WHERE cm.user_id = $1
+      ORDER BY COALESCE(lm.created_at, c.updated_at) DESC
+      LIMIT $2
+    `,
+    [actorUserId, limit]
+  );
+
+  const conversationIds = conversationsResult.rows.map((row) => row.id);
+  if (!conversationIds.length) {
+    return {
+      ok: true,
+      items: [],
+    };
+  }
+
+  const [memberRows, botRows] = await Promise.all([
+    db.query<{ conversation_id: string; user_id: string }>(
+      `
+        SELECT conversation_id, user_id
+        FROM chat_members
+        WHERE conversation_id = ANY($1::text[])
+        ORDER BY joined_at ASC
+      `,
+      [conversationIds]
+    ),
+    db.query<{ conversation_id: string; bot_id: string }>(
+      `
+        SELECT conversation_id, bot_id
+        FROM chat_bot_installs
+        WHERE conversation_id = ANY($1::text[])
+        ORDER BY installed_at ASC
+      `,
+      [conversationIds]
+    ),
+  ]);
+
+  const membersByConversation = new Map<string, string[]>();
+  for (const row of memberRows.rows) {
+    const current = membersByConversation.get(row.conversation_id) ?? [];
+    current.push(row.user_id);
+    membersByConversation.set(row.conversation_id, current);
+  }
+
+  const botsByConversation = new Map<string, string[]>();
+  for (const row of botRows.rows) {
+    const current = botsByConversation.get(row.conversation_id) ?? [];
+    current.push(row.bot_id);
+    botsByConversation.set(row.conversation_id, current);
+  }
+
+  return {
+    ok: true,
+    items: conversationsResult.rows.map((row) => ({
+      id: row.id,
+      type: row.type,
+      title: row.title,
+      ownerId: row.owner_id,
+      itemId: row.item_id,
+      participantIds: membersByConversation.get(row.id) ?? [],
+      botIds: botsByConversation.get(row.id) ?? [],
+      lastMessage: row.last_message ?? (row.type === 'group' ? `${row.title ?? 'Group'} created.` : 'No messages yet'),
+      lastMessageTime: row.last_message_created_at ?? row.updated_at,
+      unread: false,
+    })),
+  };
+});
+
+app.get('/chat/conversations/:conversationId/messages', async (request) => {
+  const paramsSchema = z.object({
+    conversationId: z.string().min(2).max(120),
+  });
+  const querySchema = z.object({
+    limit: z.coerce.number().int().min(1).max(250).default(120),
+  });
+
+  const actorUserId = resolveAuthenticatedUserId(request);
+  const { conversationId } = paramsSchema.parse(request.params);
+  const { limit } = querySchema.parse(request.query ?? {});
+
+  const conversation = await ensureChatConversationAccess(db, conversationId, actorUserId);
+
+  const result = await db.query<{
+    id: string;
+    sender_type: ChatSenderType;
+    sender_user_id: string | null;
+    sender_bot_id: string | null;
+    body: string;
+    metadata: Record<string, unknown> | null;
+    created_at: string;
+  }>(
+    `
+      SELECT
+        id,
+        sender_type,
+        sender_user_id,
+        sender_bot_id,
+        body,
+        metadata,
+        created_at::text
+      FROM chat_messages
+      WHERE conversation_id = $1
+      ORDER BY created_at ASC
+      LIMIT $2
+    `,
+    [conversationId, limit]
+  );
+
+  return {
+    ok: true,
+    conversation: {
+      id: conversation.id,
+      type: conversation.type,
+      title: conversation.title,
+      ownerId: conversation.owner_id,
+      itemId: conversation.item_id,
+    },
+    items: result.rows.map((row) => ({
+      id: row.id,
+      senderType: row.sender_type,
+      senderUserId: row.sender_user_id,
+      senderBotId: row.sender_bot_id,
+      body: row.body,
+      metadata: row.metadata ?? {},
+      createdAt: row.created_at,
+    })),
+  };
+});
+
+app.post('/chat/conversations/:conversationId/messages', async (request, reply) => {
+  const paramsSchema = z.object({
+    conversationId: z.string().min(2).max(120),
+  });
+  const bodySchema = z.object({
+    text: z.string().trim().min(1).max(4000),
+    metadata: z.record(z.unknown()).optional(),
+  });
+
+  const actorUserId = resolveAuthenticatedUserId(request);
+  const { conversationId } = paramsSchema.parse(request.params);
+  const payload = bodySchema.parse(request.body ?? {});
+
+  await ensureUserExists(actorUserId);
+  const conversation = await ensureChatConversationAccess(db, conversationId, actorUserId);
+
+  const messageId = createRuntimeId('chatmsg');
+  const result = await db.query<{ id: string; created_at: string }>(
+    `
+      INSERT INTO chat_messages (
+        id,
+        conversation_id,
+        sender_type,
+        sender_user_id,
+        sender_bot_id,
+        body,
+        metadata
+      )
+      VALUES ($1, $2, 'user', $3, NULL, $4, $5::jsonb)
+      RETURNING id, created_at::text
+    `,
+    [
+      messageId,
+      conversationId,
+      actorUserId,
+      payload.text,
+      toJsonString(payload.metadata ?? {}),
+    ]
+  );
+
+  await db.query(
+    `
+      UPDATE chat_conversations
+      SET updated_at = NOW()
+      WHERE id = $1
+    `,
+    [conversationId]
+  );
+
+  const participantIds = await listChatParticipantIds(db, conversationId);
+  const recipientIds = participantIds.filter((memberId) => memberId !== actorUserId);
+
+  await Promise.all(
+    recipientIds.map(async (memberId) => {
+      try {
+        await queueUserNotification({
+          userId: memberId,
+          title: 'New message',
+          body: conversation.type === 'group'
+            ? `New message in ${conversation.title ?? 'your group chat'}`
+            : 'You have a new message in Thryftverse.',
+          payload: {
+            conversationId,
+            messageId: result.rows[0].id,
+            senderId: actorUserId,
+            event: 'chat_message',
+          },
+          metadata: {
+            source: 'chat.conversations.message.create',
+          },
+        });
+      } catch (error) {
+        request.log.error(
+          {
+            err: error,
+            conversationId,
+            memberId,
+          },
+          'Failed to queue chat message notification'
+        );
+      }
+    })
+  );
+
+  publishRealtimeEvent({
+    topic: `chat.conversation:${conversationId}`,
+    type: 'chat.message.created',
+    payload: {
+      id: result.rows[0].id,
+      conversationId,
+      senderType: 'user',
+      senderUserId: actorUserId,
+      senderBotId: null,
+      body: payload.text,
+      metadata: payload.metadata ?? {},
+      createdAt: result.rows[0].created_at,
+    },
+  });
+
+  reply.code(201);
+  return {
+    ok: true,
+    message: {
+      id: result.rows[0].id,
+      senderType: 'user' as const,
+      senderUserId: actorUserId,
+      senderBotId: null,
+      body: payload.text,
+      metadata: payload.metadata ?? {},
+      createdAt: result.rows[0].created_at,
+    },
+  };
+});
+
+app.post('/chat/conversations/:conversationId/members', async (request) => {
+  const paramsSchema = z.object({
+    conversationId: z.string().min(2).max(120),
+  });
+  const bodySchema = z.object({
+    memberIds: z.array(z.string().trim().min(2)).min(1).max(48),
+  });
+
+  const actorUserId = resolveAuthenticatedUserId(request);
+  const { conversationId } = paramsSchema.parse(request.params);
+  const payload = bodySchema.parse(request.body ?? {});
+
+  const conversation = await ensureGroupConversationAccess(db, conversationId, actorUserId);
+  if (conversation.owner_id !== actorUserId && request.authUser?.role !== 'admin') {
+    throw createApiError('FORBIDDEN_USER_CONTEXT', 'Only group owners can add members', {
+      actorUserId,
+      ownerId: conversation.owner_id,
+      conversationId,
+    });
+  }
+
+  const normalizedMemberIds = [...new Set(payload.memberIds.map((value) => value.trim()))]
+    .filter((value) => value.length > 0);
+  await Promise.all(normalizedMemberIds.map((memberId) => ensureUserExists(memberId)));
+
+  const client = await db.connect();
+  const addedMemberIds: string[] = [];
+  let participantIds: string[] = [];
+  let updateMessage: { id: string; createdAt: string } | null = null;
+
+  try {
+    await client.query('BEGIN');
+
+    for (const memberId of normalizedMemberIds) {
+      const inserted = await client.query<{ user_id: string }>(
+        `
+          INSERT INTO chat_members (conversation_id, user_id, role)
+          VALUES ($1, $2, 'member')
+          ON CONFLICT (conversation_id, user_id) DO NOTHING
+          RETURNING user_id
+        `,
+        [conversationId, memberId]
+      );
+
+      if (inserted.rowCount) {
+        addedMemberIds.push(inserted.rows[0].user_id);
+      }
+    }
+
+    if (addedMemberIds.length > 0) {
+      updateMessage = await appendSystemChatMessage(client, {
+        conversationId,
+        text: `${addedMemberIds.length} member${addedMemberIds.length === 1 ? '' : 's'} added to the group.`,
+        metadata: {
+          event: 'group_members_added',
+          actorUserId,
+          memberIds: addedMemberIds,
+        },
+      });
+
+      await client.query(
+        `
+          UPDATE chat_conversations
+          SET updated_at = NOW()
+          WHERE id = $1
+        `,
+        [conversationId]
+      );
+    }
+
+    participantIds = await listChatParticipantIds(client, conversationId);
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  await Promise.all(
+    addedMemberIds
+      .filter((memberId) => memberId !== actorUserId)
+      .map(async (memberId) => {
+        try {
+          await queueUserNotification({
+            userId: memberId,
+            title: 'Added to a group chat',
+            body: `You were added to ${conversation.title ?? 'a group chat'}.`,
+            payload: {
+              conversationId,
+              event: 'chat_group_member_added',
+            },
+            metadata: {
+              source: 'chat.conversations.members.add',
+            },
+          });
+        } catch (error) {
+          request.log.error(
+            {
+              err: error,
+              conversationId,
+              memberId,
+            },
+            'Failed to queue member add notification'
+          );
+        }
+      })
+  );
+
+  if (updateMessage) {
+    publishRealtimeEvent({
+      topic: `chat.conversation:${conversationId}`,
+      type: 'chat.member.added',
+      payload: {
+        conversationId,
+        actorUserId,
+        memberIds: addedMemberIds,
+        messageId: updateMessage.id,
+      },
+    });
+  }
+
+  return {
+    ok: true,
+    conversationId,
+    addedMemberIds,
+    participantIds,
+  };
+});
+
+app.get('/chat/bots', async () => {
+  const result = await db.query<{
+    id: string;
+    slug: string;
+    name: string;
+    description: string;
+    command_hint: string;
+    category: 'moderation' | 'commerce' | 'automation';
+  }>(
+    `
+      SELECT id, slug, name, description, command_hint, category
+      FROM chat_bots
+      WHERE is_active = TRUE
+      ORDER BY name ASC
+    `
+  );
+
+  return {
+    ok: true,
+    items: result.rows.map((row) => ({
+      id: row.id,
+      slug: row.slug,
+      name: row.name,
+      description: row.description,
+      commandHint: row.command_hint,
+      category: row.category,
+    })),
+  };
+});
+
+app.get('/chat/conversations/:conversationId/bots', async (request) => {
+  const paramsSchema = z.object({
+    conversationId: z.string().min(2).max(120),
+  });
+
+  const actorUserId = resolveAuthenticatedUserId(request);
+  const { conversationId } = paramsSchema.parse(request.params);
+  await ensureGroupConversationAccess(db, conversationId, actorUserId);
+
+  const result = await db.query<{
+    id: string;
+    slug: string;
+    name: string;
+    description: string;
+    command_hint: string;
+    category: 'moderation' | 'commerce' | 'automation';
+    installed_at: string;
+  }>(
+    `
+      SELECT
+        b.id,
+        b.slug,
+        b.name,
+        b.description,
+        b.command_hint,
+        b.category,
+        cbi.installed_at::text
+      FROM chat_bot_installs cbi
+      INNER JOIN chat_bots b
+        ON b.id = cbi.bot_id
+      WHERE cbi.conversation_id = $1
+      ORDER BY cbi.installed_at ASC
+    `,
+    [conversationId]
+  );
+
+  return {
+    ok: true,
+    conversationId,
+    items: result.rows.map((row) => ({
+      id: row.id,
+      slug: row.slug,
+      name: row.name,
+      description: row.description,
+      commandHint: row.command_hint,
+      category: row.category,
+      installedAt: row.installed_at,
+    })),
+  };
+});
+
+app.post('/chat/conversations/:conversationId/bots/:botId/deploy', async (request) => {
+  const paramsSchema = z.object({
+    conversationId: z.string().min(2).max(120),
+    botId: z.string().min(2).max(120),
+  });
+
+  const actorUserId = resolveAuthenticatedUserId(request);
+  const { conversationId, botId } = paramsSchema.parse(request.params);
+  await ensureGroupConversationAccess(db, conversationId, actorUserId);
+
+  const botResult = await db.query<{ id: string; name: string; command_hint: string }>(
+    `
+      SELECT id, name, command_hint
+      FROM chat_bots
+      WHERE id = $1
+        AND is_active = TRUE
+      LIMIT 1
+    `,
+    [botId]
+  );
+
+  if (!botResult.rowCount) {
+    throw createApiError('CHAT_BOT_NOT_FOUND', 'Chat bot not found', {
+      botId,
+    });
+  }
+
+  const bot = botResult.rows[0];
+  const client = await db.connect();
+  let installed = false;
+  let updateMessage: { id: string; createdAt: string } | null = null;
+  let botIds: string[] = [];
+
+  try {
+    await client.query('BEGIN');
+
+    const installResult = await client.query<{ bot_id: string }>(
+      `
+        INSERT INTO chat_bot_installs (conversation_id, bot_id, installed_by)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (conversation_id, bot_id) DO NOTHING
+        RETURNING bot_id
+      `,
+      [conversationId, botId, actorUserId]
+    );
+
+    installed = Boolean(installResult.rowCount);
+    if (installed) {
+      updateMessage = await appendSystemChatMessage(client, {
+        conversationId,
+        text: `${bot.name} deployed. Try ${bot.command_hint}`,
+        metadata: {
+          event: 'group_bot_deployed',
+          actorUserId,
+          botId,
+        },
+      });
+
+      await client.query(
+        `
+          UPDATE chat_conversations
+          SET updated_at = NOW()
+          WHERE id = $1
+        `,
+        [conversationId]
+      );
+    }
+
+    botIds = await listChatBotIds(client, conversationId);
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  if (updateMessage) {
+    publishRealtimeEvent({
+      topic: `chat.conversation:${conversationId}`,
+      type: 'chat.bot.deployed',
+      payload: {
+        conversationId,
+        botId,
+        actorUserId,
+        messageId: updateMessage.id,
+      },
+    });
+  }
+
+  return {
+    ok: true,
+    conversationId,
+    botId,
+    installed,
+    botIds,
+  };
+});
+
+app.delete('/chat/conversations/:conversationId/bots/:botId', async (request) => {
+  const paramsSchema = z.object({
+    conversationId: z.string().min(2).max(120),
+    botId: z.string().min(2).max(120),
+  });
+
+  const actorUserId = resolveAuthenticatedUserId(request);
+  const { conversationId, botId } = paramsSchema.parse(request.params);
+  await ensureGroupConversationAccess(db, conversationId, actorUserId);
+
+  const botResult = await db.query<{ id: string; name: string }>(
+    `
+      SELECT id, name
+      FROM chat_bots
+      WHERE id = $1
+      LIMIT 1
+    `,
+    [botId]
+  );
+
+  if (!botResult.rowCount) {
+    throw createApiError('CHAT_BOT_NOT_FOUND', 'Chat bot not found', {
+      botId,
+    });
+  }
+
+  const bot = botResult.rows[0];
+  const client = await db.connect();
+  let removed = false;
+  let updateMessage: { id: string; createdAt: string } | null = null;
+  let botIds: string[] = [];
+
+  try {
+    await client.query('BEGIN');
+
+    const deleteResult = await client.query<{ bot_id: string }>(
+      `
+        DELETE FROM chat_bot_installs
+        WHERE conversation_id = $1
+          AND bot_id = $2
+        RETURNING bot_id
+      `,
+      [conversationId, botId]
+    );
+
+    removed = Boolean(deleteResult.rowCount);
+    if (removed) {
+      updateMessage = await appendSystemChatMessage(client, {
+        conversationId,
+        text: `${bot.name} removed from the group.`,
+        metadata: {
+          event: 'group_bot_removed',
+          actorUserId,
+          botId,
+        },
+      });
+
+      await client.query(
+        `
+          UPDATE chat_conversations
+          SET updated_at = NOW()
+          WHERE id = $1
+        `,
+        [conversationId]
+      );
+    }
+
+    botIds = await listChatBotIds(client, conversationId);
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  if (updateMessage) {
+    publishRealtimeEvent({
+      topic: `chat.conversation:${conversationId}`,
+      type: 'chat.bot.removed',
+      payload: {
+        conversationId,
+        botId,
+        actorUserId,
+        messageId: updateMessage.id,
+      },
+    });
+  }
+
+  return {
+    ok: true,
+    conversationId,
+    botId,
+    removed,
+    botIds,
+  };
+});
+
 app.post('/wallets/:userId/snapshot', async (request, reply) => {
   const paramsSchema = z.object({ userId: z.string().min(2) });
   const bodySchema = z.object({
@@ -6132,14 +8731,25 @@ app.get('/wallet/1ze/quote', async (request, reply) => {
     });
 
     const direction = payload.fiatAmount !== undefined ? 'mint' : 'burn';
-    const fiatAmount =
-      payload.fiatAmount !== undefined
-        ? Number(payload.fiatAmount.toFixed(6))
-        : Number(((payload.izeAmount ?? 0) * rate.ratePerGram).toFixed(6));
-    const izeAmount =
-      payload.izeAmount !== undefined
-        ? Number(payload.izeAmount.toFixed(6))
-        : Number(((payload.fiatAmount ?? 0) / rate.ratePerGram).toFixed(6));
+
+    let fiatAmount: number;
+    let izeAmount: number;
+    let netFiatAmount: number;
+    let platformFeeAmount = 0;
+    let platformFeeRate = 0;
+
+    if (direction === 'mint') {
+      const feeBreakdown = calculateWalletTopupFeeBreakdown(payload.fiatAmount ?? 0);
+      fiatAmount = feeBreakdown.grossFiatAmount;
+      netFiatAmount = feeBreakdown.netFiatAmount;
+      platformFeeAmount = feeBreakdown.platformFeeAmount;
+      platformFeeRate = feeBreakdown.platformFeeRate;
+      izeAmount = Number((netFiatAmount / rate.ratePerGram).toFixed(6));
+    } else {
+      fiatAmount = Number(((payload.izeAmount ?? 0) * rate.ratePerGram).toFixed(6));
+      netFiatAmount = fiatAmount;
+      izeAmount = Number((payload.izeAmount ?? 0).toFixed(6));
+    }
 
     return {
       ok: true,
@@ -6147,7 +8757,10 @@ app.get('/wallet/1ze/quote', async (request, reply) => {
         direction,
         fiatCurrency: payload.fiatCurrency.toUpperCase(),
         fiatAmount,
+        netFiatAmount,
         izeAmount,
+        platformFeeRate,
+        platformFeeAmount,
         ratePerGram: rate.ratePerGram,
         rateSource: rate.source,
       },
@@ -6305,6 +8918,7 @@ app.post('/wallet/1ze/mint', async (request, reply) => {
 
   const payload = bodySchema.parse(request.body ?? {});
   const actorUserId = resolveAuthenticatedUserId(request, payload.userId);
+  const feeBreakdown = calculateWalletTopupFeeBreakdown(payload.fiatAmount);
 
   if (!(await onezeTablesAvailable(db))) {
     reply.code(503);
@@ -6319,6 +8933,10 @@ app.post('/wallet/1ze/mint', async (request, reply) => {
     await client.query('BEGIN');
     await ensureUserExists(actorUserId);
 
+    if (feeBreakdown.netFiatAmount <= 0) {
+      throw createApiError('IZE_MINT_INVALID', 'Top-up amount is too low after platform fee');
+    }
+
     if (config.nodeEnv === 'production' && !payload.paymentIntentId) {
       throw createApiError(
         'IZE_MINT_BACKING_REQUIRED',
@@ -6331,7 +8949,7 @@ app.post('/wallet/1ze/mint', async (request, reply) => {
       const settledIntent = await assertSettledWalletTopupIntent(client, {
         paymentIntentId: payload.paymentIntentId,
         userId: actorUserId,
-        fiatAmount: payload.fiatAmount,
+        fiatAmount: feeBreakdown.grossFiatAmount,
         fiatCurrency: payload.fiatCurrency,
       });
 
@@ -6341,7 +8959,7 @@ app.post('/wallet/1ze/mint', async (request, reply) => {
     const quote = await resolveGoldRate(client, payload.fiatCurrency, {
       forceRefresh: false,
     });
-    const izeAmount = Number((payload.fiatAmount / quote.ratePerGram).toFixed(6));
+    const izeAmount = Number((feeBreakdown.netFiatAmount / quote.ratePerGram).toFixed(6));
 
     if (!Number.isFinite(izeAmount) || izeAmount <= 0) {
       throw createApiError('IZE_MINT_INVALID', 'Unable to derive a valid 1ze mint amount');
@@ -6351,12 +8969,20 @@ app.post('/wallet/1ze/mint', async (request, reply) => {
     await recordIzeMint(client, {
       operationId,
       userId: actorUserId,
-      fiatAmount: payload.fiatAmount,
+      fiatAmount: feeBreakdown.netFiatAmount,
       fiatCurrency: payload.fiatCurrency.toUpperCase(),
       izeAmount,
       ratePerGram: quote.ratePerGram,
       paymentIntentId: payload.paymentIntentId,
-      metadata: payload.metadata,
+      metadata: {
+        ...(payload.metadata ?? {}),
+        walletTopup: {
+          grossFiatAmount: feeBreakdown.grossFiatAmount,
+          netFiatAmount: feeBreakdown.netFiatAmount,
+          platformFeeRate: feeBreakdown.platformFeeRate,
+          platformFeeAmount: feeBreakdown.platformFeeAmount,
+        },
+      },
     });
 
     const [walletBalanceIze, reserveSnapshot] = await Promise.all([
@@ -6372,7 +8998,11 @@ app.post('/wallet/1ze/mint', async (request, reply) => {
         id: operationId,
         type: 'mint',
         userId: actorUserId,
-        fiatAmount: payload.fiatAmount,
+        fiatAmount: feeBreakdown.netFiatAmount,
+        grossFiatAmount: feeBreakdown.grossFiatAmount,
+        netFiatAmount: feeBreakdown.netFiatAmount,
+        platformFeeRate: feeBreakdown.platformFeeRate,
+        platformFeeAmount: feeBreakdown.platformFeeAmount,
         fiatCurrency: payload.fiatCurrency.toUpperCase(),
         izeAmount,
         ratePerGram: quote.ratePerGram,
@@ -9362,6 +11992,7 @@ app.post('/orders', async (request, reply) => {
     listingId: z.string().min(2),
     addressId: z.coerce.number().int().positive().optional(),
     paymentMethodId: z.coerce.number().int().positive().optional(),
+    platformChargeGbp: z.number().min(0).optional(),
     buyerProtectionFeeGbp: z.number().min(0).optional(),
   });
 
@@ -9411,11 +12042,13 @@ app.post('/orders', async (request, reply) => {
   }
 
   const subtotalGbp = roundTo(Number(listing.price_gbp), 2);
-  const buyerProtectionFeeGbp =
-    payload.buyerProtectionFeeGbp !== undefined
-      ? roundTo(payload.buyerProtectionFeeGbp, 2)
-      : roundTo(subtotalGbp * 0.05 + 0.7, 2);
-  const totalGbp = roundTo(subtotalGbp + buyerProtectionFeeGbp, 2);
+  const platformChargeGbp =
+    payload.platformChargeGbp !== undefined
+      ? roundTo(payload.platformChargeGbp, 2)
+      : payload.buyerProtectionFeeGbp !== undefined
+        ? roundTo(payload.buyerProtectionFeeGbp, 2)
+        : calculateCommercePlatformChargeGbp(subtotalGbp);
+  const totalGbp = roundTo(subtotalGbp + platformChargeGbp, 2);
 
   const orderId = payload.orderId ?? `ord_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
 
@@ -9467,7 +12100,7 @@ app.post('/orders', async (request, reply) => {
       listing.seller_id,
       payload.listingId,
       subtotalGbp,
-      buyerProtectionFeeGbp,
+      platformChargeGbp,
       totalGbp,
       payload.addressId ?? null,
       payload.paymentMethodId ?? null,
@@ -9484,6 +12117,7 @@ app.post('/orders', async (request, reply) => {
       listingId: insertResult.rows[0].listing_id,
       subtotalGbp: Number(insertResult.rows[0].subtotal_gbp),
       buyerProtectionFeeGbp: Number(insertResult.rows[0].buyer_protection_fee_gbp),
+      platformChargeGbp: Number(insertResult.rows[0].buyer_protection_fee_gbp),
       totalGbp: Number(insertResult.rows[0].total_gbp),
       status: insertResult.rows[0].status,
       addressId: insertResult.rows[0].address_id,
@@ -9554,12 +12188,14 @@ app.post('/orders/:orderId/pay', async (request, reply) => {
         buyerId: paidRow.buyer_id,
         sellerId: paidRow.seller_id,
         subtotalGbp: Number(paidRow.subtotal_gbp),
-        buyerProtectionFeeGbp: Number(paidRow.buyer_protection_fee_gbp),
+        platformChargeGbp: Number(paidRow.buyer_protection_fee_gbp),
         totalGbp: Number(paidRow.total_gbp),
       });
     }
 
     await client.query('COMMIT');
+
+    const platformChargeCreditedGbp = Number(paidRow.buyer_protection_fee_gbp);
 
     return {
       ok: true,
@@ -9569,7 +12205,8 @@ app.post('/orders/:orderId/pay', async (request, reply) => {
       settlement: {
         buyerChargedGbp: Number(paidRow.total_gbp),
         sellerPayableCreditedGbp: Number(paidRow.subtotal_gbp),
-        platformCommissionCreditedGbp: Number(paidRow.buyer_protection_fee_gbp),
+        platformCommissionCreditedGbp: platformChargeCreditedGbp,
+        platformChargeCreditedGbp,
       },
     };
   } catch (error) {
@@ -9704,6 +12341,7 @@ app.get('/orders/:orderId', async (request, reply) => {
   }
 
   const row = result.rows[0];
+  const platformChargeGbp = Number(row.buyer_protection_fee_gbp);
   return {
     ok: true,
     order: {
@@ -9712,7 +12350,8 @@ app.get('/orders/:orderId', async (request, reply) => {
       sellerId: row.seller_id,
       listingId: row.listing_id,
       subtotalGbp: Number(row.subtotal_gbp),
-      buyerProtectionFeeGbp: Number(row.buyer_protection_fee_gbp),
+      buyerProtectionFeeGbp: platformChargeGbp,
+      platformChargeGbp,
       totalGbp: Number(row.total_gbp),
       status: row.status,
       addressId: row.address_id,
@@ -9844,7 +12483,11 @@ app.get('/users/:userId/market-history', async (request, reply) => {
           ab.amount_gbp AS amount_gbp,
           NULL::INTEGER AS units,
           NULL::NUMERIC AS unit_price_gbp,
-          NULL::NUMERIC AS fee_gbp,
+          CASE
+            WHEN a.status = 'ended' AND a.winner_bid_id = ab.id
+              THEN ROUND(ab.amount_gbp * $6::numeric, 2)
+            ELSE NULL::NUMERIC
+          END AS fee_gbp,
           NULL::TEXT AS status,
           l.title AS note,
           ab.created_at AS timestamp
@@ -9876,7 +12519,7 @@ app.get('/users/:userId/market-history', async (request, reply) => {
       ORDER BY history.timestamp DESC, history.entry_id DESC
       LIMIT $5
     `,
-    [userId, channel, cursorTs ?? null, cursorId ?? null, fetchLimit]
+    [userId, channel, cursorTs ?? null, cursorId ?? null, fetchLimit, AUCTION_PLATFORM_FEE_RATE]
   );
 
   const hasMore = result.rows.length > limit;
@@ -11007,7 +13650,7 @@ app.post('/syndicate/assets/:assetId/orders', async (request, reply) => {
   const bodySchema = z.object({
     userId: z.string().min(2),
     side: z.enum(['buy', 'sell']),
-    units: z.number().int().positive(),
+    units: z.number().int().min(1).max(20),
     orderType: z.enum(['market', 'limit']).default('market'),
     limitPriceGbp: z.number().positive().optional(),
   }).superRefine((value, ctx) => {
@@ -11300,7 +13943,7 @@ app.post('/syndicate/assets/:assetId/orders', async (request, reply) => {
       const fillUnits = Math.min(remainingUnits, restingRemaining);
       const tradePrice = Number(resting.unit_price_gbp);
       const tradeNotional = roundTo(fillUnits * tradePrice, 4);
-      const tradeFee = roundTo(tradeNotional * 0.005, 4);
+      const tradeFee = roundTo(tradeNotional * SYNDICATE_TRADE_FEE_RATE, 4);
 
       if (payload.side === 'buy') {
         await applySyndicateTransfer(client, {
@@ -11379,7 +14022,7 @@ app.post('/syndicate/assets/:assetId/orders', async (request, reply) => {
       if (primaryFillUnits > 0) {
         const tradePrice = referencePriceGbp;
         const tradeNotional = roundTo(primaryFillUnits * tradePrice, 4);
-        const tradeFee = roundTo(tradeNotional * 0.005, 4);
+        const tradeFee = roundTo(tradeNotional * SYNDICATE_TRADE_FEE_RATE, 4);
 
         await applySyndicateTransfer(client, {
           assetId,
@@ -11673,7 +14316,7 @@ app.post('/syndicate/assets/:assetId/buyout-offers', async (request, reply) => {
   const bodySchema = z.object({
     bidderUserId: z.string().min(2),
     offerPriceGbp: z.number().positive(),
-    targetUnits: z.number().int().positive().optional(),
+    targetUnits: z.number().int().min(1).max(20).optional(),
     expiresInHours: z.number().int().min(1).max(168).default(24),
     metadata: z.record(z.unknown()).optional(),
   });
@@ -11930,7 +14573,7 @@ app.post('/syndicate/buyout-offers/:offerId/accept', async (request, reply) => {
   const paramsSchema = z.object({ offerId: z.string().min(4) });
   const bodySchema = z.object({
     holderUserId: z.string().min(2),
-    units: z.number().int().positive(),
+    units: z.number().int().min(1).max(20),
     metadata: z.record(z.unknown()).optional(),
   });
 

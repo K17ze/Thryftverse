@@ -19,6 +19,7 @@ import { MOCK_LISTINGS, MOCK_USERS } from '../data/mockData';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useBackendData } from '../context/BackendDataContext';
 import { getOrder } from '../services/commerceApi';
+import { calculatePlatformChargeGbp } from '../utils/currencyAuthoringFlows';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 type RouteT = RouteProp<RootStackParamList, 'OrderDetail'>;
@@ -156,6 +157,7 @@ export default function OrderDetailScreen() {
         listingId: string;
         subtotalGbp: number;
         buyerProtectionFeeGbp: number;
+        platformChargeGbp?: number;
         totalGbp: number;
         status: string;
         addressId: number | null;
@@ -209,11 +211,14 @@ export default function OrderDetailScreen() {
     MOCK_USERS[0];
 
   const subtotal = backendOrder?.subtotalGbp ?? listing.price;
-  const buyerProtectionFee = backendOrder?.buyerProtectionFeeGbp ?? listing.price * 0.05 + 0.7;
+  const platformCharge =
+    backendOrder?.platformChargeGbp ??
+    backendOrder?.buyerProtectionFeeGbp ??
+    calculatePlatformChargeGbp(listing.price);
   const postageFee = backendOrder
-    ? Math.max(0, Number((backendOrder.totalGbp - subtotal - buyerProtectionFee).toFixed(2)))
+    ? Math.max(0, Number((backendOrder.totalGbp - subtotal - platformCharge).toFixed(2)))
     : 2.89;
-  const totalPaid = backendOrder?.totalGbp ?? subtotal + buyerProtectionFee + postageFee;
+  const totalPaid = backendOrder?.totalGbp ?? subtotal + platformCharge + postageFee;
 
   const orderStatus = normalizeOrderStatus(backendOrder?.status);
   const trackingSteps = buildTrackingSteps(orderStatus, seller.username);
@@ -320,7 +325,7 @@ export default function OrderDetailScreen() {
         <Text style={styles.sectionTitle}>Transaction</Text>
         <View style={styles.txCard}>
           <TxRow label="Item price" value={formatFromFiat(subtotal, 'GBP', { displayMode: 'fiat' })} />
-          <TxRow label="Buyer protection" value={formatFromFiat(buyerProtectionFee, 'GBP', { displayMode: 'fiat' })} />
+          <TxRow label="Platform charge" value={formatFromFiat(platformCharge, 'GBP', { displayMode: 'fiat' })} />
           <TxRow label="Postage" value={`from ${formatFromFiat(postageFee, 'GBP', { displayMode: 'fiat' })}`} />
           <View style={styles.txDivider} />
           <TxRow label="Total paid" value={formatFromFiat(totalPaid, 'GBP', { displayMode: 'fiat' })} bold />

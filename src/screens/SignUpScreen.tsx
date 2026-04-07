@@ -22,6 +22,7 @@ import { signupWithPassword } from '../services/authApi';
 export default function SignUpScreen() {
   const navigation = useNavigation<any>();
   const login = useStore((state) => state.login);
+  const setTwoFactorEnabled = useStore((state) => state.setTwoFactorEnabled);
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -88,6 +89,7 @@ export default function SignUpScreen() {
       });
 
       login(result.storeUser);
+      setTwoFactorEnabled(result.user.twoFactorEnabled);
       navigation.replace('MainTabs');
     } catch (error) {
       setErrorMsg((error as Error).message || 'Unable to create account right now.');

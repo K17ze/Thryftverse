@@ -28,6 +28,7 @@ import { ActiveTheme, Colors } from '../constants/colors';
 import { Listing, MOCK_USERS, MY_USER } from '../data/mockData';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useBackendData } from '../context/BackendDataContext';
+import { useToast } from '../context/ToastContext';
 
 type Props = StackScreenProps<RootStackParamList, 'UserProfile'>;
 
@@ -73,8 +74,10 @@ export default function UserProfileScreen({ navigation, route }: Props) {
   const insets = useSafeAreaInsets();
   const userAvatar = useStore(state => state.userAvatar);
   const userCover = useStore(state => state.userCover);
+  const { show } = useToast();
   const [activeTab, setActiveTab] = useState<Tab>('Listings');
   const [following, setFollowing] = useState(false);
+  const [isBlocked, setIsBlocked] = useState(false);
   const [reviewFilter, setReviewFilter] = useState<ReviewFilter>('All');
   const [actionSheetVisible, setActionSheetVisible] = useState(false);
   const { formatFromFiat } = useFormattedPrice();
@@ -247,12 +250,17 @@ export default function UserProfileScreen({ navigation, route }: Props) {
                   return;
                 }
 
+                if (isBlocked) {
+                  show('This user is blocked. Unblock them before following.', 'info');
+                  return;
+                }
+
                 setFollowing((prev) => !prev);
               }}
               activeOpacity={0.85}
             >
               <Text style={[styles.heroActionPrimaryText, following && !route.params.isMe && styles.heroActionPrimaryTextActive]}>
-                {route.params.isMe ? 'Edit profile' : following ? 'Following' : 'Follow user'}
+                {route.params.isMe ? 'Edit profile' : isBlocked ? 'Blocked' : following ? 'Following' : 'Follow user'}
               </Text>
             </AnimatedPressable>
 
@@ -403,6 +411,14 @@ export default function UserProfileScreen({ navigation, route }: Props) {
             style={{ paddingVertical: 16, flexDirection: 'row', alignItems: 'center', gap: 12 }}
             onPress={() => {
               setActionSheetVisible(false);
+              if (route.params.isMe) {
+                show('You cannot block your own profile.', 'info');
+                return;
+              }
+
+              setIsBlocked(true);
+              setFollowing(false);
+              show('User blocked. You will not receive new messages from them.', 'success');
             }}
           >
             <Ionicons name="ban-outline" size={20} color={Colors.danger} />

@@ -61,8 +61,6 @@ export default function AuctionsScreen() {
   const customPosters = useStore((state) => state.customPosters);
   const customAuctions = useStore((state) => state.customAuctions);
   const auctionRuntime = useStore((state) => state.auctionRuntime);
-  const placeAuctionBidLocal = useStore((state) => state.placeAuctionBid);
-  const buyNowAuctionLocal = useStore((state) => state.buyNowAuction);
   const settleExpiredAuctions = useStore((state) => state.settleExpiredAuctions);
 
   const actingUserId = currentUser?.id ?? 'u1';
@@ -297,44 +295,26 @@ export default function AuctionsScreen() {
     setIsSubmittingBid(true);
 
     try {
-      try {
-        const remoteResult = await placeAuctionBidRemote(selectedBidAuction.id, {
-          bidderId: actingUserId,
-          amountGbp: roundedAmount,
-        });
+      const remoteResult = await placeAuctionBidRemote(selectedBidAuction.id, {
+        bidderId: actingUserId,
+        amountGbp: roundedAmount,
+      });
 
-        await syncAuctions();
-        setNowTs(Date.now());
-        show(
-          `Bid placed on ${selectedBidAuction.title} at ${formatFromFiat(roundedAmount, 'GBP', { displayMode: 'fiat' })}`,
-          'success'
-        );
+      await syncAuctions();
+      setNowTs(Date.now());
+      show(
+        `Bid placed on ${selectedBidAuction.title} at ${formatFromFiat(roundedAmount, 'GBP', { displayMode: 'fiat' })}`,
+        'success'
+      );
 
-        if (remoteResult.aml?.alertId) {
-          show('Bid is flagged for AML review.', 'info');
-        }
-
-        closeBidComposer();
-        return;
-      } catch (error) {
-        const parsedError = parseApiError(error, 'Unable to place bid');
-        if (!parsedError.isNetworkError) {
-          show(parsedError.message, 'error');
-          return;
-        }
-
-        const result = placeAuctionBidLocal(selectedBidAuction, actingUserId, roundedAmount);
-        if (!result.ok) {
-          show(result.message ?? 'Unable to place bid', 'error');
-          return;
-        }
-
-        show(
-          `Bid placed on ${selectedBidAuction.title}. Backend sync unavailable.`,
-          'info'
-        );
-        closeBidComposer();
+      if (remoteResult.aml?.alertId) {
+        show('Bid is flagged for AML review.', 'info');
       }
+
+      closeBidComposer();
+    } catch (error) {
+      const parsedError = parseApiError(error, 'Unable to place bid');
+      show(parsedError.message, 'error');
     } finally {
       setIsSubmittingBid(false);
     }
@@ -348,44 +328,22 @@ export default function AuctionsScreen() {
     setBuyNowAuctionId(auction.id);
 
     try {
-      let backendSynced = false;
-      let backendAmlAlerted = false;
+      const remoteResult = await placeAuctionBidRemote(auction.id, {
+        bidderId: actingUserId,
+        amountGbp: Number(auction.buyNowPrice.toFixed(2)),
+      });
 
-      try {
-        const remoteResult = await placeAuctionBidRemote(auction.id, {
-          bidderId: actingUserId,
-          amountGbp: Number(auction.buyNowPrice.toFixed(2)),
-        });
+      await syncAuctions();
+      show(`You won ${auction.title}`, 'success');
 
-        backendSynced = true;
-        backendAmlAlerted = !!remoteResult.aml?.alertId;
-        await syncAuctions();
-      } catch (error) {
-        const parsedError = parseApiError(error, 'Unable to complete buy now');
-        if (!parsedError.isNetworkError) {
-          show(parsedError.message, 'error');
-          return;
-        }
-
-        backendSynced = false;
-      }
-
-      const localResult = buyNowAuctionLocal(auction, actingUserId);
-      if (!backendSynced && !localResult.ok) {
-        show(localResult.message ?? 'Unable to buy now', 'error');
-        return;
-      }
-
-      show(
-        backendSynced ? `You won ${auction.title}` : `You won ${auction.title}. Backend sync unavailable.`,
-        backendSynced ? 'success' : 'info'
-      );
-
-      if (backendAmlAlerted) {
+      if (remoteResult.aml?.alertId) {
         show('Buy now is flagged for AML review.', 'info');
       }
 
       navigation.navigate('Checkout', { itemId: auction.listingId });
+    } catch (error) {
+      const parsedError = parseApiError(error, 'Unable to complete buy now');
+      show(parsedError.message, 'error');
     } finally {
       setBuyNowAuctionId(null);
     }
@@ -497,7 +455,7 @@ export default function AuctionsScreen() {
 
       <View style={styles.rulesCard}>
         <Ionicons name="timer-outline" size={16} color={BRAND} />
-        <Text style={styles.rulesText}>Auctions are timed fiat bidding windows (6h). For fractional 1ze trading, switch to Syndicate.</Text>
+        <Text style={styles.rulesText}>Auctions are timed fiat bidding windows (6h). Winning bids include a 3% platform charge. For fractional 1ze trading, switch to Syndicate.</Text>
       </View>
 
       <View style={styles.launchRow}>

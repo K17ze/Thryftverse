@@ -47,15 +47,15 @@ const PRICE_SERIES: Record<string, PricePoint[]> = MOCK_SYNDICATE_ASSETS.reduce(
 const ORDER_BOOK: Record<string, OrderBookEntry[]> = MOCK_SYNDICATE_ASSETS.reduce((acc, asset) => {
   const center = asset.unitPriceGBP;
   const bids: OrderBookEntry[] = [
-    { price: Number((center * 0.998).toFixed(2)), quantity: 42, side: 'bid', orderCount: 4 },
-    { price: Number((center * 0.994).toFixed(2)), quantity: 64, side: 'bid', orderCount: 7 },
-    { price: Number((center * 0.99).toFixed(2)), quantity: 90, side: 'bid', orderCount: 8 },
+    { price: Number((center * 0.998).toFixed(2)), quantity: 2, side: 'bid', orderCount: 4 },
+    { price: Number((center * 0.994).toFixed(2)), quantity: 4, side: 'bid', orderCount: 7 },
+    { price: Number((center * 0.99).toFixed(2)), quantity: 6, side: 'bid', orderCount: 8 },
   ];
 
   const asks: OrderBookEntry[] = [
-    { price: Number((center * 1.002).toFixed(2)), quantity: 38, side: 'ask', orderCount: 5 },
-    { price: Number((center * 1.006).toFixed(2)), quantity: 58, side: 'ask', orderCount: 6 },
-    { price: Number((center * 1.01).toFixed(2)), quantity: 74, side: 'ask', orderCount: 9 },
+    { price: Number((center * 1.002).toFixed(2)), quantity: 3, side: 'ask', orderCount: 5 },
+    { price: Number((center * 1.006).toFixed(2)), quantity: 5, side: 'ask', orderCount: 6 },
+    { price: Number((center * 1.01).toFixed(2)), quantity: 7, side: 'ask', orderCount: 9 },
   ];
 
   acc[asset.id] = [...bids, ...asks].sort((a, b) => a.price - b.price);
@@ -152,10 +152,10 @@ export const MOCK_BUYOUT_OFFERS: BuyoutOffer[] = [
     id: 'buyout_001',
     assetId: 's4',
     buyerId: 'u2',
-    sharesOwned: 730,
-    sharesNeeded: 190,
+    sharesOwned: 14,
+    sharesNeeded: 6,
     offerPricePerShare: 2.98,
-    totalCost: 566.2,
+    totalCost: 17.88,
     status: 'open',
     expiresAt: new Date(now + 48 * 60 * 60 * 1000).toISOString(),
   },

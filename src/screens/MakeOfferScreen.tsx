@@ -54,7 +54,7 @@ export default function MakeOfferScreen({ navigation, route }: Props) {
   const numericOffer = parseFloat(offerPrice) || 0;
   const {
     offerGbp: numericOfferGbp,
-    buyerProtectionFeeGbp: buyerProtectionFee,
+    platformChargeGbp,
     totalGbp: total,
   } = calculateOfferSummaryFromDisplay(numericOffer, currencyCode, goldRates);
 
@@ -122,13 +122,13 @@ export default function MakeOfferScreen({ navigation, route }: Props) {
           </View>
         </View>
 
-        {/* Spaced Anti-list Buyer Protection */}
+        {/* Spaced Anti-list Platform Charge */}
         <Text style={styles.sectionLabel}>Summary</Text>
         <View style={styles.protectionCard}>
           <View style={styles.protectionRow}>
             <Ionicons name="shield-checkmark" size={18} color={BRAND} />
-            <Text style={styles.protectionLabel}>Buyer Protection</Text>
-            <Text style={styles.protectionValue}>{formatFromFiat(buyerProtectionFee, 'GBP')}</Text>
+            <Text style={styles.protectionLabel}>Platform charge</Text>
+            <Text style={styles.protectionValue}>{formatFromFiat(platformChargeGbp, 'GBP')}</Text>
           </View>
           
           <View style={[styles.protectionRow, { marginTop: 12 }]}>
@@ -137,7 +137,7 @@ export default function MakeOfferScreen({ navigation, route }: Props) {
           </View>
           
           <Text style={styles.protectionNote}>
-            Includes our Buyer Protection fee. You're covered if the item doesn't arrive or isn't as described.
+            Includes our platform charge for secure settlement and support.
           </Text>
         </View>
 

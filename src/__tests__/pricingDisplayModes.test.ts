@@ -16,11 +16,11 @@ function buildPricingSurface(mode: CurrencyDisplayMode) {
   return {
     mode,
     itemPrice: formatPrice({ izeAmount: itemIze, currencyCode: 'GBP', displayMode: mode }),
-    buyerProtectionLine: `incl. ${formatPrice({
+    platformChargeLine: `incl. ${formatPrice({
       izeAmount: protectionIze,
       currencyCode: 'GBP',
       displayMode: mode,
-    })} Buyer Protection fee`,
+    })} Platform charge`,
     checkoutTotal: formatPrice({ izeAmount: totalIze, currencyCode: 'GBP', displayMode: mode }),
     promoteCta: `Promote for ${formatPrice({ izeAmount: promoteIze, currencyCode: 'GBP', displayMode: mode })}`,
   };
@@ -37,24 +37,24 @@ describe('pricing display-mode snapshots', () => {
     expect(views).toMatchInlineSnapshot(`
       [
         {
-          "buyerProtectionLine": "incl. £5.18 Buyer Protection fee",
           "checkoutTotal": "£97.57",
           "itemPrice": "£89.50",
           "mode": "fiat",
+          "platformChargeLine": "incl. £5.18 Platform charge",
           "promoteCta": "Promote for £1.99",
         },
         {
-          "buyerProtectionLine": "incl. 0.068883 1ze Buyer Protection fee",
           "checkoutTotal": "1.297473 1ze",
           "itemPrice": "1.190160 1ze",
           "mode": "ize",
+          "platformChargeLine": "incl. 0.068883 1ze Platform charge",
           "promoteCta": "Promote for 0.026463 1ze",
         },
         {
-          "buyerProtectionLine": "incl. 0.068883 1ze · £5.18 Buyer Protection fee",
           "checkoutTotal": "1.297473 1ze · £97.57",
           "itemPrice": "1.190160 1ze · £89.50",
           "mode": "both",
+          "platformChargeLine": "incl. 0.068883 1ze · £5.18 Platform charge",
           "promoteCta": "Promote for 0.026463 1ze · £1.99",
         },
       ]

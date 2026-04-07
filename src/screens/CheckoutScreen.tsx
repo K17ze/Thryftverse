@@ -19,6 +19,7 @@ import { useStore } from '../store/useStore';
 import { useToast } from '../context/ToastContext';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { isCheckoutReady } from '../utils/checkoutFlow';
+import { calculatePlatformChargeGbp } from '../utils/currencyAuthoringFlows';
 import { useBackendData } from '../context/BackendDataContext';
 import { SyncStatusPill } from '../components/SyncStatusPill';
 import { AddCardSheet } from '../components/checkout/AddCardSheet';
@@ -58,9 +59,9 @@ export default function CheckoutScreen() {
   const item = listings.find((l) => l.id === itemId) || MOCK_LISTINGS.find((l) => l.id === itemId) || listings[0] || MOCK_LISTINGS[0];
   const seller = MOCK_USERS.find(u => u.id === item.sellerId) || MOCK_USERS[0];
 
-  const PROTECTION_FEE = parseFloat((item.price * 0.05 + 0.7).toFixed(2));
+  const PLATFORM_CHARGE = calculatePlatformChargeGbp(item.price);
   const POSTAGE_FEE = 2.89;
-  const TOTAL = item.price + PROTECTION_FEE + POSTAGE_FEE;
+  const TOTAL = item.price + PLATFORM_CHARGE + POSTAGE_FEE;
   const checkoutReady = isCheckoutReady(savedAddress, savedPaymentMethod);
 
   const checkoutStatus = React.useMemo(() => {
@@ -164,7 +165,7 @@ export default function CheckoutScreen() {
         listingId: item.id,
         addressId: savedAddress?.id,
         paymentMethodId: savedPaymentMethod?.id,
-        buyerProtectionFeeGbp: PROTECTION_FEE,
+        platformChargeGbp: PLATFORM_CHARGE,
       });
       await payOrder(order.id);
 
@@ -269,7 +270,7 @@ export default function CheckoutScreen() {
         <Text style={styles.sectionTitle}>Order Summary</Text>
         <View style={styles.summaryCard}>
           <SummaryRow label="Item price" value={formatFromFiat(item.price, 'GBP')} />
-          <SummaryRow label="Buyer protection fee" value={formatFromFiat(PROTECTION_FEE, 'GBP')} info />
+          <SummaryRow label="Platform charge" value={formatFromFiat(PLATFORM_CHARGE, 'GBP')} info />
           <SummaryRow label="Postage" value={formatFromFiat(POSTAGE_FEE, 'GBP')} />
           <View style={styles.divider} />
           <SummaryRow label="Total" value={formatFromFiat(TOTAL, 'GBP')} bold />

@@ -68,7 +68,10 @@ export interface IzeQuotePayload {
   direction: 'mint' | 'burn';
   fiatCurrency: string;
   fiatAmount: number;
+  netFiatAmount?: number;
   izeAmount: number;
+  platformFeeRate?: number;
+  platformFeeAmount?: number;
   ratePerGram: number;
   rateSource: string;
 }
@@ -166,6 +169,10 @@ interface MintIzeResponse {
     type: 'mint';
     userId: string;
     fiatAmount: number;
+    grossFiatAmount?: number;
+    netFiatAmount?: number;
+    platformFeeRate?: number;
+    platformFeeAmount?: number;
     fiatCurrency: string;
     izeAmount: number;
     ratePerGram: number;

@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 
 const AUTH_SESSION_STORAGE_KEY = 'thryftverse.auth.session.v1';
 
@@ -14,6 +15,59 @@ interface AuthSessionState {
 let authSessionState: AuthSessionState | null = null;
 let authSessionLoaded = false;
 let refreshInFlight: Promise<string | null> | null = null;
+let secureStoreAvailable: boolean | null = null;
+
+async function canUseSecureStore() {
+  if (secureStoreAvailable !== null) {
+    return secureStoreAvailable;
+  }
+
+  try {
+    secureStoreAvailable = await SecureStore.isAvailableAsync();
+  } catch {
+    secureStoreAvailable = false;
+  }
+
+  return secureStoreAvailable;
+}
+
+async function readStoredAuthSessionRaw() {
+  if (await canUseSecureStore()) {
+    try {
+      return await SecureStore.getItemAsync(AUTH_SESSION_STORAGE_KEY);
+    } catch {
+      // Fall back to AsyncStorage on secure-store read failures.
+    }
+  }
+
+  return AsyncStorage.getItem(AUTH_SESSION_STORAGE_KEY);
+}
+
+async function writeStoredAuthSessionRaw(value: string) {
+  if (await canUseSecureStore()) {
+    try {
+      await SecureStore.setItemAsync(AUTH_SESSION_STORAGE_KEY, value);
+      return;
+    } catch {
+      // Fall back to AsyncStorage on secure-store write failures.
+    }
+  }
+
+  await AsyncStorage.setItem(AUTH_SESSION_STORAGE_KEY, value);
+}
+
+async function clearStoredAuthSessionRaw() {
+  if (await canUseSecureStore()) {
+    try {
+      await SecureStore.deleteItemAsync(AUTH_SESSION_STORAGE_KEY);
+      return;
+    } catch {
+      // Fall back to AsyncStorage on secure-store delete failures.
+    }
+  }
+
+  await AsyncStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
+}
 
 function normalizeBaseUrl(url: string) {
   return url.replace(/\/$/, '');
@@ -147,6 +201,9 @@ function shouldSkipTokenRefresh(path: string) {
   return (
     normalized.startsWith('/auth/login') ||
     normalized.startsWith('/auth/signup') ||
+    normalized.startsWith('/auth/oauth') ||
+    normalized.startsWith('/auth/magic-link') ||
+    normalized.startsWith('/auth/otp') ||
     normalized.startsWith('/auth/refresh') ||
     normalized.startsWith('/auth/password-reset')
   );
@@ -160,7 +217,7 @@ async function hydrateAuthSession() {
   authSessionLoaded = true;
 
   try {
-    const raw = await AsyncStorage.getItem(AUTH_SESSION_STORAGE_KEY);
+    const raw = await readStoredAuthSessionRaw();
     if (!raw) {
       authSessionState = null;
       return;
@@ -200,13 +257,13 @@ export async function getAuthSession() {
 export async function setAuthSession(nextSession: AuthSessionState) {
   authSessionState = nextSession;
   authSessionLoaded = true;
-  await AsyncStorage.setItem(AUTH_SESSION_STORAGE_KEY, JSON.stringify(nextSession));
+  await writeStoredAuthSessionRaw(JSON.stringify(nextSession));
 }
 
 export async function clearAuthSession() {
   authSessionState = null;
   authSessionLoaded = true;
-  await AsyncStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
+  await clearStoredAuthSessionRaw();
 }
 
 async function refreshAccessToken(baseUrl: string): Promise<string | null> {

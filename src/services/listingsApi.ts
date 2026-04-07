@@ -1,5 +1,6 @@
 import { Listing } from '../data/mockData';
 import { fetchJson } from '../lib/apiClient';
+import { ENABLE_RUNTIME_MOCKS } from '../constants/runtimeFlags';
 
 interface ApiListingRow {
   id: string;
@@ -73,6 +74,7 @@ function mapApiListingToApp(row: ApiListingRow, fallback?: Listing): Listing {
 export async function fetchListingsFromApiWithFallback(
   fallbackListings: Listing[]
 ): Promise<ListingsSyncResult> {
+  const fallbackPool = ENABLE_RUNTIME_MOCKS ? fallbackListings : [];
   const fallbackById = new Map(fallbackListings.map((listing) => [listing.id, listing]));
 
   try {
@@ -80,24 +82,40 @@ export async function fetchListingsFromApiWithFallback(
     const rows = Array.isArray(payload.items) ? payload.items : [];
 
     if (rows.length === 0) {
+      if (fallbackPool.length > 0) {
+        return {
+          listings: fallbackPool,
+          source: 'mock',
+          error: 'API returned zero listings; using mock fallback.',
+        };
+      }
+
       return {
-        listings: fallbackListings,
-        source: 'mock',
-        error: 'API returned zero listings; using mock fallback.',
+        listings: [],
+        source: 'api',
+        error: 'API returned zero listings.',
       };
     }
 
     const mapped = rows.map((row) => mapApiListingToApp(row, fallbackById.get(row.id)));
     const mappedIds = new Set(mapped.map((listing) => listing.id));
-    const merged = [...mapped, ...fallbackListings.filter((listing) => !mappedIds.has(listing.id))];
+    const merged = [...mapped, ...fallbackPool.filter((listing) => !mappedIds.has(listing.id))];
 
     return {
       listings: merged,
       source: 'api',
     };
   } catch (error) {
+    if (fallbackPool.length === 0) {
+      return {
+        listings: [],
+        source: 'api',
+        error: (error as Error).message,
+      };
+    }
+
     return {
-      listings: fallbackListings,
+      listings: fallbackPool,
       source: 'mock',
       error: (error as Error).message,
     };

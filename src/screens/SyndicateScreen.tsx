@@ -50,6 +50,7 @@ const PANEL_TINT_BG = IS_LIGHT ? '#ece4d8' : '#2f291f';
 const PANEL_TINT_BORDER = IS_LIGHT ? '#d0c3af' : '#4f4638';
 const POSITIVE_BG = IS_LIGHT ? '#ece4d8' : '#14302a';
 const NEGATIVE_BG = IS_LIGHT ? '#f3dddd' : '#301919';
+const SYNDICATE_MAX_UNITS = 20;
 
 const COUNTRY_OPTIONS = [
   { code: 'GB', label: 'United Kingdom' },
@@ -67,6 +68,7 @@ const settlementLabelMap: Record<'GBP' | 'TVUSD' | 'HYBRID', string> = {
 };
 
 const COMPLIANCE_BLOCK_CODES = new Set([
+  'RISK_DISCLOSURE_REQUIRED',
   'KYC_REQUIRED',
   'KYC_LEVEL_INSUFFICIENT',
   'JURISDICTION_BLOCKED',
@@ -116,8 +118,6 @@ export default function SyndicateScreen() {
   const syndicateCompliance = useStore((state) => state.syndicateCompliance);
   const updateSyndicateCompliance = useStore((state) => state.updateSyndicateCompliance);
   const checkSyndicateEligibility = useStore((state) => state.checkSyndicateEligibility);
-  const buySyndicateUnits = useStore((state) => state.buySyndicateUnits);
-  const sellSyndicateUnits = useStore((state) => state.sellSyndicateUnits);
 
   const actingUserId = currentUser?.id ?? 'u1';
 
@@ -329,11 +329,15 @@ export default function SyndicateScreen() {
       return;
     }
 
+    if (units > SYNDICATE_MAX_UNITS) {
+      show(`Units must be between 1 and ${SYNDICATE_MAX_UNITS}`, 'error');
+      return;
+    }
+
     setIsSubmittingOrder(true);
 
     try {
       let remoteOrder: Awaited<ReturnType<typeof placeSyndicateOrder>> | null = null;
-      let canFallbackLocal = false;
 
       try {
         remoteOrder = await placeSyndicateOrder(selectedAsset.id, {
@@ -353,7 +357,8 @@ export default function SyndicateScreen() {
           return;
         }
 
-        canFallbackLocal = true;
+        show('Trading engine unavailable. Please retry once connection is restored.', 'error');
+        return;
       }
 
       if (remoteOrder) {
@@ -377,34 +382,7 @@ export default function SyndicateScreen() {
         return;
       }
 
-      if (!canFallbackLocal) {
-        show('Unable to submit order', 'error');
-        return;
-      }
-
-      const localResult = composerMode === 'buy'
-        ? buySyndicateUnits(selectedAsset, actingUserId, units)
-        : sellSyndicateUnits(selectedAsset, actingUserId, units);
-
-      if (!localResult.ok) {
-        show(localResult.message ?? 'Unable to submit order', 'error');
-        if (shouldOpenComplianceModal(localResult.message ?? '', null)) {
-          setComplianceModalVisible(true);
-        }
-        return;
-      }
-
-      const fallbackSuccessLabel = `${composerMode === 'buy' ? 'Purchased' : 'Sold'} units`;
-      const successMessage = localResult.ok
-        ? localResult.message ?? fallbackSuccessLabel
-        : 'Order submitted and filled';
-
-      closeUnitsComposer();
-      show(`${successMessage}. Backend sync unavailable.`, 'info');
-
-      if (localResult.deliveryTriggered && localResult.deliveryListingId) {
-        navigation.navigate('Checkout', { itemId: localResult.deliveryListingId });
-      }
+      show('Unable to submit order', 'error');
     } finally {
       setIsSubmittingOrder(false);
     }
@@ -715,7 +693,21 @@ export default function SyndicateScreen() {
               <TextInput
                 style={styles.unitsInput}
                 value={unitsInput}
-                onChangeText={(value) => setUnitsInput(value.replace(/\D/g, ''))}
+                onChangeText={(value) => {
+                  const sanitized = value.replace(/\D/g, '');
+                  if (!sanitized) {
+                    setUnitsInput('');
+                    return;
+                  }
+
+                  const parsed = Math.floor(Number(sanitized));
+                  if (!Number.isFinite(parsed) || parsed <= 0) {
+                    setUnitsInput('1');
+                    return;
+                  }
+
+                  setUnitsInput(String(Math.min(SYNDICATE_MAX_UNITS, parsed)));
+                }}
                 keyboardType="number-pad"
                 placeholder="1"
                 placeholderTextColor={Colors.textMuted}
@@ -723,7 +715,7 @@ export default function SyndicateScreen() {
             </View>
 
             <View style={styles.unitsQuickRow}>
-              {[1, 5, 10, 25].map((units) => (
+              {[1, 5, 10, 20].map((units) => (
                 <AnimatedPressable
                   key={units}
                   style={styles.unitsQuickChip}

@@ -1,8 +1,9 @@
 import { create } from 'zustand';
 import type { Poster } from '../data/posters';
 import type { AuctionMarketItem, AuctionViewModel, SyndicateAsset } from '../data/tradeHub';
-import type { Conversation } from '../data/mockData';
-import { MOCK_CONVERSATIONS } from '../data/mockData';
+import type { ChatBot, Conversation, Message as ConversationMessage } from '../data/mockData';
+import { MOCK_CHAT_BOTS, MOCK_CONVERSATIONS } from '../data/mockData';
+import { ENABLE_RUNTIME_MOCKS } from '../constants/runtimeFlags';
 
 interface User {
   id: string;
@@ -16,6 +17,12 @@ interface DraftListing {
   brand?: string;
   size?: string;
   condition?: string;
+}
+
+interface CreateGroupConversationInput {
+  title: string;
+  memberIds: string[];
+  creatorId?: string;
 }
 
 type BrowseSortOption = 'Recommended' | 'Newest' | 'Price: Low to High' | 'Price: High to Low';
@@ -107,8 +114,6 @@ const makeLedgerEntry = (
   timestamp: new Date().toISOString(),
 });
 
-const RESTRICTED_SYNDICATE_COUNTRIES = ['US', 'CA'];
-
 interface StoreState {
   // Auth
   currentUser: User | null;
@@ -170,9 +175,16 @@ interface StoreState {
 
   // Conversations Inbox
   conversations: Conversation[];
+  availableChatBots: ChatBot[];
+  upsertConversation: (conversation: Conversation) => void;
   markConversationRead: (id: string) => void;
   archiveConversation: (id: string) => void;
   deleteConversation: (id: string) => void;
+  createGroupConversation: (input: CreateGroupConversationInput) => string;
+  deployBotToConversation: (conversationId: string, botId: string) => void;
+  undeployBotFromConversation: (conversationId: string, botId: string) => void;
+  appendConversationMessage: (conversationId: string, message: ConversationMessage) => void;
+  replaceConversationMessages: (conversationId: string, messages: ConversationMessage[]) => void;
 
   // Profile Uploads
   userAvatar: string | null;
@@ -381,13 +393,6 @@ export const useStore = create<StoreState>((set, get) => ({
     })),
   checkSyndicateEligibility: (settlementMode = 'HYBRID') => {
     const profile = get().syndicateCompliance;
-
-    if (RESTRICTED_SYNDICATE_COUNTRIES.includes(profile.countryCode.toUpperCase())) {
-      return {
-        ok: false,
-        message: 'Syndicate trading is currently unavailable in your selected country.',
-      };
-    }
 
     if (!profile.kycVerified) {
       return {
@@ -630,7 +635,7 @@ export const useStore = create<StoreState>((set, get) => ({
   twoFactorEnabled: false,
   setTwoFactorEnabled: (enabled) => set({ twoFactorEnabled: enabled }),
 
-  notificationCount: 3, // Hardcoded initial mock badge
+  notificationCount: ENABLE_RUNTIME_MOCKS ? 3 : 0,
   setNotificationCount: (count) => set({ notificationCount: count }),
 
   sellDraft: {},
@@ -638,7 +643,32 @@ export const useStore = create<StoreState>((set, get) => ({
     set((state) => ({ sellDraft: { ...state.sellDraft, ...updates } })),
   clearSellDraft: () => set({ sellDraft: {} }),
 
-  conversations: MOCK_CONVERSATIONS,
+  conversations: ENABLE_RUNTIME_MOCKS ? MOCK_CONVERSATIONS : [],
+  availableChatBots: ENABLE_RUNTIME_MOCKS ? MOCK_CHAT_BOTS : [],
+  upsertConversation: (conversation) =>
+    set((state) => {
+      const existing = state.conversations.find((item) => item.id === conversation.id);
+      if (!existing) {
+        return {
+          conversations: [conversation, ...state.conversations],
+        };
+      }
+
+      const mergedConversation: Conversation = {
+        ...existing,
+        ...conversation,
+        participantIds: conversation.participantIds ?? existing.participantIds,
+        botIds: conversation.botIds ?? existing.botIds,
+        messages: conversation.messages.length ? conversation.messages : existing.messages,
+      };
+
+      return {
+        conversations: [
+          mergedConversation,
+          ...state.conversations.filter((item) => item.id !== conversation.id),
+        ],
+      };
+    }),
   markConversationRead: (id) =>
     set((state) => ({
       conversations: state.conversations.map((c) =>
@@ -652,6 +682,159 @@ export const useStore = create<StoreState>((set, get) => ({
   deleteConversation: (id) =>
     set((state) => ({
       conversations: state.conversations.filter((c) => c.id !== id),
+    })),
+  createGroupConversation: ({ title, memberIds, creatorId }) => {
+    const creator = creatorId ?? get().currentUser?.id ?? 'me';
+    const uniqueMemberIds = [...new Set([creator, ...memberIds])].filter((id) => id.trim().length > 0);
+    const groupTitle = title.trim() || 'New Group';
+    const conversationId = `g_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+
+    const createdMessage: ConversationMessage = {
+      id: `msg_${Date.now()}`,
+      senderId: 'system',
+      isSystem: true,
+      systemTitle: 'Group created',
+      text: `${groupTitle} was created.`,
+      timestamp: 'just now',
+      type: 'system',
+      sender: 'system',
+    };
+
+    const nextConversation: Conversation = {
+      id: conversationId,
+      type: 'group',
+      title: groupTitle,
+      ownerId: creator,
+      participantIds: uniqueMemberIds,
+      botIds: [],
+      lastMessage: createdMessage.text ?? 'Group created',
+      lastMessageTime: createdMessage.timestamp,
+      unread: false,
+      messages: [createdMessage],
+    };
+
+    set((state) => ({
+      conversations: [nextConversation, ...state.conversations],
+    }));
+
+    return conversationId;
+  },
+  deployBotToConversation: (conversationId, botId) =>
+    set((state) => ({
+      conversations: state.conversations.map((conversation) => {
+        if (conversation.id !== conversationId || conversation.type !== 'group') {
+          return conversation;
+        }
+
+        const existingBotIds = conversation.botIds ?? [];
+        if (existingBotIds.includes(botId)) {
+          return conversation;
+        }
+
+        const bot = state.availableChatBots.find((item) => item.id === botId);
+        const deployedText = bot
+          ? `${bot.name} deployed. Try ${bot.commandHint}`
+          : 'A bot was deployed to this group.';
+
+        const deployedMessage: ConversationMessage = {
+          id: `msg_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+          senderId: 'system',
+          isSystem: true,
+          systemTitle: 'Bot deployed',
+          text: deployedText,
+          timestamp: 'just now',
+          type: 'system',
+          sender: 'system',
+        };
+
+        return {
+          ...conversation,
+          botIds: [...existingBotIds, botId],
+          lastMessage: deployedMessage.text ?? conversation.lastMessage,
+          lastMessageTime: deployedMessage.timestamp,
+          messages: [...conversation.messages, deployedMessage],
+        };
+      }),
+    })),
+  undeployBotFromConversation: (conversationId, botId) =>
+    set((state) => ({
+      conversations: state.conversations.map((conversation) => {
+        if (conversation.id !== conversationId || conversation.type !== 'group') {
+          return conversation;
+        }
+
+        const nextBotIds = (conversation.botIds ?? []).filter((id) => id !== botId);
+        if (nextBotIds.length === (conversation.botIds ?? []).length) {
+          return conversation;
+        }
+
+        const bot = state.availableChatBots.find((item) => item.id === botId);
+        const removedText = bot
+          ? `${bot.name} removed from the group.`
+          : 'A bot was removed from this group.';
+
+        const removedMessage: ConversationMessage = {
+          id: `msg_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+          senderId: 'system',
+          isSystem: true,
+          systemTitle: 'Bot removed',
+          text: removedText,
+          timestamp: 'just now',
+          type: 'system',
+          sender: 'system',
+        };
+
+        return {
+          ...conversation,
+          botIds: nextBotIds,
+          lastMessage: removedMessage.text ?? conversation.lastMessage,
+          lastMessageTime: removedMessage.timestamp,
+          messages: [...conversation.messages, removedMessage],
+        };
+      }),
+    })),
+  appendConversationMessage: (conversationId, message) =>
+    set((state) => ({
+      conversations: state.conversations.map((conversation) => {
+        if (conversation.id !== conversationId) {
+          return conversation;
+        }
+
+        const nextLastMessage = message.text
+          ?? message.systemTitle
+          ?? (message.offerPrice ? `Offer ${message.offerPrice}` : 'New message');
+
+        return {
+          ...conversation,
+          lastMessage: nextLastMessage,
+          lastMessageTime: message.timestamp,
+          messages: [...conversation.messages, message],
+        };
+      }),
+    })),
+  replaceConversationMessages: (conversationId, messages) =>
+    set((state) => ({
+      conversations: state.conversations.map((conversation) => {
+        if (conversation.id !== conversationId) {
+          return conversation;
+        }
+
+        if (!messages.length) {
+          return conversation;
+        }
+
+        const latestMessage = messages[messages.length - 1];
+        const nextLastMessage = latestMessage.text
+          ?? latestMessage.systemTitle
+          ?? (latestMessage.offerPrice ? `Offer ${latestMessage.offerPrice}` : conversation.lastMessage);
+
+        return {
+          ...conversation,
+          messages,
+          lastMessage: nextLastMessage,
+          lastMessageTime: latestMessage.timestamp,
+        };
+      }),
     })),
 
   userAvatar: null,

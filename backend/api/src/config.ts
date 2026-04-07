@@ -30,6 +30,17 @@ function asNumber(value: string | undefined, fallback: number): number {
   return parsed;
 }
 
+function asCsvList(value: string | undefined): string[] {
+  if (!value) {
+    return [];
+  }
+
+  return value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+}
+
 function requiredSecret(name: string, developmentFallback: string): string {
   const raw = process.env[name]?.trim();
   if (raw) {
@@ -66,11 +77,29 @@ export const config = {
   authRefreshTokenTtlSeconds: asNumber(process.env.AUTH_REFRESH_TOKEN_TTL_SECONDS, 30 * 24 * 60 * 60),
   authPasswordHashCost: asNumber(process.env.AUTH_PASSWORD_HASH_COST, 12),
   authPasswordResetTokenTtlSeconds: asNumber(process.env.AUTH_PASSWORD_RESET_TOKEN_TTL_SECONDS, 20 * 60),
+  authMagicLinkTtlSeconds: asNumber(process.env.AUTH_MAGIC_LINK_TTL_SECONDS, 15 * 60),
+  authMagicLinkBaseUrl:
+    process.env.AUTH_MAGIC_LINK_BASE_URL?.trim() || 'thryftverse://auth/magic-link',
+  authOtpTtlSeconds: asNumber(process.env.AUTH_OTP_TTL_SECONDS, 5 * 60),
+  authOtpMaxAttempts: asNumber(process.env.AUTH_OTP_MAX_ATTEMPTS, 5),
+  authEmailProvider:
+    process.env.AUTH_EMAIL_PROVIDER?.trim().toLowerCase()
+    || (nodeEnv === 'production' ? 'resend' : 'log'),
+  authExposeDevelopmentArtifacts: asBoolean(process.env.AUTH_EXPOSE_DEVELOPMENT_ARTIFACTS, false),
+  authEmailFrom: process.env.AUTH_EMAIL_FROM?.trim() || null,
+  resendApiKey: process.env.RESEND_API_KEY?.trim() || null,
   apiSecurityAdminToken: requiredSecret('API_SECURITY_ADMIN_TOKEN', 'local-security-admin-token'),
-  apiEnableMockWebhooks: asBoolean(process.env.API_ENABLE_MOCK_WEBHOOKS, nodeEnv !== 'production'),
+  apiEnableMockWebhooks: asBoolean(process.env.API_ENABLE_MOCK_WEBHOOKS, false),
   apiRateLimitMax: asNumber(process.env.API_RATE_LIMIT_MAX, 140),
   apiRateLimitWindow: process.env.API_RATE_LIMIT_WINDOW ?? '1 minute',
+  kycDefaultVendor: required('KYC_DEFAULT_VENDOR', nodeEnv !== 'production' ? 'sandbox_kyc_vendor' : undefined),
+  kycVerificationBaseUrl: required(
+    'KYC_VERIFICATION_BASE_URL',
+    nodeEnv !== 'production' ? 'https://verify.thryftverse.local/session' : undefined
+  ),
   paymentWebhookToleranceSeconds: asNumber(process.env.PAYMENT_WEBHOOK_TOLERANCE_SECONDS, 300),
+  googleOAuthClientIds: asCsvList(process.env.GOOGLE_OAUTH_CLIENT_IDS),
+  appleOAuthAudience: process.env.APPLE_OAUTH_AUDIENCE?.trim() || null,
   stripeSecretKey: process.env.STRIPE_SECRET_KEY,
   stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
   razorpayKeyId: process.env.RAZORPAY_KEY_ID,

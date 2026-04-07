@@ -31,6 +31,7 @@ import { useStore } from '../store/useStore';
 import { useBackendData } from '../context/BackendDataContext';
 import { getBackendSyncStatus } from '../utils/syncStatus';
 import { useToast } from '../context/ToastContext';
+import { ENABLE_RUNTIME_MOCKS } from '../constants/runtimeFlags';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -52,7 +53,7 @@ interface SavedLook {
   saved: boolean;
 }
 
-const SAVED_LOOKS: SavedLook[] = [
+const SAVED_LOOKS_SEED: SavedLook[] = [
   {
     id: 'look1',
     title: 'Winter Layers',
@@ -95,6 +96,8 @@ const SAVED_LOOKS: SavedLook[] = [
     saved: true,
   },
 ];
+
+const SAVED_LOOKS: SavedLook[] = ENABLE_RUNTIME_MOCKS ? SAVED_LOOKS_SEED : [];
 
 // ── Look Card Component ──────────────────────────────────────
 function LookCard({

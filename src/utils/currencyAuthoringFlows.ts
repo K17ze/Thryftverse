@@ -1,6 +1,10 @@
 import { SupportedCurrencyCode } from '../constants/currencies';
 import { GoldRates, toFiat, toIze } from './currency';
 
+const COMMERCE_PLATFORM_CHARGE_RATE = 0.05;
+const COMMERCE_PLATFORM_CHARGE_FIXED_GBP = 0.7;
+const COMMERCE_PLATFORM_CHARGE_MIN_RATE = 0.02;
+
 export function sanitizeDecimalInput(rawValue: string): string {
   const normalized = rawValue.replace(',', '.').replace(/[^0-9.]/g, '');
   const firstDot = normalized.indexOf('.');
@@ -42,6 +46,14 @@ export function convertDisplayToGbpAmount(
   return toFiat(amountIze, 'GBP', goldRates);
 }
 
+export function calculatePlatformChargeGbp(subtotalGbp: number): number {
+  const normalizedSubtotal = Number.isFinite(subtotalGbp) ? Math.max(0, subtotalGbp) : 0;
+  const formulaCharge =
+    normalizedSubtotal * COMMERCE_PLATFORM_CHARGE_RATE + COMMERCE_PLATFORM_CHARGE_FIXED_GBP;
+  const minimumCharge = normalizedSubtotal * COMMERCE_PLATFORM_CHARGE_MIN_RATE;
+  return Number(Math.max(formulaCharge, minimumCharge).toFixed(2));
+}
+
 export function getSuggestedBidDisplayAmount(
   currentBidGbp: number,
   currencyCode: SupportedCurrencyCode,
@@ -58,6 +70,7 @@ export function getSuggestedBidDisplayAmount(
 
 export interface OfferSummary {
   offerGbp: number;
+  platformChargeGbp: number;
   buyerProtectionFeeGbp: number;
   totalGbp: number;
 }
@@ -69,12 +82,13 @@ export function calculateOfferSummaryFromDisplay(
 ): OfferSummary {
   const offerGbpRaw = convertDisplayToGbpAmount(offerDisplay, currencyCode, goldRates);
   const offerGbp = Number.isFinite(offerGbpRaw) && offerGbpRaw > 0 ? offerGbpRaw : 0;
-  const buyerProtectionFeeGbp = Number((offerGbp * 0.05 + 0.7).toFixed(2));
-  const totalGbp = Number((offerGbp + buyerProtectionFeeGbp).toFixed(2));
+  const platformChargeGbp = calculatePlatformChargeGbp(offerGbp);
+  const totalGbp = Number((offerGbp + platformChargeGbp).toFixed(2));
 
   return {
     offerGbp,
-    buyerProtectionFeeGbp,
+    platformChargeGbp,
+    buyerProtectionFeeGbp: platformChargeGbp,
     totalGbp,
   };
 }

@@ -274,18 +274,18 @@ VALUES
     '{"jurisdiction": "Africa", "comment": "Conservative notional caps"}'::jsonb
   ),
   (
-    'jr_syndicate_us_block',
+    'jr_syndicate_us',
     'syndicate',
     'country',
     'US',
-    FALSE,
+    TRUE,
     'enhanced',
     TRUE,
     NULL,
     NULL,
     NULL,
-    'Syndicate market is currently unavailable in your jurisdiction.',
-    '{"reason": "securities_licensing"}'::jsonb
+    NULL,
+    '{"jurisdiction": "US", "comment": "Country rule enabled with enhanced KYC"}'::jsonb
   ),
   (
     'jr_auctions_global',

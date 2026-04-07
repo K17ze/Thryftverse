@@ -32,7 +32,8 @@ describe('currency authoring flow utilities', () => {
     const summary = calculateOfferSummaryFromDisplay(50, 'GBP', DEFAULT_GOLD_RATES);
 
     expect(summary.offerGbp).toBe(50);
-    expect(summary.buyerProtectionFeeGbp).toBe(3.2);
+    expect(summary.platformChargeGbp).toBe(3.2);
+    expect(summary.buyerProtectionFeeGbp).toBe(summary.platformChargeGbp);
     expect(summary.totalGbp).toBe(53.2);
   });
 

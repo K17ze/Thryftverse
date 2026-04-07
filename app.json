@@ -2,6 +2,7 @@
   "expo": {
     "name": "thryftverse",
     "slug": "thryftverse",
+    "scheme": "thryftverse",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -12,9 +13,11 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
+      "bundleIdentifier": "com.thryftverse.app",
       "supportsTablet": true
     },
     "android": {
+      "package": "com.thryftverse.app",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -28,7 +31,10 @@
     },
     "plugins": [
       "expo-font",
-      "expo-asset"
+      "expo-asset",
+      "expo-web-browser",
+      "expo-notifications",
+      "expo-secure-store"
     ]
   }
 }

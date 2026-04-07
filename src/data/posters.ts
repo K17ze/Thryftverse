@@ -1,4 +1,5 @@
 import { MOCK_LISTINGS, MOCK_USERS, User } from './mockData';
+import { ENABLE_RUNTIME_MOCKS } from '../constants/runtimeFlags';
 
 export interface Poster {
   id: string;
@@ -81,8 +82,9 @@ export function getFreshPosters(
   runtimePosters: Poster[] = []
 ): PosterViewModel[] {
   const freshnessWindowMs = freshnessHours * 60 * 60 * 1000;
+  const seedPosters = ENABLE_RUNTIME_MOCKS ? MOCK_POSTERS : [];
 
-  return [...runtimePosters, ...MOCK_POSTERS]
+  return [...runtimePosters, ...seedPosters]
     .map((poster) => {
       const createdAtMs = new Date(poster.createdAt).getTime();
       const expiresAtMs = createdAtMs + poster.expiryHours * 60 * 60 * 1000;

@@ -272,7 +272,11 @@ export default function WithdrawScreen() {
           {exceedsBalance ? <Text style={styles.balanceError}>Entered amount exceeds available balance.</Text> : null}
 
           <Text style={styles.sectionTitle}>Transfer to</Text>
-          <AnimatedPressable style={styles.bankCard} activeOpacity={0.8}>
+          <AnimatedPressable
+            style={styles.bankCard}
+            activeOpacity={0.8}
+            onPress={() => navigation.navigate('AddBankAccount')}
+          >
             <View style={styles.bankLeft}>
               <View style={styles.bankIcon}>
                 <Ionicons name="business" size={24} color={Colors.textPrimary} />

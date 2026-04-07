@@ -73,8 +73,8 @@ export default function HelpSupportScreen({ navigation }: Props) {
   const faqs = React.useMemo(
     () => [
       {
-        q: 'How does Buyer Protection work?',
-        a: 'Thryftverse Buyer Protection covers you if an item doesn\'t arrive, arrives significantly different from what was described, or is damaged. File a claim within 2 days of the delivery date.',
+        q: 'How does the platform charge work?',
+        a: 'Thryftverse applies a platform charge to each checkout. It funds secure payments, delivery issue handling, and buyer support if an item doesn\'t arrive or is significantly misdescribed. File a claim within 2 days of delivery.',
       },
       {
         q: 'How do I withdraw my balance?',
@@ -82,11 +82,11 @@ export default function HelpSupportScreen({ navigation }: Props) {
       },
       {
         q: 'What fees does Thryftverse charge?',
-        a: `Thryftverse charges a 5% service fee on each sale, plus a fixed transaction fee of ${fixedFeeLabel}. The buyer also pays a Buyer Protection fee on top of the item price.`,
+        a: `Thryftverse charges a 5% service fee on each sale, plus a fixed transaction fee of ${fixedFeeLabel}. Buyers also pay a platform charge on top of the item price.`,
       },
       {
         q: 'Can I cancel or return an order?',
-        a: 'Buyers can request a cancellation within 1 hour of purchase. Returns are handled through Buyer Protection if the item doesn\'t match the description.',
+        a: 'Buyers can request a cancellation within 1 hour of purchase. Returns and issue handling are covered under our platform charge support policy when items do not match the description.',
       },
       {
         q: 'How do I report a fake or misleading listing?',

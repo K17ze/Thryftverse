@@ -30,6 +30,7 @@ export interface CommerceOrder {
   listingId: string;
   subtotalGbp: number;
   buyerProtectionFeeGbp: number;
+  platformChargeGbp: number;
   totalGbp: number;
   status: string;
   addressId: number | null;
@@ -110,6 +111,7 @@ export interface CreateOrderInput {
   listingId: string;
   addressId?: number;
   paymentMethodId?: number;
+  platformChargeGbp?: number;
   buyerProtectionFeeGbp?: number;
 }
 

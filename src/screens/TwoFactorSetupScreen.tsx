@@ -8,7 +8,9 @@ import {
   TextInput,
   StatusBar,
   KeyboardAvoidingView,
-  Platform
+  Platform,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,6 +19,7 @@ import { RootStackParamList } from '../navigation/types';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { useStore } from '../store/useStore';
 import { useToast } from '../context/ToastContext';
+import { requestTwoFactorEnrollment, verifyTwoFactorEnrollment } from '../services/authApi';
 
 type Props = StackScreenProps<RootStackParamList, 'TwoFactorSetup'>;
 const PANEL_BG = Colors.card;
@@ -25,20 +28,61 @@ const PANEL_BORDER = Colors.border;
 export default function TwoFactorSetupScreen({ navigation }: Props) {
   const [code, setCode] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const [manualKey, setManualKey] = useState('');
+  const [otpauthUrl, setOtpauthUrl] = useState('');
+  const [isLoadingEnrollment, setIsLoadingEnrollment] = useState(true);
+  const [isVerifying, setIsVerifying] = useState(false);
   const setTwoFactorEnabled = useStore((state) => state.setTwoFactorEnabled);
   const { show } = useToast();
-  const canEnable = code.trim().length === 6;
+  const canEnable = code.trim().length === 6 && !isLoadingEnrollment && !isVerifying;
 
-  const handleEnable = () => {
+  const fetchEnrollment = async () => {
+    setIsLoadingEnrollment(true);
+    setErrorMsg('');
+
+    try {
+      const result = await requestTwoFactorEnrollment();
+      setManualKey(result.secret);
+      setOtpauthUrl(result.otpauthUrl);
+      show('Authenticator secret generated. Add it in your app and verify.', 'info');
+    } catch (error) {
+      setErrorMsg((error as Error).message || 'Unable to start two-factor setup.');
+    } finally {
+      setIsLoadingEnrollment(false);
+    }
+  };
+
+  React.useEffect(() => {
+    void fetchEnrollment();
+  }, []);
+
+  const handleEnable = async () => {
     if (code.trim().length !== 6) {
       setErrorMsg('Enter the 6-digit code from your authenticator app.');
       return;
     }
 
     setErrorMsg('');
-    setTwoFactorEnabled(true);
-    show('Two-factor authentication enabled', 'success');
-    navigation.goBack();
+    setIsVerifying(true);
+    try {
+      const result = await verifyTwoFactorEnrollment(code.trim());
+      setTwoFactorEnabled(true);
+      Alert.alert(
+        '2FA Enabled',
+        `Save these recovery codes in a secure location:\n\n${result.recoveryCodes.join('\n')}`,
+        [
+          {
+            text: 'Done',
+            onPress: () => navigation.goBack(),
+          },
+        ]
+      );
+      show('Two-factor authentication enabled', 'success');
+    } catch (error) {
+      setErrorMsg((error as Error).message || 'Unable to verify the provided code.');
+    } finally {
+      setIsVerifying(false);
+    }
   };
 
   return (
@@ -60,8 +104,13 @@ export default function TwoFactorSetupScreen({ navigation }: Props) {
         </Text>
 
         <View style={styles.qrCard}>
-          <Ionicons name="qr-code-outline" size={88} color={Colors.textPrimary} />
-          <Text style={styles.qrHint}>otpauth://totp/thryftverse:user@example.com</Text>
+          {isLoadingEnrollment ? (
+            <ActivityIndicator color={Colors.textPrimary} size="large" />
+          ) : (
+            <Ionicons name="qr-code-outline" size={88} color={Colors.textPrimary} />
+          )}
+          <Text style={styles.qrHint} numberOfLines={3}>{otpauthUrl || 'Generating secure enrollment secret...'}</Text>
+          {!!manualKey && <Text style={styles.manualKeyText}>Manual key: {manualKey}</Text>}
         </View>
 
         <Text style={styles.inputLabel}>Verification code</Text>
@@ -82,17 +131,17 @@ export default function TwoFactorSetupScreen({ navigation }: Props) {
 
         {!!errorMsg && <Text style={styles.errorText}>{errorMsg}</Text>}
 
-        <AnimatedPressable style={styles.secondaryBtn} onPress={() => show('New code requested', 'info')} activeOpacity={0.8}>
-          <Text style={styles.secondaryBtnText}>I need a new code</Text>
+        <AnimatedPressable style={styles.secondaryBtn} onPress={() => void fetchEnrollment()} activeOpacity={0.8}>
+          <Text style={styles.secondaryBtnText}>{isLoadingEnrollment ? 'Refreshing secret...' : 'I need a new secret'}</Text>
         </AnimatedPressable>
 
         <AnimatedPressable
           style={[styles.primaryBtn, !canEnable && styles.primaryBtnDisabled]}
-          onPress={handleEnable}
+          onPress={() => void handleEnable()}
           activeOpacity={0.9}
           disabled={!canEnable}
         >
-          <Text style={styles.primaryBtnText}>Enable 2FA</Text>
+          <Text style={styles.primaryBtnText}>{isVerifying ? 'Verifying...' : 'Enable 2FA'}</Text>
         </AnimatedPressable>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -155,6 +204,14 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     fontSize: 11,
     fontFamily: 'Inter_400Regular',
+    textAlign: 'center',
+  },
+  manualKeyText: {
+    marginTop: 10,
+    color: Colors.textSecondary,
+    fontSize: 12,
+    fontFamily: 'Inter_500Medium',
+    textAlign: 'center',
   },
   inputLabel: {
     fontSize: 13,

@@ -1,10 +1,12 @@
-import React from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   StatusBar,
   Dimensions,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
 import Reanimated, {
   FadeInDown,
@@ -15,17 +17,202 @@ import { useNavigation } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import * as WebBrowser from 'expo-web-browser';
+import * as Google from 'expo-auth-session/providers/google';
+import * as AppleAuthentication from 'expo-apple-authentication';
+import * as Linking from 'expo-linking';
 import { Colors } from '../constants/colors';
 import { Typography } from '../constants/typography';
 import { AnimatedPressable } from '../components/AnimatedPressable';
 import { CachedImage } from '../components/CachedImage';
+import { useStore } from '../store/useStore';
+import { consumeMagicLink, loginWithAppleIdentityToken, loginWithGoogleIdToken } from '../services/authApi';
 
 const { width, height } = Dimensions.get('window');
 
 const BG_IMAGE = 'https://images.unsplash.com/photo-1509631179647-0177331693ae?w=800&q=85';
 
+WebBrowser.maybeCompleteAuthSession();
+
+function firstQueryParam(value: string | string[] | undefined): string | undefined {
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.find((entry) => typeof entry === 'string');
+  }
+
+  return undefined;
+}
+
 export default function AuthLandingScreen() {
   const navigation = useNavigation<any>();
+  const login = useStore((state) => state.login);
+  const setTwoFactorEnabled = useStore((state) => state.setTwoFactorEnabled);
+  const [socialLoading, setSocialLoading] = useState<'google' | 'apple' | null>(null);
+  const [isMagicLinkLoading, setIsMagicLinkLoading] = useState(false);
+
+  const [googleRequest, googleResponse, promptGoogleAuth] = Google.useIdTokenAuthRequest({
+    clientId: process.env.EXPO_PUBLIC_GOOGLE_OAUTH_CLIENT_ID,
+    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_OAUTH_IOS_CLIENT_ID,
+    androidClientId: process.env.EXPO_PUBLIC_GOOGLE_OAUTH_ANDROID_CLIENT_ID,
+    webClientId: process.env.EXPO_PUBLIC_GOOGLE_OAUTH_WEB_CLIENT_ID,
+  });
+
+  const handleMagicLink = useCallback(
+    async (url: string | null) => {
+      if (!url) {
+        return;
+      }
+
+      const parsed = Linking.parse(url);
+      const normalizedPath = (parsed.path ?? '').replace(/^\/+/, '').toLowerCase();
+      const isExpectedMagicPath = normalizedPath === 'auth/magic-link' || normalizedPath === 'magic-link';
+      if (!isExpectedMagicPath) {
+        return;
+      }
+
+      const token = firstQueryParam(parsed.queryParams?.token as string | string[] | undefined);
+      const email = firstQueryParam(parsed.queryParams?.email as string | string[] | undefined);
+
+      if (!token) {
+        return;
+      }
+
+      setIsMagicLinkLoading(true);
+      try {
+        const result = await consumeMagicLink({
+          token,
+          email,
+        });
+        login(result.storeUser);
+        setTwoFactorEnabled(result.user.twoFactorEnabled);
+        navigation.replace('MainTabs');
+      } catch (error) {
+        Alert.alert('Magic link failed', (error as Error).message);
+      } finally {
+        setIsMagicLinkLoading(false);
+      }
+    },
+    [login, navigation, setTwoFactorEnabled]
+  );
+
+  useEffect(() => {
+    void (async () => {
+      const initialUrl = await Linking.getInitialURL();
+      await handleMagicLink(initialUrl);
+    })();
+
+    const subscription = Linking.addEventListener('url', ({ url }) => {
+      void handleMagicLink(url);
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [handleMagicLink]);
+
+  useEffect(() => {
+    if (!googleResponse) {
+      return;
+    }
+
+    if (googleResponse.type !== 'success') {
+      setSocialLoading(null);
+      return;
+    }
+
+    const tokenFromAuth = googleResponse.authentication?.idToken;
+    const tokenFromParams = typeof googleResponse.params?.id_token === 'string'
+      ? googleResponse.params.id_token
+      : null;
+    const idToken = tokenFromAuth ?? tokenFromParams;
+
+    if (!idToken) {
+      setSocialLoading(null);
+      Alert.alert('Google sign-in failed', 'Unable to get Google identity token.');
+      return;
+    }
+
+    void (async () => {
+      try {
+        const result = await loginWithGoogleIdToken(idToken);
+        login(result.storeUser);
+        setTwoFactorEnabled(result.user.twoFactorEnabled);
+        navigation.replace('MainTabs');
+      } catch (error) {
+        Alert.alert('Google sign-in failed', (error as Error).message);
+      } finally {
+        setSocialLoading(null);
+      }
+    })();
+  }, [googleResponse, login, navigation, setTwoFactorEnabled]);
+
+  const handleGoogleSignIn = async () => {
+    if (socialLoading || isMagicLinkLoading) {
+      return;
+    }
+
+    if (!googleRequest) {
+      Alert.alert(
+        'Google sign-in unavailable',
+        'Configure Google OAuth client IDs in your Expo public environment variables.'
+      );
+      return;
+    }
+
+    setSocialLoading('google');
+
+    try {
+      const response = await promptGoogleAuth();
+      if (response.type !== 'success') {
+        setSocialLoading(null);
+      }
+    } catch (error) {
+      setSocialLoading(null);
+      Alert.alert('Google sign-in failed', (error as Error).message);
+    }
+  };
+
+  const handleAppleSignIn = async () => {
+    if (socialLoading || isMagicLinkLoading) {
+      return;
+    }
+
+    const available = await AppleAuthentication.isAvailableAsync();
+    if (!available) {
+      Alert.alert('Apple sign-in unavailable', 'Apple sign-in is only available on supported iOS devices.');
+      return;
+    }
+
+    setSocialLoading('apple');
+
+    try {
+      const credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+      });
+
+      if (!credential.identityToken) {
+        throw new Error('Missing Apple identity token');
+      }
+
+      const result = await loginWithAppleIdentityToken(credential.identityToken);
+      login(result.storeUser);
+      setTwoFactorEnabled(result.user.twoFactorEnabled);
+      navigation.replace('MainTabs');
+    } catch (error) {
+      const code = (error as { code?: string }).code;
+      if (code !== 'ERR_REQUEST_CANCELED') {
+        Alert.alert('Apple sign-in failed', (error as Error).message);
+      }
+    } finally {
+      setSocialLoading(null);
+    }
+  };
 
   return (
     <View style={styles.container}>
@@ -91,20 +278,34 @@ export default function AuthLandingScreen() {
           {/* Social login row */}
           <View style={styles.socialRow}>
             <AnimatedPressable
-              style={styles.socialBtn}
+              style={[styles.socialBtn, (!!socialLoading || isMagicLinkLoading) && styles.socialBtnDisabled]}
               activeOpacity={0.8}
-              onPress={() => navigation.navigate('SignUp')}
+              onPress={handleAppleSignIn}
+              disabled={!!socialLoading || isMagicLinkLoading}
             >
-              <Ionicons name="logo-apple" size={20} color="#fff" />
+              {socialLoading === 'apple' ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Ionicons name="logo-apple" size={20} color="#fff" />
+              )}
             </AnimatedPressable>
             <AnimatedPressable
-              style={styles.socialBtn}
+              style={[styles.socialBtn, (!!socialLoading || isMagicLinkLoading) && styles.socialBtnDisabled]}
               activeOpacity={0.8}
-              onPress={() => navigation.navigate('SignUp')}
+              onPress={handleGoogleSignIn}
+              disabled={!!socialLoading || isMagicLinkLoading}
             >
-              <Ionicons name="logo-google" size={18} color="#fff" />
+              {socialLoading === 'google' ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Ionicons name="logo-google" size={18} color="#fff" />
+              )}
             </AnimatedPressable>
           </View>
+
+          {isMagicLinkLoading && (
+            <Text style={styles.magicLinkLoadingText}>Signing you in from your email link...</Text>
+          )}
 
           <Text style={styles.termsText}>
             by continuing, you agree to our terms of service and privacy policy.
@@ -214,6 +415,16 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.12)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  socialBtnDisabled: {
+    opacity: 0.7,
+  },
+  magicLinkLoadingText: {
+    marginTop: 8,
+    color: 'rgba(255,255,255,0.62)',
+    fontSize: 12,
+    textAlign: 'center',
+    fontFamily: Typography.family.medium,
   },
   termsText: {
     color: 'rgba(255,255,255,0.3)',

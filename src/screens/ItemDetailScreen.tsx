@@ -191,7 +191,7 @@ export default function ItemDetailScreen() {
           <Text style={styles.brand} numberOfLines={1} ellipsizeMode="tail">{item.brand}</Text>
           {item.priceWithProtection && (
             <Text style={styles.protectionText}>
-              incl. {formatFromFiat(item.priceWithProtection - item.price, 'GBP', { displayMode: 'fiat' })} Buyer Protection fee
+              incl. {formatFromFiat(item.priceWithProtection - item.price, 'GBP', { displayMode: 'fiat' })} Platform charge
             </Text>
           )}
 

@@ -24,6 +24,8 @@ import AssetLeaderboardScreen from '../screens/AssetLeaderboardScreen';
 import BuyoutScreen from '../screens/BuyoutScreen';
 import SyndicateOnboardingScreen from '../screens/SyndicateOnboardingScreen';
 import ChatScreen from '../screens/ChatScreen';
+import CreateGroupChatScreen from '../screens/CreateGroupChatScreen';
+import GroupBotDirectoryScreen from '../screens/GroupBotDirectoryScreen';
 import UserProfileScreen from '../screens/UserProfileScreen';
 
 // Profile Subs
@@ -104,6 +106,8 @@ export default function AppNavigator() {
       <Stack.Screen name="Buyout" component={BuyoutScreen} />
       <Stack.Screen name="SyndicateOnboarding" component={SyndicateOnboardingScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="Chat" component={ChatScreen} />
+      <Stack.Screen name="CreateGroupChat" component={CreateGroupChatScreen} options={{ presentation: 'modal' }} />
+      <Stack.Screen name="GroupBotDirectory" component={GroupBotDirectoryScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="UserProfile" component={UserProfileScreen} />
       <Stack.Screen name="Balance" component={BalanceScreen} />
       <Stack.Screen name="Wallet" component={WalletScreen} />

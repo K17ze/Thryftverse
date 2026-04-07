@@ -33,7 +33,7 @@ type Props = StackScreenProps<RootStackParamList, 'Balance' | 'Wallet'>;
 type TxFilter = 'all' | 'sale' | 'purchase' | 'withdrawal';
 
 const TX_FILTERS: TxFilter[] = ['all', 'sale', 'purchase', 'withdrawal'];
-const LOAD_IZE_FEE_RATE = 0.02;
+const LOAD_IZE_FEE_RATE = 0.01;
 const IS_LIGHT = ActiveTheme === 'light';
 const TINT_CARD_BG = IS_LIGHT ? '#f1ede6' : '#1b1712';
 const TINT_CARD_BORDER = IS_LIGHT ? '#d9d3c9' : '#3a342b';
@@ -63,6 +63,7 @@ export default function BalanceScreen({ navigation }: Props) {
   const loadNetIze = Math.max(0, loadGrossIze - loadFeeIze);
   const loadFeeFiat = loadFiatValue * LOAD_IZE_FEE_RATE;
   const canLoadIze = Number.isFinite(loadFiatValue) && loadFiatValue > 0 && !isLoadingIze;
+  const loadFeeRateLabel = `${Math.round(LOAD_IZE_FEE_RATE * 100)}%`;
 
   const transactions = [
     { id: '1', type: 'sale', amount: 45.0, title: 'Item sold: Y2K Hoodie', date: 'Today, 14:30', status: 'pending' },
@@ -101,18 +102,17 @@ export default function BalanceScreen({ navigation }: Props) {
       return;
     }
 
-    const netCreditGbp = Number((loadAmountGbp * (1 - LOAD_IZE_FEE_RATE)).toFixed(2));
-    if (!Number.isFinite(netCreditGbp) || netCreditGbp <= 0) {
-      show('Enter a larger amount to cover conversion rules.', 'error');
-      return;
-    }
-
     setIsLoadingIze(true);
     try {
       const quote = await getIzeQuote({
         fiatCurrency: 'GBP',
-        fiatAmount: netCreditGbp,
+        fiatAmount: loadAmountGbp,
       });
+      const quoteFeeRate = quote.quote.platformFeeRate ?? LOAD_IZE_FEE_RATE;
+      const quoteFeeAmount =
+        quote.quote.platformFeeAmount ?? Number((quote.quote.fiatAmount * quoteFeeRate).toFixed(2));
+      const quoteNetFiatAmount =
+        quote.quote.netFiatAmount ?? Number((quote.quote.fiatAmount - quoteFeeAmount).toFixed(2));
 
       const intentResponse = await createPaymentIntent({
         userId: currentUser.id,
@@ -125,7 +125,9 @@ export default function BalanceScreen({ navigation }: Props) {
           displayCurrency: currencyCode,
           enteredDisplayAmount: loadFiatValue,
           enteredGbpAmount: loadAmountGbp,
-          uiFeeRate: LOAD_IZE_FEE_RATE,
+          platformFeeRate: quoteFeeRate,
+          platformFeeAmount: quoteFeeAmount,
+          netCreditedAmountGbp: quoteNetFiatAmount,
         },
       });
 
@@ -155,13 +157,16 @@ export default function BalanceScreen({ navigation }: Props) {
           displayCurrency: currencyCode,
           enteredDisplayAmount: loadFiatValue,
           enteredGbpAmount: loadAmountGbp,
-          uiFeeRate: LOAD_IZE_FEE_RATE,
+          platformFeeRate: quoteFeeRate,
+          platformFeeAmount: quoteFeeAmount,
+          netCreditedAmountGbp: quoteNetFiatAmount,
           paymentIntentId: settledIntent.id,
         },
       });
 
+      const netCreditedFiatGbp = mintResult.operation.netFiatAmount ?? mintResult.operation.fiatAmount;
       setAvailableBalance((prev) =>
-        Number((prev + Number(mintResult.operation.fiatAmount.toFixed(2))).toFixed(2))
+        Number((prev + Number(netCreditedFiatGbp.toFixed(2))).toFixed(2))
       );
       setLoadFiatInput('');
       show(`Loaded ${formatIzeAmount(mintResult.operation.izeAmount)} into your wallet.`, 'success');
@@ -235,7 +240,7 @@ export default function BalanceScreen({ navigation }: Props) {
 
         <View style={styles.loadCard}>
           <Text style={styles.loadTitle}>Load 1ze Wallet</Text>
-          <Text style={styles.loadHint}>Convert your local currency into 1ze with a 2% platform transaction fee.</Text>
+          <Text style={styles.loadHint}>Convert your local currency into 1ze with a low {loadFeeRateLabel} platform spread.</Text>
 
           <Text style={styles.loadInputLabel}>Amount in {currencyCode}</Text>
           <TextInput
@@ -253,7 +258,7 @@ export default function BalanceScreen({ navigation }: Props) {
             <Text style={styles.loadSummaryValue}>{formatIzeAmount(loadGrossIze)}</Text>
           </View>
           <View style={styles.loadSummaryRow}>
-            <Text style={styles.loadSummaryLabel}>Platform fee (2%)</Text>
+            <Text style={styles.loadSummaryLabel}>Platform fee ({loadFeeRateLabel})</Text>
             <Text style={styles.loadSummaryValue}>{formatIzeAmount(loadFeeIze)} · {formatFromFiat(loadFeeFiat, currencyCode, { displayMode: 'fiat' })}</Text>
           </View>
           <View style={[styles.loadSummaryRow, styles.loadSummaryRowTotal]}>

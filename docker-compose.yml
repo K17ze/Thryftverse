@@ -111,7 +111,9 @@ services:
       KEY_SERVICE_CLIENT_TOKEN: ${KEY_SERVICE_CLIENT_TOKEN:-local-key-client-token}
       KEY_SERVICE_ADMIN_TOKEN: ${KEY_SERVICE_ADMIN_TOKEN:-local-key-admin-token}
       API_SECURITY_ADMIN_TOKEN: ${API_SECURITY_ADMIN_TOKEN:-local-security-admin-token}
-      API_ENABLE_MOCK_WEBHOOKS: ${API_ENABLE_MOCK_WEBHOOKS:-true}
+      API_ENABLE_MOCK_WEBHOOKS: ${API_ENABLE_MOCK_WEBHOOKS:-false}
+      KYC_DEFAULT_VENDOR: ${KYC_DEFAULT_VENDOR:-sandbox_kyc_vendor}
+      KYC_VERIFICATION_BASE_URL: ${KYC_VERIFICATION_BASE_URL:-https://verify.thryftverse.local/session}
       S3_ENDPOINT: http://minio:9000
       S3_PUBLIC_ENDPOINT: http://localhost:9000
       S3_REGION: ${S3_REGION:-us-east-1}
@@ -127,6 +129,8 @@ services:
       OTEL_ENABLED: ${OTEL_ENABLED:-true}
       OTEL_EXPORTER_OTLP_HTTP_URL: ${OTEL_EXPORTER_OTLP_HTTP_URL:-http://localhost:4318/v1/traces}
       AUCTION_SWEEP_INTERVAL_MS: ${AUCTION_SWEEP_INTERVAL_MS:-30000}
+      GOOGLE_OAUTH_CLIENT_IDS: ${GOOGLE_OAUTH_CLIENT_IDS:-}
+      APPLE_OAUTH_AUDIENCE: ${APPLE_OAUTH_AUDIENCE:-}
     ports:
       - "4000:4000"
 

@@ -588,6 +588,30 @@ async function readMarketExposure(
   };
 }
 
+async function hasAcceptedActiveRiskDisclosure(
+  client: DbQueryable,
+  userId: string
+): Promise<boolean> {
+  const result = await client.query<{ accepted: boolean }>(
+    `
+      SELECT EXISTS(
+        SELECT 1
+        FROM legal_documents ld
+        INNER JOIN user_consents uc ON uc.document_id = ld.id
+        WHERE uc.user_id = $1
+          AND uc.accepted = TRUE
+          AND ld.doc_type = 'risk_disclosure'
+          AND ld.is_active = TRUE
+          AND ld.effective_at <= NOW()
+          AND (ld.retired_at IS NULL OR ld.retired_at > NOW())
+      ) AS accepted
+    `,
+    [userId]
+  );
+
+  return result.rows[0]?.accepted === true;
+}
+
 export async function evaluateMarketEligibility(
   client: DbQueryable,
   input: MarketEligibilityInput
@@ -655,6 +679,16 @@ export async function evaluateMarketEligibility(
       'KYC_LEVEL_INSUFFICIENT',
       `Your KYC level is insufficient for ${input.market}. Required: ${rule.minKycLevel}.`
     );
+  }
+
+  if (input.market === 'syndicate') {
+    const acceptedRiskDisclosure = await hasAcceptedActiveRiskDisclosure(client, input.userId);
+    if (!acceptedRiskDisclosure) {
+      return deny(
+        'RISK_DISCLOSURE_REQUIRED',
+        'Accept the active syndicate risk disclosure before trading.'
+      );
+    }
   }
 
   if (rule.requireSanctionsClear && profile.sanctionsStatus !== 'clear') {

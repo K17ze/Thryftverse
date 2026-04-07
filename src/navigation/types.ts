@@ -34,6 +34,8 @@ export type RootStackParamList = {
   Buyout: { assetId: string };
   SyndicateOnboarding: undefined;
   Chat: { conversationId: string };
+  CreateGroupChat: undefined;
+  GroupBotDirectory: { conversationId: string };
   UserProfile: { userId: string; isMe?: boolean };
   // Profile sub-screens
   Balance: undefined;
