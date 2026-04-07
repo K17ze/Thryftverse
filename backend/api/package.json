@@ -7,7 +7,7 @@
     "dev": "tsx watch src/index.ts",
     "serve": "tsx src/index.ts",
     "build": "tsc -p tsconfig.json",
-    "test": "tsx --test \"src/**/*.test.ts\"",
+    "test": "tsx --test src/**/*.test.ts",
     "backup:db": "node scripts/postgres-backup.mjs",
     "migrate": "tsx src/db/migrate.ts",
     "start": "node --enable-source-maps dist/index.js"
