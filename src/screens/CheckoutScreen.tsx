@@ -235,7 +235,7 @@ export default function CheckoutScreen() {
             <View style={styles.blockTextCol}>
               <Text style={styles.blockTitle}>{savedAddress ? savedAddress.street : 'Add delivery address'}</Text>
               <Text style={styles.blockSub}>
-                {savedAddress ? `${savedAddress.city} â€¢ ${savedAddress.postcode}` : 'Required for postage'}
+                {savedAddress ? `${savedAddress.city} | ${savedAddress.postcode}` : 'Required for postage'}
               </Text>
             </View>
           </View>

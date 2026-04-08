@@ -88,7 +88,7 @@ export default function PortfolioScreen() {
           <Image source={{ uri: item.image }} style={styles.holdingImage} />
           <View style={styles.holdingInfo}>
             <Text style={styles.holdingTitle} numberOfLines={1}>{item.title}</Text>
-            <Text style={styles.holdingMeta}>{item.yourUnits} shares Â· Avg {formatFromFiat(avg, 'GBP', { displayMode: 'fiat' })}</Text>
+            <Text style={styles.holdingMeta}>{item.yourUnits} shares | Avg {formatFromFiat(avg, 'GBP', { displayMode: 'fiat' })}</Text>
           </View>
           <View style={styles.holdingRight}>
             <Text style={styles.holdingValue}>{formatFromFiat(value, 'GBP', { displayMode: 'fiat' })}</Text>

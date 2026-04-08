@@ -71,14 +71,14 @@ export default function SettingsScreen({ navigation }: Props) {
   const currencyOptions = React.useMemo(
     () =>
       (Object.keys(CURRENCIES) as SupportedCurrencyCode[]).map(
-        (code) => `${code} Â· ${CURRENCIES[code].name} (${CURRENCIES[code].symbol})`
+        (code) => `${code} | ${CURRENCIES[code].name} (${CURRENCIES[code].symbol})`
       ),
     []
   );
 
   const selectedCurrencyOption = React.useMemo(
     () =>
-      currencyOptions.find((option) => option.startsWith(`${currencyCode} Â·`)),
+      currencyOptions.find((option) => option.startsWith(`${currencyCode} |`)),
     [currencyCode, currencyOptions]
   );
 
@@ -98,7 +98,7 @@ export default function SettingsScreen({ navigation }: Props) {
   }, []);
 
   const handleCurrencySelect = (option: string) => {
-    const selectedCode = option.split(' Â· ')[0] as SupportedCurrencyCode;
+    const selectedCode = option.split(' | ')[0] as SupportedCurrencyCode;
     if (selectedCode !== currencyCode) {
       setCurrencyCode(selectedCode);
     }

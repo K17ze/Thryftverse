@@ -74,6 +74,8 @@ $env:EXPO_PUBLIC_API_BASE_URL="http://192.168.1.10:4000"; npx expo start
 - `POST /wallets/:userId/snapshot` and `GET /wallets/:userId/snapshot`
 - `POST /security/keys/:keyName/rotate` (admin-maintenance route, optional bulk rewrap)
 - `POST /ops/auctions/sweep` (admin maintenance trigger for auction settlement job)
+- `POST /ops/oneze/reconcile` (admin maintenance trigger for 1ze reserve invariant snapshot)
+- `POST /ops/oneze/attest` (admin maintenance trigger for signed daily 1ze attestation artifact export)
 
 Payments and treasury:
 
@@ -106,6 +108,15 @@ Payout operations:
 - `GET /wallet/1ze/fx-quote`
 - `POST /wallet/1ze/mint`
 - `POST /wallet/1ze/burn`
+- `POST /wallet/1ze/transfer`
+- `POST /wallet/1ze/withdrawals/quote`
+- `POST /wallet/1ze/withdrawals/:withdrawalId/accept`
+- `POST /wallet/1ze/withdrawals/:withdrawalId/execute` (admin-maintenance route)
+- `POST /wallet/1ze/withdrawals/:withdrawalId/fail` (admin-maintenance route)
+- `GET /wallet/1ze/:userId/withdrawals`
+- `GET /wallet/1ze/:userId/balance`
+- `GET /wallet/1ze/:userId/ledger`
+- `GET /wallet/1ze/:userId/transfers`
 - `GET /wallet/1ze/:userId/position`
 - `POST /wallet/1ze/reconcile` (gold operator token required)
 
@@ -168,6 +179,14 @@ Money-layer request notes:
 
 - `POST /wallet/1ze/mint` accepts `fiatAmount` + `fiatCurrency` and optional `paymentIntentId`.
 - `POST /wallet/1ze/burn` accepts `izeAmount` + `fiatCurrency` and optional `payoutRequestId`.
+- `POST /wallet/1ze/transfer` accepts `recipientUserId` + `izeAmount`, with optional `senderUserId` (admin context), `fiatCurrency`, `note`, and metadata.
+- `POST /wallet/1ze/withdrawals/quote` accepts exactly one of `amountMg` or `amountOneze`, plus `targetCurrency`; quote validity defaults to `ONEZE_WITHDRAWAL_QUOTE_TTL_SECONDS`.
+- `POST /wallet/1ze/withdrawals/:withdrawalId/accept` reserves 1ze balance atomically (wallet debit + `WITHDRAWAL_RESERVED` ledger row). Amounts above `ONEZE_WITHDRAWAL_INSTANT_LIMIT_MG` are queued for async execution.
+- `POST /wallet/1ze/withdrawals/:withdrawalId/execute` finalizes payout and reserve consumption (`WITHDRAWAL_SETTLED`) and marks withdrawal `PAID_OUT`.
+- `POST /wallet/1ze/withdrawals/:withdrawalId/fail` reverses reserved 1ze (`WITHDRAWAL_REVERSED`) and marks withdrawal `FAILED`.
+- `GET /wallet/1ze/:userId/balance` and `GET /wallet/1ze/:userId/ledger` read from the new `wallets` and append-only `wallet_ledger` architecture tables.
+- `GET /wallet/1ze/:userId/transfers` supports `direction=all|inbound|outbound` and `limit`.
+- `POST /wallet/1ze/mint` and `POST /wallet/1ze/burn` support optional `idempotencyKey` for safe retries.
 - In production, `paymentIntentId` is required for mint and `payoutRequestId` is required for burn.
 - `POST /users/:userId/payout-requests` accepts exactly one of:
 	- `amountGbp` (explicit internal settlement amount), or

@@ -134,7 +134,7 @@ const styles = StyleSheet.create({
     width: CARD_WIDTH,
     height: CARD_WIDTH * 1.4,
     backgroundColor: Colors.surface,
-    borderRadius: 16,
+    borderRadius: 20,
     overflow: 'hidden',
   },
   imageContainerCompact: {
@@ -153,8 +153,8 @@ const styles = StyleSheet.create({
   soldText: {
     color: Colors.textPrimary,
     fontFamily: Typography.family.bold,
-    fontSize: 14,
-    letterSpacing: 1.1,
+    fontSize: Typography.size.caption + 2,
+    letterSpacing: Typography.tracking.caps,
   },
   conditionChip: {
     position: 'absolute',
@@ -167,9 +167,9 @@ const styles = StyleSheet.create({
   },
   conditionText: {
     color: CHIP_TEXT,
-    fontSize: 9,
+    fontSize: Typography.size.micro,
     fontFamily: Typography.family.bold,
-    letterSpacing: 0.6,
+    letterSpacing: Typography.tracking.caps,
   },
   multiImageBadge: {
     position: 'absolute',
@@ -188,16 +188,16 @@ const styles = StyleSheet.create({
   },
   price: {
     color: Colors.textPrimary,
-    fontSize: 14,
+    fontSize: Typography.size.body,
     fontFamily: Typography.family.semibold,
-    letterSpacing: 0.1,
+    letterSpacing: Typography.tracking.normal,
     marginBottom: 2,
   },
   brand: {
     color: Colors.textSecondary,
-    fontSize: 12,
+    fontSize: Typography.size.caption,
     fontFamily: Typography.family.regular,
-    letterSpacing: 0.08,
+    letterSpacing: Typography.tracking.wide,
   },
   engagementRow: {
     flexDirection: 'row',
@@ -212,7 +212,7 @@ const styles = StyleSheet.create({
   },
   engagementText: {
     color: Colors.textMuted,
-    fontSize: 10,
+    fontSize: Typography.size.micro,
     fontFamily: Typography.family.medium,
   },
   favBtn: {

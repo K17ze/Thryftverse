@@ -239,7 +239,7 @@ export default function MarketLedgerScreen() {
                   ? 'Units Sold'
                   : 'Units Purchased'}
           </Text>
-          <Text style={styles.rowMeta} numberOfLines={1}>{item.referenceId} Â· {relativeTime(item.timestamp)}</Text>
+          <Text style={styles.rowMeta} numberOfLines={1}>{item.referenceId} | {relativeTime(item.timestamp)}</Text>
           {item.note ? <Text style={styles.rowNote} numberOfLines={1}>{item.note}</Text> : null}
         </View>
 

@@ -182,7 +182,7 @@ export default function AssetDetailScreen() {
         <Image source={{ uri: asset.image }} style={styles.heroImage} />
 
         <Text style={styles.assetTitle}>{asset.title}</Text>
-        <Text style={styles.assetSub}>Asset ID {asset.id.toUpperCase()} Â· Issuer {asset.issuerId}</Text>
+        <Text style={styles.assetSub}>Asset ID {asset.id.toUpperCase()} | Issuer {asset.issuerId}</Text>
 
         <View style={styles.priceRow}>
           <Text style={styles.pricePrimary}>{formatFromFiat(asset.unitPriceGBP, 'GBP')}</Text>

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 
-export type ComplianceMarket = 'syndicate' | 'auctions' | 'wallet';
+export type ComplianceMarket = 'syndicate' | 'auctions' | 'wallet' | 'p2p';
 export type JurisdictionScope = 'country' | 'region' | 'global';
 export type KycLevel = 'none' | 'basic' | 'enhanced';
 export type KycStatus = 'not_started' | 'pending' | 'verified' | 'rejected' | 'expired';
@@ -112,7 +112,7 @@ interface CreateAmlAlertInput {
   userId: string;
   relatedUserId?: string | null;
   market: ComplianceMarket;
-  eventType: 'trade' | 'bid' | 'deposit' | 'withdrawal' | 'manual';
+  eventType: 'trade' | 'bid' | 'deposit' | 'withdrawal' | 'transfer' | 'manual';
   amountGbp: number;
   referenceId?: string | null;
   ruleCode?: string | null;
@@ -579,6 +579,39 @@ async function readMarketExposure(
     return {
       dailyNotionalGbp: roundTo(toNumber(dailyNotional.rows[0]?.notional), 2),
       openOrderCount: Math.max(0, Math.floor(toNumber(openOrders.rows[0]?.count))),
+    };
+  }
+
+  if (market === 'p2p') {
+    const tableCheck = await client.query<{ exists: boolean }>(
+      `
+        SELECT to_regclass('public.wallet_ize_transfers') IS NOT NULL AS exists
+      `
+    );
+
+    if (!tableCheck.rows[0]?.exists) {
+      return {
+        dailyNotionalGbp: 0,
+        openOrderCount: 0,
+      };
+    }
+
+    const activity = await client.query<{ notional: string; count: string }>(
+      `
+        SELECT
+          COALESCE(SUM(fiat_amount), 0)::text AS notional,
+          COUNT(*)::text AS count
+        FROM wallet_ize_transfers
+        WHERE sender_user_id = $1
+          AND status = 'committed'
+          AND created_at >= date_trunc('day', NOW())
+      `,
+      [userId]
+    );
+
+    return {
+      dailyNotionalGbp: roundTo(toNumber(activity.rows[0]?.notional), 2),
+      openOrderCount: Math.max(0, Math.floor(toNumber(activity.rows[0]?.count))),
     };
   }
 

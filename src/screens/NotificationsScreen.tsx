@@ -41,7 +41,7 @@ const ENRICHED_NOTIFICATIONS = [
   {
     id: 'n5',
     itemImage: 'https://picsum.photos/seed/noti5/80/80',
-    text: 'samrivera left you a 5â˜… review: "Great quality item, well packaged."',
+    text: 'samrivera left you a 5* review: "Great quality item, well packaged."',
     time: 'Yesterday',
     type: 'review' as const,
     read: true,
@@ -57,7 +57,7 @@ const ENRICHED_NOTIFICATIONS = [
   {
     id: 'n7',
     itemImage: 'https://picsum.photos/seed/noti7/80/80',
-    text: 'Price drop alert: "StÃ¼ssy Logo Tee" is now 20% off.',
+    text: 'Price drop alert: "Stussy Logo Tee" is now 20% off.',
     time: '3 days ago',
     type: 'price' as const,
     read: true,

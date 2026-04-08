@@ -41,7 +41,7 @@ const PANEL_BG = Colors.card;
 const PANEL_ALT = IS_LIGHT ? '#ece4d8' : '#1f1f1f';
 const BRAND = IS_LIGHT ? '#2f251b' : ACCENT;
 
-// â”€â”€ Saved Look data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Saved look data
 interface SavedLook {
   id: string;
   title: string;
@@ -86,7 +86,7 @@ const SAVED_LOOKS_SEED: SavedLook[] = [
     title: 'Streetwear Daily',
     coverImage: 'https://images.unsplash.com/photo-1552374196-1ab2a1c593e8?w=600&q=80',
     items: [
-      { id: 'l4', label: 'StÃ¼ssy Logo Tee', x: 0.4, y: 0.3 },
+      { id: 'l4', label: 'Stussy Logo Tee', x: 0.4, y: 0.3 },
       { id: 'l9', label: 'Represent Hoodie', x: 0.25, y: 0.15 },
       { id: 'l10', label: 'Chuck Taylor', x: 0.6, y: 0.8 },
     ],
@@ -99,7 +99,7 @@ const SAVED_LOOKS_SEED: SavedLook[] = [
 
 const SAVED_LOOKS: SavedLook[] = ENABLE_RUNTIME_MOCKS ? SAVED_LOOKS_SEED : [];
 
-// â”€â”€ Look Card Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Look card component
 function LookCard({
   look,
   onPress,
@@ -186,7 +186,7 @@ function LookCard({
   );
 }
 
-// â”€â”€ Main Screen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Main screen
 export default function SearchScreen() {
   const [activeTab, setActiveTab] = useState<'SAVED' | 'WISHLIST'>('SAVED');
   const [searchQuery, setSearchQuery] = useState('');

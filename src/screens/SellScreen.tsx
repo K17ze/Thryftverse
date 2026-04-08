@@ -30,7 +30,7 @@ import { buildCreateSyndicatePrefillFromSell } from '../utils/syndicatePrefill';
 
 const CONDITIONS = ['New with tags', 'Very good', 'Good', 'Satisfactory'];
 const SIZES = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', 'One size'];
-const BRANDS = ['Nike', 'Adidas', 'Zara', 'H&M', 'Ralph Lauren', 'Off-White', 'Stone Island', 'StÃ¼ssy', 'Other'];
+const BRANDS = ['Nike', 'Adidas', 'Zara', 'H&M', 'Ralph Lauren', 'Off-White', 'Stone Island', 'Stussy', 'Other'];
 const CATEGORY_OPTIONS = ['Women', 'Men', 'Designer', 'Kids', 'Home', 'Electronics', 'Entertainment', 'Hobbies & collectables', 'Sports'];
 const OFFERING_WINDOWS_HOURS = [24, 48, 72];
 const IS_LIGHT = ActiveTheme === 'light';
@@ -532,7 +532,7 @@ export default function SellScreen() {
                 <View style={styles.authRow}>
                   <View>
                     <Text style={styles.authTitle}>Authentication photos</Text>
-                    <Text style={styles.authHint}>{authPhotos.length} attached Â· Required for issuance</Text>
+                    <Text style={styles.authHint}>{authPhotos.length} attached | Required for issuance</Text>
                   </View>
                   <View style={styles.authBtnRow}>
                     <AnimatedPressable

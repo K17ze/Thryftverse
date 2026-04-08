@@ -162,7 +162,7 @@ export default function MakeOfferScreen({ navigation, route }: Props) {
           onPress={handleSendOffer}
           activeOpacity={0.9}
         >
-          <Text style={styles.sendBtnText}>Send offer Â· {formatFromFiat(total, 'GBP')}</Text>
+          <Text style={styles.sendBtnText}>Send offer | {formatFromFiat(total, 'GBP')}</Text>
         </AnimatedPressable>
       </View>
     </SafeAreaView>

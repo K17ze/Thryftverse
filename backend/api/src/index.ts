@@ -47,6 +47,7 @@ import {
 import {
   closeBackgroundQueues,
   enqueueAuctionSweepJob,
+  enqueueOnezeWithdrawalExecuteJob,
   enqueuePushNotificationJob,
   startBackgroundWorkers,
 } from './lib/queues.js';
@@ -57,7 +58,7 @@ import {
   registerSseClient,
   registerWsClient,
 } from './lib/realtime.js';
-import { assertS3BucketConnectivity, createUploadUrl } from './lib/s3.js';
+import { assertS3BucketConnectivity, createUploadUrl, putJsonObject } from './lib/s3.js';
 import {
   metricsContentType,
   observeHttpRequest,
@@ -186,6 +187,61 @@ const COMMERCE_PLATFORM_CHARGE_MIN_RATE = 0.02;
 const SYNDICATE_TRADE_FEE_RATE = 0.01;
 const AUCTION_PLATFORM_FEE_RATE = 0.03;
 const WALLET_TOPUP_PLATFORM_FEE_RATE = 0.01;
+const ONEZE_MG_PER_IZE = 1_000;
+const DEFAULT_WALLET_FIAT_CURRENCY = 'INR';
+
+const FIAT_MINOR_DIGITS: Record<string, number> = {
+  BIF: 0,
+  CLP: 0,
+  DJF: 0,
+  GNF: 0,
+  JPY: 0,
+  KMF: 0,
+  KRW: 0,
+  MGA: 1,
+  PYG: 0,
+  RWF: 0,
+  UGX: 0,
+  VND: 0,
+  VUV: 0,
+  XAF: 0,
+  XOF: 0,
+  XPF: 0,
+};
+
+function onezeAmountToMg(amount: number): number {
+  const mg = Math.round(amount * ONEZE_MG_PER_IZE);
+  if (!Number.isSafeInteger(mg) || mg <= 0) {
+    throw createApiError('IZE_AMOUNT_INVALID', '1ze amount cannot be represented safely in mg units');
+  }
+
+  return mg;
+}
+
+function mgToOnezeAmount(amountMg: number): number {
+  return Number((amountMg / ONEZE_MG_PER_IZE).toFixed(6));
+}
+
+function getFiatMinorDigits(currency: string): number {
+  return FIAT_MINOR_DIGITS[currency.toUpperCase()] ?? 2;
+}
+
+function toFiatMinor(amountMajor: number, currency: string): number {
+  const digits = getFiatMinorDigits(currency);
+  const factor = 10 ** digits;
+  const minor = Math.round(amountMajor * factor);
+  if (!Number.isSafeInteger(minor)) {
+    throw createApiError('FIAT_AMOUNT_INVALID', 'Fiat amount cannot be represented safely in minor units');
+  }
+
+  return minor;
+}
+
+function fromFiatMinor(amountMinor: number, currency: string): number {
+  const digits = getFiatMinorDigits(currency);
+  const factor = 10 ** digits;
+  return Number((amountMinor / factor).toFixed(Math.max(2, digits)));
+}
 
 function calculateCommercePlatformChargeGbp(subtotalGbp: number): number {
   const normalizedSubtotal = roundTo(Math.max(0, subtotalGbp), 2);
@@ -525,6 +581,10 @@ function statusCodeForApiError(code: string): number {
     return 400;
   }
 
+  if (code.startsWith('P2P_TRANSFER_') && code.endsWith('_BLOCKED')) {
+    return 403;
+  }
+
   return 409;
 }
 
@@ -709,6 +769,108 @@ interface PayoutRequestRow {
   updated_at: string;
 }
 
+interface WalletIzeTransferRow {
+  id: string;
+  sender_user_id: string;
+  recipient_user_id: string;
+  ize_amount: number | string;
+  fiat_amount: number | string;
+  fiat_currency: string;
+  rate_per_gram: number | string;
+  status: 'committed' | 'blocked' | 'reversed';
+  eligibility_code: string | null;
+  aml_risk_score: number | string | null;
+  aml_risk_level: string | null;
+  aml_alert_id: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  committed_at: string | null;
+  sender_country?: string | null;
+  recipient_country?: string | null;
+  is_cross_border?: boolean;
+  travel_rule_payload?: Record<string, unknown>;
+}
+
+interface WalletRow {
+  id: string;
+  user_id: string;
+  oneze_balance_mg: number | string;
+  fiat_balance_minor: number | string;
+  fiat_currency: string;
+  version: number | string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface WalletLedgerRow {
+  id: number;
+  wallet_id: string;
+  tx_id: string;
+  asset: '1ZE' | 'FIAT';
+  amount: number | string;
+  balance_after: number | string;
+  kind: string;
+  ref_type: string | null;
+  ref_id: string | null;
+  gold_rate_inr_per_g: number | string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+interface PayoutCorridorRow {
+  currency: string;
+  rail: string;
+  min_amount_minor: number | string;
+  max_amount_minor: number | string;
+  spread_bps: number;
+  network_fee_minor: number | string;
+  enabled: boolean;
+  settlement_sla_hours: number;
+}
+
+interface WithdrawalRow {
+  id: string;
+  user_id: string;
+  burn_tx_id: string | null;
+  amount_mg: number | string;
+  target_currency: string;
+  gross_minor: number | string;
+  spread_minor: number | string;
+  network_fee_minor: number | string;
+  net_minor: number | string;
+  rate_locked: number | string;
+  rate_expires_at: string;
+  rail: string;
+  rail_ref: string | null;
+  status: 'QUOTED' | 'ACCEPTED' | 'RESERVED' | 'PAID_OUT' | 'FAILED' | 'REVERSED';
+  payout_destination: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  completed_at: string | null;
+}
+
+interface JurisdictionPolicyRow {
+  country_code: string;
+  p2p_send_allowed: boolean;
+  p2p_receive_allowed: boolean;
+  p2p_daily_limit_mg: number | string | null;
+  p2p_monthly_limit_mg: number | string | null;
+  p2p_per_tx_limit_mg: number | string | null;
+  requires_context: boolean;
+  notes: string | null;
+}
+
+interface OnezeReconciliationRow {
+  id: string;
+  circulating_mg: number | string;
+  reserve_active_mg: number | string;
+  within_invariant: boolean;
+  invariant_hash: string;
+  reason: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
 function createRuntimeId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1_000_000)}`;
 }
@@ -872,6 +1034,104 @@ function toPayoutRequestPayload(row: PayoutRequestRow) {
     metadata: row.metadata,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+
+function toWalletIzeTransferPayload(row: WalletIzeTransferRow) {
+  return {
+    id: row.id,
+    senderUserId: row.sender_user_id,
+    recipientUserId: row.recipient_user_id,
+    izeAmount: Number(row.ize_amount),
+    fiatAmount: Number(row.fiat_amount),
+    fiatCurrency: row.fiat_currency,
+    ratePerGram: Number(row.rate_per_gram),
+    status: row.status,
+    eligibilityCode: row.eligibility_code,
+    amlRiskScore: row.aml_risk_score === null ? null : Number(row.aml_risk_score),
+    amlRiskLevel: row.aml_risk_level,
+    amlAlertId: row.aml_alert_id,
+    metadata: row.metadata,
+    createdAt: row.created_at,
+    committedAt: row.committed_at,
+    senderCountry: row.sender_country ?? null,
+    recipientCountry: row.recipient_country ?? null,
+    isCrossBorder: row.is_cross_border ?? null,
+    travelRulePayload: row.travel_rule_payload ?? {},
+  };
+}
+
+function toWalletPayload(row: WalletRow) {
+  const onezeBalanceMg = Number(row.oneze_balance_mg);
+  const fiatBalanceMinor = Number(row.fiat_balance_minor);
+
+  return {
+    id: row.id,
+    userId: row.user_id,
+    onezeBalanceMg,
+    onezeBalance: mgToOnezeAmount(onezeBalanceMg),
+    fiatBalanceMinor,
+    fiatBalance: fromFiatMinor(fiatBalanceMinor, row.fiat_currency),
+    fiatCurrency: row.fiat_currency,
+    version: Number(row.version),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function toWalletLedgerPayload(row: WalletLedgerRow) {
+  const asset = row.asset;
+  const amount = Number(row.amount);
+  const balanceAfter = Number(row.balance_after);
+
+  return {
+    id: row.id,
+    walletId: row.wallet_id,
+    txId: row.tx_id,
+    asset,
+    amount,
+    amountDisplay: asset === '1ZE' ? mgToOnezeAmount(amount) : amount,
+    balanceAfter,
+    balanceAfterDisplay: asset === '1ZE' ? mgToOnezeAmount(balanceAfter) : balanceAfter,
+    kind: row.kind,
+    refType: row.ref_type,
+    refId: row.ref_id,
+    goldRateInrPerG: row.gold_rate_inr_per_g === null ? null : Number(row.gold_rate_inr_per_g),
+    metadata: row.metadata,
+    createdAt: row.created_at,
+  };
+}
+
+function toWithdrawalPayload(row: WithdrawalRow) {
+  const grossMinor = Number(row.gross_minor);
+  const spreadMinor = Number(row.spread_minor);
+  const networkFeeMinor = Number(row.network_fee_minor);
+  const netMinor = Number(row.net_minor);
+
+  return {
+    id: row.id,
+    userId: row.user_id,
+    burnTxId: row.burn_tx_id,
+    amountMg: Number(row.amount_mg),
+    amountOneze: mgToOnezeAmount(Number(row.amount_mg)),
+    targetCurrency: row.target_currency,
+    grossMinor,
+    gross: fromFiatMinor(grossMinor, row.target_currency),
+    spreadMinor,
+    spread: fromFiatMinor(spreadMinor, row.target_currency),
+    networkFeeMinor,
+    networkFee: fromFiatMinor(networkFeeMinor, row.target_currency),
+    netMinor,
+    net: fromFiatMinor(netMinor, row.target_currency),
+    rateLocked: Number(row.rate_locked),
+    rateExpiresAt: row.rate_expires_at,
+    rail: row.rail,
+    railRef: row.rail_ref,
+    status: row.status,
+    payoutDestination: row.payout_destination,
+    metadata: row.metadata,
+    createdAt: row.created_at,
+    completedAt: row.completed_at,
   };
 }
 
@@ -1073,6 +1333,986 @@ async function onezeTablesAvailable(client: DbQueryable): Promise<boolean> {
   return Boolean(result.rows[0]?.exists);
 }
 
+async function onezeP2pTablesAvailable(client: DbQueryable): Promise<boolean> {
+  const result = await client.query<{ exists: boolean }>(
+    `
+      SELECT
+        to_regclass('public.wallet_ize_transfers') IS NOT NULL
+        AND to_regclass('public.user_compliance_profiles') IS NOT NULL
+        AND to_regclass('public.jurisdiction_rules') IS NOT NULL
+        AND to_regclass('public.aml_alerts') IS NOT NULL AS exists
+    `
+  );
+
+  return Boolean(result.rows[0]?.exists);
+}
+
+async function onezeArchitectureTablesAvailable(client: DbQueryable): Promise<boolean> {
+  const result = await client.query<{ exists: boolean }>(
+    `
+      SELECT
+        to_regclass('public.wallets') IS NOT NULL
+        AND to_regclass('public.wallet_ledger') IS NOT NULL
+        AND to_regclass('public.gold_reserve_lots') IS NOT NULL
+        AND to_regclass('public.reserve_movements') IS NOT NULL
+        AND to_regclass('public.gold_price_ticks') IS NOT NULL
+        AND to_regclass('public.payout_corridors') IS NOT NULL
+        AND to_regclass('public.fx_rates') IS NOT NULL
+        AND to_regclass('public.withdrawals') IS NOT NULL
+        AND to_regclass('public.wallet_idempotency_keys') IS NOT NULL
+        AND to_regclass('public.oneze_reconciliation_snapshots') IS NOT NULL
+        AND to_regclass('public.jurisdiction_policies') IS NOT NULL AS exists
+    `
+  );
+
+  return Boolean(result.rows[0]?.exists);
+}
+
+function hashWalletIdempotencyPayload(payload: unknown): string {
+  return crypto.createHash('sha256').update(toJsonString(payload ?? {})).digest('hex');
+}
+
+async function getWalletIdempotentResponse(
+  client: DbQueryable,
+  input: {
+    userId: string;
+    operation: string;
+    idempotencyKey: string;
+    requestHash: string;
+  }
+): Promise<Record<string, unknown> | null> {
+  const result = await client.query<{
+    request_hash: string;
+    response_payload: Record<string, unknown>;
+  }>(
+    `
+      SELECT request_hash, response_payload
+      FROM wallet_idempotency_keys
+      WHERE user_id = $1
+        AND operation = $2
+        AND idempotency_key = $3
+      LIMIT 1
+    `,
+    [input.userId, input.operation, input.idempotencyKey]
+  );
+
+  const row = result.rows[0];
+  if (!row) {
+    return null;
+  }
+
+  if (row.request_hash !== input.requestHash) {
+    throw createApiError(
+      'IDEMPOTENCY_KEY_REUSED',
+      'Idempotency key was already used with a different request payload'
+    );
+  }
+
+  return row.response_payload;
+}
+
+async function saveWalletIdempotentResponse(
+  client: DbQueryable,
+  input: {
+    userId: string;
+    operation: string;
+    idempotencyKey: string;
+    requestHash: string;
+    responsePayload: Record<string, unknown>;
+  }
+): Promise<void> {
+  await client.query(
+    `
+      INSERT INTO wallet_idempotency_keys (
+        user_id,
+        operation,
+        idempotency_key,
+        request_hash,
+        response_payload
+      )
+      VALUES ($1, $2, $3, $4, $5::jsonb)
+      ON CONFLICT (user_id, operation, idempotency_key)
+      DO NOTHING
+    `,
+    [
+      input.userId,
+      input.operation,
+      input.idempotencyKey,
+      input.requestHash,
+      toJsonString(input.responsePayload),
+    ]
+  );
+}
+
+async function ensureWallet(
+  client: DbQueryable,
+  userId: string,
+  fiatCurrency = DEFAULT_WALLET_FIAT_CURRENCY
+): Promise<WalletRow> {
+  const result = await client.query<WalletRow>(
+    `
+      INSERT INTO wallets (
+        id,
+        user_id,
+        fiat_currency
+      )
+      VALUES ($1, $2, $3)
+      ON CONFLICT (user_id)
+      DO UPDATE SET user_id = EXCLUDED.user_id
+      RETURNING
+        id,
+        user_id,
+        oneze_balance_mg,
+        fiat_balance_minor,
+        fiat_currency,
+        version,
+        created_at::text,
+        updated_at::text
+    `,
+    [createRuntimeId('wal'), userId, fiatCurrency.toUpperCase()]
+  );
+
+  const wallet = result.rows[0];
+
+  const walletLedgerCountResult = await client.query<{ count: string }>(
+    `
+      SELECT COUNT(*)::text AS count
+      FROM wallet_ledger
+      WHERE wallet_id = $1
+    `,
+    [wallet.id]
+  );
+
+  const walletLedgerCount = Number(walletLedgerCountResult.rows[0]?.count ?? '0');
+  if (walletLedgerCount > 0) {
+    return wallet;
+  }
+
+  if (!(await ledgerTablesAvailable(client))) {
+    return wallet;
+  }
+
+  const legacyIzeBalance = await getLedgerAccountBalance(client, 'user', userId, 'ize_wallet', 'IZE');
+  const syncedOnezeBalanceMg = Math.max(0, Math.round(legacyIzeBalance * ONEZE_MG_PER_IZE));
+
+  if (
+    !Number.isSafeInteger(syncedOnezeBalanceMg)
+    || syncedOnezeBalanceMg === Number(wallet.oneze_balance_mg)
+  ) {
+    return wallet;
+  }
+
+  const syncedResult = await client.query<WalletRow>(
+    `
+      UPDATE wallets
+      SET
+        oneze_balance_mg = $2,
+        version = version + 1,
+        updated_at = NOW()
+      WHERE id = $1
+      RETURNING
+        id,
+        user_id,
+        oneze_balance_mg,
+        fiat_balance_minor,
+        fiat_currency,
+        version,
+        created_at::text,
+        updated_at::text
+    `,
+    [wallet.id, syncedOnezeBalanceMg]
+  );
+
+  return syncedResult.rows[0] ?? wallet;
+}
+
+async function loadWalletForUpdate(client: DbQueryable, walletId: string): Promise<WalletRow> {
+  const result = await client.query<WalletRow>(
+    `
+      SELECT
+        id,
+        user_id,
+        oneze_balance_mg,
+        fiat_balance_minor,
+        fiat_currency,
+        version,
+        created_at::text,
+        updated_at::text
+      FROM wallets
+      WHERE id = $1
+      LIMIT 1
+      FOR UPDATE
+    `,
+    [walletId]
+  );
+
+  const wallet = result.rows[0];
+  if (!wallet) {
+    throw createApiError('WALLET_NOT_FOUND', 'Wallet not found', { walletId });
+  }
+
+  return wallet;
+}
+
+async function applyWalletLedgerDelta(
+  client: DbQueryable,
+  input: {
+    walletId: string;
+    txId: string;
+    asset: '1ZE' | 'FIAT';
+    amount: number;
+    kind: string;
+    refType?: string;
+    refId?: string;
+    goldRateInrPerG?: number;
+    metadata?: Record<string, unknown>;
+  }
+): Promise<number> {
+  if (!Number.isSafeInteger(input.amount)) {
+    throw createApiError('WALLET_AMOUNT_INVALID', 'Wallet ledger amount must be an integer unit');
+  }
+
+  const wallet = await loadWalletForUpdate(client, input.walletId);
+  const currentBalance = Number(
+    input.asset === '1ZE' ? wallet.oneze_balance_mg : wallet.fiat_balance_minor
+  );
+  const nextBalance = currentBalance + input.amount;
+
+  if (nextBalance < 0) {
+    throw createApiError('WALLET_INSUFFICIENT_BALANCE', 'Wallet balance is insufficient for this operation', {
+      walletId: input.walletId,
+      asset: input.asset,
+      currentBalance,
+      attemptedDelta: input.amount,
+    });
+  }
+
+  if (input.asset === '1ZE') {
+    await client.query(
+      `
+        UPDATE wallets
+        SET
+          oneze_balance_mg = $2,
+          version = version + 1,
+          updated_at = NOW()
+        WHERE id = $1
+      `,
+      [input.walletId, nextBalance]
+    );
+  } else {
+    await client.query(
+      `
+        UPDATE wallets
+        SET
+          fiat_balance_minor = $2,
+          version = version + 1,
+          updated_at = NOW()
+        WHERE id = $1
+      `,
+      [input.walletId, nextBalance]
+    );
+  }
+
+  await client.query(
+    `
+      INSERT INTO wallet_ledger (
+        wallet_id,
+        tx_id,
+        asset,
+        amount,
+        balance_after,
+        kind,
+        ref_type,
+        ref_id,
+        gold_rate_inr_per_g,
+        metadata
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
+    `,
+    [
+      input.walletId,
+      input.txId,
+      input.asset,
+      input.amount,
+      nextBalance,
+      input.kind,
+      input.refType ?? null,
+      input.refId ?? null,
+      input.goldRateInrPerG ?? null,
+      toJsonString(input.metadata ?? {}),
+    ]
+  );
+
+  return nextBalance;
+}
+
+async function resolveUserCountryCode(client: DbQueryable, userId: string): Promise<string> {
+  const result = await client.query<{ country_code: string | null }>(
+    `
+      SELECT country_code
+      FROM user_compliance_profiles
+      WHERE user_id = $1
+      LIMIT 1
+    `,
+    [userId]
+  );
+
+  return normalizeCountryCode(result.rows[0]?.country_code ?? 'GB');
+}
+
+async function resolveJurisdictionPolicy(
+  client: DbQueryable,
+  countryCode: string
+): Promise<JurisdictionPolicyRow> {
+  const normalizedCountry = countryCode.toUpperCase();
+  const exact = await client.query<JurisdictionPolicyRow>(
+    `
+      SELECT
+        country_code,
+        p2p_send_allowed,
+        p2p_receive_allowed,
+        p2p_daily_limit_mg,
+        p2p_monthly_limit_mg,
+        p2p_per_tx_limit_mg,
+        requires_context,
+        notes
+      FROM jurisdiction_policies
+      WHERE country_code = $1
+      LIMIT 1
+    `,
+    [normalizedCountry]
+  );
+
+  if (exact.rowCount) {
+    return exact.rows[0];
+  }
+
+  const global = await client.query<JurisdictionPolicyRow>(
+    `
+      SELECT
+        country_code,
+        p2p_send_allowed,
+        p2p_receive_allowed,
+        p2p_daily_limit_mg,
+        p2p_monthly_limit_mg,
+        p2p_per_tx_limit_mg,
+        requires_context,
+        notes
+      FROM jurisdiction_policies
+      WHERE country_code = 'GLOBAL'
+      LIMIT 1
+    `
+  );
+
+  if (global.rowCount) {
+    return global.rows[0];
+  }
+
+  return {
+    country_code: 'GLOBAL',
+    p2p_send_allowed: false,
+    p2p_receive_allowed: false,
+    p2p_daily_limit_mg: null,
+    p2p_monthly_limit_mg: null,
+    p2p_per_tx_limit_mg: null,
+    requires_context: true,
+    notes: 'Default deny policy',
+  };
+}
+
+async function evaluateP2pPolicyEligibility(
+  client: DbQueryable,
+  input: {
+    senderUserId: string;
+    recipientUserId: string;
+    amountMg: number;
+    contextType?: string;
+    contextId?: string;
+  }
+): Promise<{
+  senderCountry: string;
+  recipientCountry: string;
+  requiresTravelRule: boolean;
+}> {
+  const [senderCountry, recipientCountry] = await Promise.all([
+    resolveUserCountryCode(client, input.senderUserId),
+    resolveUserCountryCode(client, input.recipientUserId),
+  ]);
+
+  const [senderPolicy, recipientPolicy] = await Promise.all([
+    resolveJurisdictionPolicy(client, senderCountry),
+    resolveJurisdictionPolicy(client, recipientCountry),
+  ]);
+
+  if (!senderPolicy.p2p_send_allowed) {
+    throw createApiError('P2P_TRANSFER_SENDER_BLOCKED', 'P2P sending is not enabled in sender jurisdiction', {
+      senderCountry,
+      policy: senderPolicy,
+    });
+  }
+
+  if (!recipientPolicy.p2p_receive_allowed) {
+    throw createApiError('P2P_TRANSFER_RECIPIENT_BLOCKED', 'P2P receiving is not enabled in recipient jurisdiction', {
+      recipientCountry,
+      policy: recipientPolicy,
+    });
+  }
+
+  const requiresContext = senderPolicy.requires_context || recipientPolicy.requires_context;
+  if (requiresContext && (!input.contextType || !input.contextId)) {
+    throw createApiError(
+      'P2P_TRANSFER_CONTEXT_REQUIRED',
+      'This transfer requires marketplace or syndicate context in one of the jurisdictions'
+    );
+  }
+
+  const perTxLimit = Math.min(
+    Number(senderPolicy.p2p_per_tx_limit_mg ?? Number.MAX_SAFE_INTEGER),
+    Number(recipientPolicy.p2p_per_tx_limit_mg ?? Number.MAX_SAFE_INTEGER)
+  );
+
+  if (input.amountMg > perTxLimit) {
+    throw createApiError('P2P_TRANSFER_LIMIT_EXCEEDED', 'Transfer exceeds jurisdiction per-transaction limit', {
+      perTxLimitMg: perTxLimit,
+      requestedMg: input.amountMg,
+    });
+  }
+
+  const dailyResult = await client.query<{ total: string }>(
+    `
+      SELECT COALESCE(SUM(ROUND(ize_amount * $2)), 0)::text AS total
+      FROM wallet_ize_transfers
+      WHERE sender_user_id = $1
+        AND status = 'committed'
+        AND created_at >= date_trunc('day', NOW())
+    `,
+    [input.senderUserId, ONEZE_MG_PER_IZE]
+  );
+
+  const monthlyResult = await client.query<{ total: string }>(
+    `
+      SELECT COALESCE(SUM(ROUND(ize_amount * $2)), 0)::text AS total
+      FROM wallet_ize_transfers
+      WHERE sender_user_id = $1
+        AND status = 'committed'
+        AND created_at >= date_trunc('month', NOW())
+    `,
+    [input.senderUserId, ONEZE_MG_PER_IZE]
+  );
+
+  const dailySpentMg = Number(dailyResult.rows[0]?.total ?? '0');
+  const monthlySpentMg = Number(monthlyResult.rows[0]?.total ?? '0');
+
+  const dailyLimit = Number(senderPolicy.p2p_daily_limit_mg ?? Number.MAX_SAFE_INTEGER);
+  if (dailySpentMg + input.amountMg > dailyLimit) {
+    throw createApiError('P2P_TRANSFER_DAILY_LIMIT_EXCEEDED', 'Transfer exceeds sender daily P2P limit', {
+      dailyLimitMg: dailyLimit,
+      dailySpentMg,
+      requestedMg: input.amountMg,
+    });
+  }
+
+  const monthlyLimit = Number(senderPolicy.p2p_monthly_limit_mg ?? Number.MAX_SAFE_INTEGER);
+  if (monthlySpentMg + input.amountMg > monthlyLimit) {
+    throw createApiError('P2P_TRANSFER_MONTHLY_LIMIT_EXCEEDED', 'Transfer exceeds sender monthly P2P limit', {
+      monthlyLimitMg: monthlyLimit,
+      monthlySpentMg,
+      requestedMg: input.amountMg,
+    });
+  }
+
+  return {
+    senderCountry,
+    recipientCountry,
+    requiresTravelRule:
+      senderCountry !== recipientCountry && input.amountMg >= config.onezeTravelRuleThresholdMg,
+  };
+}
+
+async function appendGoldPriceTick(client: DbQueryable, source: string, inrPerGram: number): Promise<void> {
+  await client.query(
+    `
+      INSERT INTO gold_price_ticks (source, inr_per_gram, observed_at)
+      VALUES ($1, $2, NOW())
+    `,
+    [source, inrPerGram]
+  );
+}
+
+async function addReserveLotForMint(
+  client: DbQueryable,
+  input: {
+    linkedTxId: string;
+    weightMg: number;
+    custodian: string;
+    custodianRef: string;
+    purity: number;
+    acquisitionCostInr: number;
+    attestationUrl?: string;
+    metadata?: Record<string, unknown>;
+  }
+): Promise<string> {
+  const lotId = createRuntimeId('lot');
+  await client.query(
+    `
+      INSERT INTO gold_reserve_lots (
+        id,
+        custodian,
+        custodian_ref,
+        weight_mg,
+        purity,
+        acquired_at,
+        acquisition_cost_inr,
+        attestation_url,
+        status
+      )
+      VALUES ($1, $2, $3, $4, $5, NOW(), $6, $7, 'active')
+    `,
+    [
+      lotId,
+      input.custodian,
+      input.custodianRef,
+      input.weightMg,
+      input.purity,
+      input.acquisitionCostInr,
+      input.attestationUrl ?? null,
+    ]
+  );
+
+  await client.query(
+    `
+      INSERT INTO reserve_movements (
+        id,
+        lot_id,
+        delta_mg,
+        reason,
+        linked_tx_id,
+        metadata
+      )
+      VALUES ($1, $2, $3, 'user_deposit_mint', $4, $5::jsonb)
+    `,
+    [createRuntimeId('rsm'), lotId, input.weightMg, input.linkedTxId, toJsonString(input.metadata ?? {})]
+  );
+
+  return lotId;
+}
+
+async function consumeReserveLotsForBurn(
+  client: DbQueryable,
+  input: {
+    linkedTxId: string;
+    requiredMg: number;
+    metadata?: Record<string, unknown>;
+  }
+): Promise<Array<{ lotId: string; consumedMg: number }>> {
+  const lotsResult = await client.query<{
+    id: string;
+    weight_mg: number | string;
+  }>(
+    `
+      SELECT id, weight_mg
+      FROM gold_reserve_lots
+      WHERE status = 'active'
+        AND weight_mg > 0
+      ORDER BY acquired_at ASC, id ASC
+      FOR UPDATE
+    `
+  );
+
+  let remaining = input.requiredMg;
+  const consumed: Array<{ lotId: string; consumedMg: number }> = [];
+
+  for (const lot of lotsResult.rows) {
+    if (remaining <= 0) {
+      break;
+    }
+
+    const available = Number(lot.weight_mg);
+    if (available <= 0) {
+      continue;
+    }
+
+    const take = Math.min(available, remaining);
+    const nextWeight = available - take;
+
+    await client.query(
+      `
+        UPDATE gold_reserve_lots
+        SET
+          weight_mg = $2,
+          status = CASE WHEN $2 <= 0 THEN 'depleted' ELSE status END,
+          updated_at = NOW()
+        WHERE id = $1
+      `,
+      [lot.id, nextWeight]
+    );
+
+    await client.query(
+      `
+        INSERT INTO reserve_movements (
+          id,
+          lot_id,
+          delta_mg,
+          reason,
+          linked_tx_id,
+          metadata
+        )
+        VALUES ($1, $2, $3, 'user_redemption', $4, $5::jsonb)
+      `,
+      [createRuntimeId('rsm'), lot.id, -take, input.linkedTxId, toJsonString(input.metadata ?? {})]
+    );
+
+    consumed.push({ lotId: lot.id, consumedMg: take });
+    remaining -= take;
+  }
+
+  if (remaining > 0) {
+    throw createApiError('RESERVE_INSUFFICIENT', 'Active reserve inventory is insufficient for burn', {
+      requestedMg: input.requiredMg,
+      unfulfilledMg: remaining,
+    });
+  }
+
+  return consumed;
+}
+
+async function resolvePayoutCorridor(client: DbQueryable, currency: string): Promise<PayoutCorridorRow | null> {
+  const result = await client.query<PayoutCorridorRow>(
+    `
+      SELECT
+        currency,
+        rail,
+        min_amount_minor,
+        max_amount_minor,
+        spread_bps,
+        network_fee_minor,
+        enabled,
+        settlement_sla_hours
+      FROM payout_corridors
+      WHERE currency = $1
+      LIMIT 1
+    `,
+    [currency.toUpperCase()]
+  );
+
+  return result.rows[0] ?? null;
+}
+
+async function resolveXauFxRate(
+  client: DbQueryable,
+  currency: string,
+  options?: { forceRefresh?: boolean }
+): Promise<{ rate: number; source: string; observedAt: string }> {
+  const upper = currency.toUpperCase();
+  if (!options?.forceRefresh) {
+    const cached = await client.query<{ rate: string; source: string; observed_at: string }>(
+      `
+        SELECT rate::text, source, observed_at::text
+        FROM fx_rates
+        WHERE base = 'XAU'
+          AND quote = $1
+        ORDER BY observed_at DESC
+        LIMIT 1
+      `,
+      [upper]
+    );
+
+    if (cached.rowCount) {
+      return {
+        rate: Number(cached.rows[0].rate),
+        source: cached.rows[0].source,
+        observedAt: cached.rows[0].observed_at,
+      };
+    }
+  }
+
+  const goldRate = await resolveGoldRate(client, upper, {
+    forceRefresh: options?.forceRefresh ?? false,
+  });
+
+  await client.query(
+    `
+      INSERT INTO fx_rates (base, quote, rate, source, observed_at)
+      VALUES ('XAU', $1, $2, $3, NOW())
+    `,
+    [upper, goldRate.ratePerGram, `gold_oracle:${goldRate.source}`]
+  );
+
+  return {
+    rate: goldRate.ratePerGram,
+    source: `gold_oracle:${goldRate.source}`,
+    observedAt: new Date().toISOString(),
+  };
+}
+
+function canTransitionWithdrawalStatus(
+  currentStatus: WithdrawalRow['status'],
+  nextStatus: WithdrawalRow['status']
+): boolean {
+  if (currentStatus === nextStatus) {
+    return true;
+  }
+
+  if (currentStatus === 'QUOTED') {
+    return ['ACCEPTED', 'RESERVED', 'FAILED'].includes(nextStatus);
+  }
+
+  if (currentStatus === 'ACCEPTED') {
+    return ['RESERVED', 'FAILED', 'REVERSED'].includes(nextStatus);
+  }
+
+  if (currentStatus === 'RESERVED') {
+    return ['PAID_OUT', 'FAILED', 'REVERSED'].includes(nextStatus);
+  }
+
+  if (currentStatus === 'FAILED') {
+    return ['REVERSED'].includes(nextStatus);
+  }
+
+  return false;
+}
+
+async function loadWithdrawalById(
+  client: DbQueryable,
+  withdrawalId: string,
+  options?: { forUpdate?: boolean }
+): Promise<WithdrawalRow | null> {
+  const baseQuery = `
+    SELECT
+      id,
+      user_id,
+      burn_tx_id,
+      amount_mg::text,
+      target_currency,
+      gross_minor::text,
+      spread_minor::text,
+      network_fee_minor::text,
+      net_minor::text,
+      rate_locked::text,
+      rate_expires_at::text,
+      rail,
+      rail_ref,
+      status,
+      payout_destination,
+      metadata,
+      created_at::text,
+      completed_at::text
+    FROM withdrawals
+    WHERE id = $1
+    LIMIT 1
+  `;
+
+  const queryText = options?.forUpdate ? `${baseQuery} FOR UPDATE` : baseQuery;
+  const result = await client.query<WithdrawalRow>(queryText, [withdrawalId]);
+  return result.rows[0] ?? null;
+}
+
+async function captureOnezeReconciliationSnapshot(
+  client: DbQueryable,
+  reason: string,
+  metadata?: Record<string, unknown>
+): Promise<{
+  id: string;
+  circulatingMg: number;
+  reserveActiveMg: number;
+  withinInvariant: boolean;
+  invariantHash: string;
+  createdAt: string;
+}> {
+  const [circulatingResult, reserveResult] = await Promise.all([
+    client.query<{ total: string }>(
+      `
+        SELECT COALESCE(SUM(oneze_balance_mg), 0)::text AS total
+        FROM wallets
+      `
+    ),
+    client.query<{ total: string }>(
+      `
+        SELECT COALESCE(SUM(weight_mg), 0)::text AS total
+        FROM gold_reserve_lots
+        WHERE status = 'active'
+      `
+    ),
+  ]);
+
+  const circulatingMg = Number(circulatingResult.rows[0]?.total ?? '0');
+  const reserveActiveMg = Number(reserveResult.rows[0]?.total ?? '0');
+  const withinInvariant = circulatingMg <= reserveActiveMg;
+  const invariantHash = crypto
+    .createHash('sha256')
+    .update(`${circulatingMg}|${reserveActiveMg}|${reason}`)
+    .digest('hex');
+  const snapshotId = createRuntimeId('recon');
+
+  const inserted = await client.query<{ created_at: string }>(
+    `
+      INSERT INTO oneze_reconciliation_snapshots (
+        id,
+        circulating_mg,
+        reserve_active_mg,
+        within_invariant,
+        invariant_hash,
+        reason,
+        metadata
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+      RETURNING created_at::text
+    `,
+    [
+      snapshotId,
+      circulatingMg,
+      reserveActiveMg,
+      withinInvariant,
+      invariantHash,
+      reason,
+      toJsonString(metadata ?? {}),
+    ]
+  );
+
+  return {
+    id: snapshotId,
+    circulatingMg,
+    reserveActiveMg,
+    withinInvariant,
+    invariantHash,
+    createdAt: inserted.rows[0]?.created_at ?? new Date().toISOString(),
+  };
+}
+
+async function executeReservedWithdrawal(
+  client: DbQueryable,
+  input: {
+    withdrawalId: string;
+    railRef?: string;
+    metadata?: Record<string, unknown>;
+  }
+): Promise<{
+  alreadySettled: boolean;
+  withdrawal: ReturnType<typeof toWithdrawalPayload>;
+  settlement: {
+    railRef: string;
+    reserveConsumption: Array<{ lotId: string; consumedMg: number }>;
+  } | null;
+  wallet: {
+    walletId: string;
+    onezeBalanceMg: number;
+    onezeBalance: number;
+  } | null;
+}> {
+  const withdrawal = await loadWithdrawalById(client, input.withdrawalId, { forUpdate: true });
+  if (!withdrawal) {
+    throw createApiError('WITHDRAWAL_NOT_FOUND', 'Withdrawal not found', {
+      withdrawalId: input.withdrawalId,
+    });
+  }
+
+  if (withdrawal.status === 'PAID_OUT') {
+    return {
+      alreadySettled: true,
+      withdrawal: toWithdrawalPayload(withdrawal),
+      settlement: null,
+      wallet: null,
+    };
+  }
+
+  if (!canTransitionWithdrawalStatus(withdrawal.status, 'PAID_OUT')) {
+    throw createApiError('WITHDRAWAL_STATE_INVALID', 'Withdrawal cannot be executed from current status', {
+      withdrawalId: input.withdrawalId,
+      status: withdrawal.status,
+    });
+  }
+
+  const amountMg = Number(withdrawal.amount_mg);
+  const linkedTxId = withdrawal.burn_tx_id ?? createRuntimeId('wdburn');
+  const reserveConsumption = await consumeReserveLotsForBurn(client, {
+    linkedTxId,
+    requiredMg: amountMg,
+    metadata: {
+      withdrawalId: withdrawal.id,
+      stage: 'execute',
+      ...(input.metadata ?? {}),
+    },
+  });
+
+  const inrRate = await resolveGoldRate(client, 'INR', {
+    forceRefresh: false,
+  });
+
+  const wallet = await ensureWallet(client, withdrawal.user_id, withdrawal.target_currency);
+  const walletBalanceAfterMg = await applyWalletLedgerDelta(client, {
+    walletId: wallet.id,
+    txId: linkedTxId,
+    asset: '1ZE',
+    amount: 0,
+    kind: 'WITHDRAWAL_SETTLED',
+    refType: 'withdrawal',
+    refId: withdrawal.id,
+    goldRateInrPerG: inrRate.ratePerGram,
+    metadata: {
+      withdrawalId: withdrawal.id,
+      reserveLots: reserveConsumption,
+      ...(input.metadata ?? {}),
+    },
+  });
+
+  const railRef = input.railRef ?? `${withdrawal.rail}_${createRuntimeId('payout')}`;
+  const updatedResult = await client.query<WithdrawalRow>(
+    `
+      UPDATE withdrawals
+      SET
+        burn_tx_id = COALESCE(burn_tx_id, $2),
+        rail_ref = $3,
+        status = 'PAID_OUT',
+        completed_at = NOW(),
+        metadata = metadata || $4::jsonb
+      WHERE id = $1
+      RETURNING
+        id,
+        user_id,
+        burn_tx_id,
+        amount_mg::text,
+        target_currency,
+        gross_minor::text,
+        spread_minor::text,
+        network_fee_minor::text,
+        net_minor::text,
+        rate_locked::text,
+        rate_expires_at::text,
+        rail,
+        rail_ref,
+        status,
+        payout_destination,
+        metadata,
+        created_at::text,
+        completed_at::text
+    `,
+    [
+      withdrawal.id,
+      linkedTxId,
+      railRef,
+      toJsonString({
+        executedAt: new Date().toISOString(),
+        reserveConsumption,
+        ...(input.metadata ?? {}),
+      }),
+    ]
+  );
+
+  return {
+    alreadySettled: false,
+    withdrawal: toWithdrawalPayload(updatedResult.rows[0]),
+    settlement: {
+      railRef,
+      reserveConsumption,
+    },
+    wallet: {
+      walletId: wallet.id,
+      onezeBalanceMg: walletBalanceAfterMg,
+      onezeBalance: mgToOnezeAmount(walletBalanceAfterMg),
+    },
+  };
+}
+
 async function ensureLedgerAccount(
   client: DbQueryable,
   ownerType: LedgerOwnerType,
@@ -1112,7 +2352,8 @@ async function appendLedgerEntry(
       | 'burn'
       | 'syndicate_trade'
       | 'buyout'
-      | 'reserve_reconcile';
+      | 'reserve_reconcile'
+      | 'transfer';
     sourceId: string;
     lineType: string;
     metadata?: Record<string, unknown>;
@@ -1448,6 +2689,128 @@ async function recordIzeBurn(
       input.izeAmount,
       input.ratePerGram,
       input.payoutRequestId ?? null,
+      toJsonString(input.metadata ?? {}),
+    ]
+  );
+}
+
+async function recordIzeTransfer(
+  client: PoolClient,
+  input: {
+    transferId: string;
+    senderUserId: string;
+    recipientUserId: string;
+    izeAmount: number;
+    fiatAmount: number;
+    fiatCurrency: string;
+    ratePerGram: number;
+    eligibilityCode: string;
+    amlRiskScore: number;
+    amlRiskLevel: string;
+    amlAlertId?: string | null;
+    senderCountry?: string;
+    recipientCountry?: string;
+    travelRulePayload?: Record<string, unknown>;
+    metadata?: Record<string, unknown>;
+  }
+): Promise<void> {
+  if (input.senderUserId === input.recipientUserId) {
+    throw createApiError('P2P_TRANSFER_INVALID', 'Sender and recipient must be different users');
+  }
+
+  const availableIze = await getLedgerAccountBalance(client, 'user', input.senderUserId, 'ize_wallet', 'IZE');
+  if (input.izeAmount > availableIze + 1e-8) {
+    throw createApiError('IZE_TRANSFER_INSUFFICIENT_BALANCE', 'Insufficient 1ze balance for transfer', {
+      availableIze,
+      requestedIze: input.izeAmount,
+    });
+  }
+
+  const senderWalletAccountId = await ensureLedgerAccount(client, 'user', input.senderUserId, 'ize_wallet', 'IZE');
+  const recipientWalletAccountId = await ensureLedgerAccount(
+    client,
+    'user',
+    input.recipientUserId,
+    'ize_wallet',
+    'IZE'
+  );
+
+  await appendLedgerEntry(client, {
+    accountId: senderWalletAccountId,
+    counterpartyAccountId: recipientWalletAccountId,
+    direction: 'debit',
+    amount: input.izeAmount,
+    currency: 'IZE',
+    sourceType: 'transfer',
+    sourceId: input.transferId,
+    lineType: 'p2p_sender_debit',
+    metadata: {
+      senderUserId: input.senderUserId,
+      recipientUserId: input.recipientUserId,
+      fiatAmount: input.fiatAmount,
+      fiatCurrency: input.fiatCurrency,
+      ratePerGram: input.ratePerGram,
+      ...(input.metadata ?? {}),
+    },
+  });
+
+  await appendLedgerEntry(client, {
+    accountId: recipientWalletAccountId,
+    counterpartyAccountId: senderWalletAccountId,
+    direction: 'credit',
+    amount: input.izeAmount,
+    currency: 'IZE',
+    sourceType: 'transfer',
+    sourceId: input.transferId,
+    lineType: 'p2p_recipient_credit',
+    metadata: {
+      senderUserId: input.senderUserId,
+      recipientUserId: input.recipientUserId,
+      fiatAmount: input.fiatAmount,
+      fiatCurrency: input.fiatCurrency,
+      ratePerGram: input.ratePerGram,
+      ...(input.metadata ?? {}),
+    },
+  });
+
+  await client.query(
+    `
+      INSERT INTO wallet_ize_transfers (
+        id,
+        sender_user_id,
+        recipient_user_id,
+        ize_amount,
+        fiat_amount,
+        fiat_currency,
+        rate_per_gram,
+        status,
+        eligibility_code,
+        aml_risk_score,
+        aml_risk_level,
+        aml_alert_id,
+        sender_country,
+        recipient_country,
+        travel_rule_payload,
+        metadata,
+        committed_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, 'committed', $8, $9, $10, $11, $12, $13, $14::jsonb, $15::jsonb, NOW())
+    `,
+    [
+      input.transferId,
+      input.senderUserId,
+      input.recipientUserId,
+      input.izeAmount,
+      input.fiatAmount,
+      input.fiatCurrency,
+      input.ratePerGram,
+      input.eligibilityCode,
+      input.amlRiskScore,
+      input.amlRiskLevel,
+      input.amlAlertId ?? null,
+      input.senderCountry ?? null,
+      input.recipientCountry ?? null,
+      toJsonString(input.travelRulePayload ?? {}),
       toJsonString(input.metadata ?? {}),
     ]
   );
@@ -3236,6 +4599,246 @@ function stopAuctionSweepScheduler(): void {
   auctionSweepTimer = null;
 }
 
+let onezeReconcileTimer: NodeJS.Timeout | null = null;
+let onezeDailyAttestationTimer: NodeJS.Timeout | null = null;
+
+async function processQueuedOnezeWithdrawalExecution(input: {
+  withdrawalId: string;
+  initiatedBy: string;
+  reason: 'threshold_queue' | 'manual_queue';
+}): Promise<void> {
+  if (!(await onezeArchitectureTablesAvailable(db))) {
+    app.log.warn(
+      {
+        withdrawalId: input.withdrawalId,
+      },
+      'Skipped queued 1ze withdrawal execution because architecture tables are unavailable'
+    );
+    return;
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    const execution = await executeReservedWithdrawal(client, {
+      withdrawalId: input.withdrawalId,
+      metadata: {
+        source: 'queue_worker',
+        initiatedBy: input.initiatedBy,
+        queueReason: input.reason,
+      },
+    });
+
+    await client.query('COMMIT');
+
+    app.log.info(
+      {
+        withdrawalId: input.withdrawalId,
+        alreadySettled: execution.alreadySettled,
+        queueReason: input.reason,
+      },
+      'Processed queued 1ze withdrawal execution'
+    );
+  } catch (error) {
+    await client.query('ROLLBACK');
+    app.log.error(
+      {
+        err: error,
+        withdrawalId: input.withdrawalId,
+        queueReason: input.reason,
+      },
+      'Failed queued 1ze withdrawal execution'
+    );
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function runOnezeReconciliation(reason: 'startup' | 'interval' | 'manual'): Promise<{
+  id: string;
+  circulatingMg: number;
+  reserveActiveMg: number;
+  withinInvariant: boolean;
+  invariantHash: string;
+  createdAt: string;
+} | null> {
+  if (!(await onezeArchitectureTablesAvailable(db))) {
+    return null;
+  }
+
+  const snapshot = await captureOnezeReconciliationSnapshot(db, reason, {
+    reason,
+  });
+
+  if (!snapshot.withinInvariant) {
+    app.log.error(
+      {
+        reconciliationId: snapshot.id,
+        circulatingMg: snapshot.circulatingMg,
+        reserveActiveMg: snapshot.reserveActiveMg,
+      },
+      '1ze reconciliation invariant failed: circulating supply exceeds active reserve'
+    );
+  }
+
+  return snapshot;
+}
+
+async function runOnezeDailyAttestation(reason: 'startup' | 'interval' | 'manual'): Promise<{
+  snapshotId: string;
+  objectKey: string;
+  publicUrl: string;
+  signature: string;
+  withinInvariant: boolean;
+  createdAt: string;
+} | null> {
+  if (!(await onezeArchitectureTablesAvailable(db))) {
+    return null;
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    const snapshot = await captureOnezeReconciliationSnapshot(client, `daily_attestation_${reason}`, {
+      reason,
+      exporter: 'api_service',
+    });
+
+    const generatedAt = new Date().toISOString();
+    const [year, month, day] = generatedAt.slice(0, 10).split('-');
+    const objectKey = `attestations/oneze/${year}/${month}/${day}/snapshot_${snapshot.id}.json`;
+
+    const payload = {
+      schemaVersion: 1,
+      service: 'thryftverse-api',
+      generatedAt,
+      reason,
+      reconciliation: {
+        id: snapshot.id,
+        circulatingMg: snapshot.circulatingMg,
+        reserveActiveMg: snapshot.reserveActiveMg,
+        withinInvariant: snapshot.withinInvariant,
+        invariantHash: snapshot.invariantHash,
+        createdAt: snapshot.createdAt,
+      },
+    };
+
+    const signature = crypto
+      .createHmac('sha256', config.onezeAttestationSigningSecret)
+      .update(toJsonString(payload))
+      .digest('hex');
+
+    const uploaded = await putJsonObject(
+      objectKey,
+      {
+        ...payload,
+        signature: {
+          algorithm: 'hmac-sha256',
+          value: signature,
+        },
+      },
+      {
+        metadata: {
+          snapshotid: snapshot.id,
+          invarianthash: snapshot.invariantHash,
+          signature,
+        },
+      }
+    );
+
+    await client.query(
+      `
+        UPDATE oneze_reconciliation_snapshots
+        SET metadata = metadata || $2::jsonb
+        WHERE id = $1
+      `,
+      [
+        snapshot.id,
+        toJsonString({
+          attestationObjectKey: uploaded.key,
+          attestationPublicUrl: uploaded.publicUrl,
+          attestationSignature: signature,
+          attestedAt: generatedAt,
+          attestationReason: reason,
+        }),
+      ]
+    );
+
+    await client.query('COMMIT');
+
+    return {
+      snapshotId: snapshot.id,
+      objectKey: uploaded.key,
+      publicUrl: uploaded.publicUrl,
+      signature,
+      withinInvariant: snapshot.withinInvariant,
+      createdAt: snapshot.createdAt,
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+function startOnezeReconciliationScheduler(): void {
+  if (onezeReconcileTimer) {
+    return;
+  }
+
+  void runOnezeReconciliation('startup').catch((error) => {
+    app.log.error({ err: error }, 'Failed startup 1ze reconciliation');
+  });
+
+  onezeReconcileTimer = setInterval(() => {
+    void runOnezeReconciliation('interval').catch((error) => {
+      app.log.error({ err: error }, 'Failed interval 1ze reconciliation');
+    });
+  }, config.onezeReconcileIntervalMs);
+
+  onezeReconcileTimer.unref?.();
+}
+
+function stopOnezeReconciliationScheduler(): void {
+  if (!onezeReconcileTimer) {
+    return;
+  }
+
+  clearInterval(onezeReconcileTimer);
+  onezeReconcileTimer = null;
+}
+
+function startOnezeDailyAttestationScheduler(): void {
+  if (onezeDailyAttestationTimer) {
+    return;
+  }
+
+  void runOnezeDailyAttestation('startup').catch((error) => {
+    app.log.error({ err: error }, 'Failed startup 1ze daily attestation export');
+  });
+
+  onezeDailyAttestationTimer = setInterval(() => {
+    void runOnezeDailyAttestation('interval').catch((error) => {
+      app.log.error({ err: error }, 'Failed interval 1ze daily attestation export');
+    });
+  }, config.onezeDailyAttestationIntervalMs);
+
+  onezeDailyAttestationTimer.unref?.();
+}
+
+function stopOnezeDailyAttestationScheduler(): void {
+  if (!onezeDailyAttestationTimer) {
+    return;
+  }
+
+  clearInterval(onezeDailyAttestationTimer);
+  onezeDailyAttestationTimer = null;
+}
+
 app.get('/health', async () => {
   const [{ now }] = (await db.query<{ now: string }>('SELECT NOW() AS now')).rows;
   const redisPing = await redis.ping();
@@ -3268,6 +4871,48 @@ app.post('/ops/auctions/sweep', async (request, reply) => {
   return {
     ok: true,
     queued: true,
+  };
+});
+
+app.post('/ops/oneze/reconcile', async (request, reply) => {
+  const securityAdminError = ensureSecurityAdminAccess(request, reply);
+  if (securityAdminError) {
+    return securityAdminError;
+  }
+
+  if (!(await onezeArchitectureTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze wallet architecture tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const snapshot = await runOnezeReconciliation('manual');
+  return {
+    ok: true,
+    snapshot,
+  };
+});
+
+app.post('/ops/oneze/attest', async (request, reply) => {
+  const securityAdminError = ensureSecurityAdminAccess(request, reply);
+  if (securityAdminError) {
+    return securityAdminError;
+  }
+
+  if (!(await onezeArchitectureTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze wallet architecture tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const attestation = await runOnezeDailyAttestation('manual');
+  return {
+    ok: true,
+    attestation,
   };
 });
 
@@ -5164,7 +6809,7 @@ app.post('/auth/password-reset/confirm', async (request, reply) => {
   };
 });
 
-const complianceMarketSchema = z.enum(['syndicate', 'auctions', 'wallet']);
+const complianceMarketSchema = z.enum(['syndicate', 'auctions', 'wallet', 'p2p']);
 const kycStatusSchema = z.enum(['not_started', 'pending', 'verified', 'rejected', 'expired']);
 const kycLevelSchema = z.enum(['none', 'basic', 'enhanced']);
 const sanctionsStatusSchema = z.enum(['unknown', 'clear', 'watchlist', 'blocked']);
@@ -5824,7 +7469,7 @@ app.post('/compliance/aml/evaluate', async (request, reply) => {
   const bodySchema = z.object({
     userId: z.string().min(2),
     market: complianceMarketSchema,
-    eventType: z.enum(['trade', 'bid', 'deposit', 'withdrawal', 'manual']).default('manual'),
+    eventType: z.enum(['trade', 'bid', 'deposit', 'withdrawal', 'transfer', 'manual']).default('manual'),
     amountGbp: z.number().nonnegative(),
     relatedUserId: z.string().min(2).optional(),
     referenceId: z.string().min(2).max(80).optional(),
@@ -8913,6 +10558,7 @@ app.post('/wallet/1ze/mint', async (request, reply) => {
     fiatAmount: z.number().positive(),
     fiatCurrency: z.string().length(3).default('GBP'),
     paymentIntentId: z.string().min(4).max(120).optional(),
+    idempotencyKey: z.string().min(8).max(140).optional(),
     metadata: z.record(z.unknown()).optional(),
   });
 
@@ -8932,6 +10578,30 @@ app.post('/wallet/1ze/mint', async (request, reply) => {
   try {
     await client.query('BEGIN');
     await ensureUserExists(actorUserId);
+
+    const idempotencyRequestHash = payload.idempotencyKey
+      ? hashWalletIdempotencyPayload({
+          userId: actorUserId,
+          fiatAmount: Number(payload.fiatAmount.toFixed(6)),
+          fiatCurrency: payload.fiatCurrency.toUpperCase(),
+          paymentIntentId: payload.paymentIntentId ?? null,
+          metadata: payload.metadata ?? {},
+        })
+      : null;
+
+    if (payload.idempotencyKey && idempotencyRequestHash) {
+      const idempotentResponse = await getWalletIdempotentResponse(client, {
+        userId: actorUserId,
+        operation: 'mint',
+        idempotencyKey: payload.idempotencyKey,
+        requestHash: idempotencyRequestHash,
+      });
+
+      if (idempotentResponse) {
+        await client.query('COMMIT');
+        return idempotentResponse;
+      }
+    }
 
     if (feeBreakdown.netFiatAmount <= 0) {
       throw createApiError('IZE_MINT_INVALID', 'Top-up amount is too low after platform fee');
@@ -8985,14 +10655,72 @@ app.post('/wallet/1ze/mint', async (request, reply) => {
       },
     });
 
+    const architectureEnabled = await onezeArchitectureTablesAvailable(client);
+    let architectureWalletId: string | null = null;
+    let architectureWalletBalanceMg: number | null = null;
+    let architectureReserveLotId: string | null = null;
+
+    if (architectureEnabled) {
+      const amountMg = onezeAmountToMg(izeAmount);
+      const inrRate = await resolveGoldRate(client, 'INR', {
+        forceRefresh: false,
+      });
+      const wallet = await ensureWallet(client, actorUserId, payload.fiatCurrency.toUpperCase());
+      const walletTxId = createRuntimeId('wtx');
+
+      architectureWalletId = wallet.id;
+      architectureWalletBalanceMg = await applyWalletLedgerDelta(client, {
+        walletId: wallet.id,
+        txId: walletTxId,
+        asset: '1ZE',
+        amount: amountMg,
+        kind: 'MINT',
+        refType: 'wallet_ize_operation',
+        refId: operationId,
+        goldRateInrPerG: inrRate.ratePerGram,
+        metadata: {
+          operationId,
+          userId: actorUserId,
+          paymentIntentId: payload.paymentIntentId ?? null,
+          fiatAmount: feeBreakdown.netFiatAmount,
+          fiatCurrency: payload.fiatCurrency.toUpperCase(),
+          ...(payload.metadata ?? {}),
+        },
+      });
+
+      const maybeCustodian = payload.metadata?.custodian;
+      const maybeCustodianRef = payload.metadata?.custodianRef;
+      const custodian = typeof maybeCustodian === 'string' && maybeCustodian.trim().length > 0
+        ? maybeCustodian
+        : 'MMTC-PAMP';
+      const custodianRef = typeof maybeCustodianRef === 'string' && maybeCustodianRef.trim().length > 0
+        ? maybeCustodianRef
+        : payload.paymentIntentId ?? operationId;
+      const acquisitionCostInr = Math.max(0, Math.round(mgToOnezeAmount(amountMg) * inrRate.ratePerGram));
+
+      architectureReserveLotId = await addReserveLotForMint(client, {
+        linkedTxId: walletTxId,
+        weightMg: amountMg,
+        custodian,
+        custodianRef,
+        purity: 0.9999,
+        acquisitionCostInr,
+        metadata: {
+          operationId,
+          userId: actorUserId,
+          source: 'wallet_mint',
+        },
+      });
+
+      await appendGoldPriceTick(client, `wallet_mint:${quote.source}`, inrRate.ratePerGram);
+    }
+
     const [walletBalanceIze, reserveSnapshot] = await Promise.all([
       getLedgerAccountBalance(client, 'user', actorUserId, 'ize_wallet', 'IZE'),
       getPlatformIzeReserveSnapshot(client),
     ]);
 
-    await client.query('COMMIT');
-    reply.code(201);
-    return {
+    const responsePayload: Record<string, unknown> = {
       ok: true,
       operation: {
         id: operationId,
@@ -9014,7 +10742,32 @@ app.post('/wallet/1ze/mint', async (request, reply) => {
         outstandingIze: reserveSnapshot.outstandingIze,
         reserveGrams: reserveSnapshot.reserveGrams,
       },
+      architecture: architectureEnabled
+        ? {
+            walletId: architectureWalletId,
+            walletBalanceMg: architectureWalletBalanceMg,
+            walletBalanceOneze:
+              architectureWalletBalanceMg === null
+                ? null
+                : mgToOnezeAmount(architectureWalletBalanceMg),
+            reserveLotId: architectureReserveLotId,
+          }
+        : null,
     };
+
+    if (payload.idempotencyKey && idempotencyRequestHash) {
+      await saveWalletIdempotentResponse(client, {
+        userId: actorUserId,
+        operation: 'mint',
+        idempotencyKey: payload.idempotencyKey,
+        requestHash: idempotencyRequestHash,
+        responsePayload,
+      });
+    }
+
+    await client.query('COMMIT');
+    reply.code(201);
+    return responsePayload;
   } catch (error) {
     await client.query('ROLLBACK');
     const apiError = getApiError(error);
@@ -9044,6 +10797,7 @@ app.post('/wallet/1ze/burn', async (request, reply) => {
     izeAmount: z.number().positive(),
     fiatCurrency: z.string().length(3).default('GBP'),
     payoutRequestId: z.string().min(4).max(140).optional(),
+    idempotencyKey: z.string().min(8).max(140).optional(),
     metadata: z.record(z.unknown()).optional(),
   });
 
@@ -9062,6 +10816,30 @@ app.post('/wallet/1ze/burn', async (request, reply) => {
   try {
     await client.query('BEGIN');
     await ensureUserExists(actorUserId);
+
+    const idempotencyRequestHash = payload.idempotencyKey
+      ? hashWalletIdempotencyPayload({
+          userId: actorUserId,
+          izeAmount: Number(payload.izeAmount.toFixed(6)),
+          fiatCurrency: payload.fiatCurrency.toUpperCase(),
+          payoutRequestId: payload.payoutRequestId ?? null,
+          metadata: payload.metadata ?? {},
+        })
+      : null;
+
+    if (payload.idempotencyKey && idempotencyRequestHash) {
+      const idempotentResponse = await getWalletIdempotentResponse(client, {
+        userId: actorUserId,
+        operation: 'burn',
+        idempotencyKey: payload.idempotencyKey,
+        requestHash: idempotencyRequestHash,
+      });
+
+      if (idempotentResponse) {
+        await client.query('COMMIT');
+        return idempotentResponse;
+      }
+    }
 
     if (config.nodeEnv === 'production' && !payload.payoutRequestId) {
       throw createApiError(
@@ -9139,14 +10917,58 @@ app.post('/wallet/1ze/burn', async (request, reply) => {
       metadata: payload.metadata,
     });
 
+    const architectureEnabled = await onezeArchitectureTablesAvailable(client);
+    let architectureWalletId: string | null = null;
+    let architectureWalletBalanceMg: number | null = null;
+    let architectureReserveMovements: Array<{ lotId: string; consumedMg: number }> = [];
+
+    if (architectureEnabled) {
+      const amountMg = onezeAmountToMg(Number(payload.izeAmount.toFixed(6)));
+      const inrRate = await resolveGoldRate(client, 'INR', {
+        forceRefresh: false,
+      });
+      const wallet = await ensureWallet(client, actorUserId, payload.fiatCurrency.toUpperCase());
+      const walletTxId = createRuntimeId('wtx');
+
+      architectureWalletId = wallet.id;
+      architectureWalletBalanceMg = await applyWalletLedgerDelta(client, {
+        walletId: wallet.id,
+        txId: walletTxId,
+        asset: '1ZE',
+        amount: -amountMg,
+        kind: 'BURN',
+        refType: 'wallet_ize_operation',
+        refId: operationId,
+        goldRateInrPerG: inrRate.ratePerGram,
+        metadata: {
+          operationId,
+          userId: actorUserId,
+          payoutRequestId: payload.payoutRequestId ?? null,
+          fiatAmount,
+          fiatCurrency: payload.fiatCurrency.toUpperCase(),
+          ...(payload.metadata ?? {}),
+        },
+      });
+
+      architectureReserveMovements = await consumeReserveLotsForBurn(client, {
+        linkedTxId: walletTxId,
+        requiredMg: amountMg,
+        metadata: {
+          operationId,
+          userId: actorUserId,
+          source: 'wallet_burn',
+        },
+      });
+
+      await appendGoldPriceTick(client, `wallet_burn:${quote.source}`, inrRate.ratePerGram);
+    }
+
     const [walletBalanceIze, reserveSnapshot] = await Promise.all([
       getLedgerAccountBalance(client, 'user', actorUserId, 'ize_wallet', 'IZE'),
       getPlatformIzeReserveSnapshot(client),
     ]);
 
-    await client.query('COMMIT');
-    reply.code(201);
-    return {
+    const responsePayload: Record<string, unknown> = {
       ok: true,
       operation: {
         id: operationId,
@@ -9167,7 +10989,32 @@ app.post('/wallet/1ze/burn', async (request, reply) => {
         outstandingIze: reserveSnapshot.outstandingIze,
         reserveGrams: reserveSnapshot.reserveGrams,
       },
+      architecture: architectureEnabled
+        ? {
+            walletId: architectureWalletId,
+            walletBalanceMg: architectureWalletBalanceMg,
+            walletBalanceOneze:
+              architectureWalletBalanceMg === null
+                ? null
+                : mgToOnezeAmount(architectureWalletBalanceMg),
+            reserveMovements: architectureReserveMovements,
+          }
+        : null,
     };
+
+    if (payload.idempotencyKey && idempotencyRequestHash) {
+      await saveWalletIdempotentResponse(client, {
+        userId: actorUserId,
+        operation: 'burn',
+        idempotencyKey: payload.idempotencyKey,
+        requestHash: idempotencyRequestHash,
+        responsePayload,
+      });
+    }
+
+    await client.query('COMMIT');
+    reply.code(201);
+    return responsePayload;
   } catch (error) {
     await client.query('ROLLBACK');
     const apiError = getApiError(error);
@@ -9189,6 +11036,1355 @@ app.post('/wallet/1ze/burn', async (request, reply) => {
   } finally {
     client.release();
   }
+});
+
+app.post('/wallet/1ze/transfer', async (request, reply) => {
+  const bodySchema = z.object({
+    senderUserId: z.string().min(2).optional(),
+    recipientUserId: z.string().min(2),
+    izeAmount: z.number().positive(),
+    fiatCurrency: z.string().length(3).default('GBP'),
+    contextType: z.enum(['order', 'syndicate_trade', 'gift', 'manual']).optional(),
+    contextId: z.string().min(2).max(140).optional(),
+    note: z.string().max(280).optional(),
+    idempotencyKey: z.string().min(8).max(140).optional(),
+    metadata: z.record(z.unknown()).optional(),
+  });
+
+  const payload = bodySchema.parse(request.body ?? {});
+  const senderUserId = resolveAuthenticatedUserId(request, payload.senderUserId);
+  const recipientUserId = payload.recipientUserId;
+
+  if (senderUserId === recipientUserId) {
+    reply.code(400);
+    return {
+      ok: false,
+      error: 'Sender and recipient must be different users',
+    };
+  }
+
+  if (
+    !(await onezeTablesAvailable(db))
+    || !(await onezeP2pTablesAvailable(db))
+    || !(await onezeArchitectureTablesAvailable(db))
+  ) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze P2P transfer architecture tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    await ensureUserExists(senderUserId);
+    await ensureUserExists(recipientUserId);
+
+    const normalizedIzeAmount = Number(payload.izeAmount.toFixed(6));
+    if (!Number.isFinite(normalizedIzeAmount) || normalizedIzeAmount <= 0) {
+      throw createApiError('P2P_TRANSFER_INVALID', 'Unable to derive a valid 1ze amount for transfer');
+    }
+
+    const amountMg = onezeAmountToMg(normalizedIzeAmount);
+
+    const idempotencyRequestHash = payload.idempotencyKey
+      ? hashWalletIdempotencyPayload({
+        senderUserId,
+        recipientUserId,
+        amountMg,
+        fiatCurrency: payload.fiatCurrency.toUpperCase(),
+        contextType: payload.contextType ?? null,
+        contextId: payload.contextId ?? null,
+        note: payload.note ?? null,
+      })
+      : null;
+
+    if (payload.idempotencyKey && idempotencyRequestHash) {
+      const idempotentResponse = await getWalletIdempotentResponse(client, {
+        userId: senderUserId,
+        operation: 'p2p_transfer',
+        idempotencyKey: payload.idempotencyKey,
+        requestHash: idempotencyRequestHash,
+      });
+
+      if (idempotentResponse) {
+        await client.query('COMMIT');
+        return idempotentResponse;
+      }
+    }
+
+    const fiatCurrency = payload.fiatCurrency.toUpperCase();
+    const fiatRate = await resolveGoldRate(client, fiatCurrency, {
+      forceRefresh: false,
+    });
+
+    const inrRate = await resolveGoldRate(client, 'INR', {
+      forceRefresh: false,
+    });
+
+    const gbpRate =
+      fiatCurrency === 'GBP'
+        ? fiatRate
+        : await resolveGoldRate(client, 'GBP', {
+            forceRefresh: false,
+          });
+
+    const onezeAmountFromMg = mgToOnezeAmount(amountMg);
+    const fiatAmount = Number((onezeAmountFromMg * fiatRate.ratePerGram).toFixed(6));
+    const amountGbp = Number((onezeAmountFromMg * gbpRate.ratePerGram).toFixed(6));
+    const eligibilityAmountGbp = roundTo(amountGbp, 2);
+
+    const policyDecision = await evaluateP2pPolicyEligibility(client, {
+      senderUserId,
+      recipientUserId,
+      amountMg,
+      contextType: payload.contextType,
+      contextId: payload.contextId,
+    });
+
+    const [senderEligibility, recipientEligibility] = await Promise.all([
+      evaluateMarketEligibility(client, {
+        userId: senderUserId,
+        market: 'p2p',
+        orderNotionalGbp: eligibilityAmountGbp,
+      }),
+      evaluateMarketEligibility(client, {
+        userId: recipientUserId,
+        market: 'p2p',
+        orderNotionalGbp: eligibilityAmountGbp,
+      }),
+    ]);
+
+    if (!senderEligibility.allowed) {
+      throw createApiError('P2P_TRANSFER_SENDER_BLOCKED', senderEligibility.message, {
+        senderDecision: senderEligibility,
+      });
+    }
+
+    if (!recipientEligibility.allowed) {
+      throw createApiError('P2P_TRANSFER_RECIPIENT_BLOCKED', recipientEligibility.message, {
+        recipientDecision: recipientEligibility,
+      });
+    }
+
+    const transferId = createRuntimeId('ize_transfer');
+    const amlAssessment = await evaluateAmlRisk(client, {
+      userId: senderUserId,
+      market: 'p2p',
+      amountGbp: eligibilityAmountGbp,
+      counterpartyUserId: recipientUserId,
+    });
+
+    let amlAlert: { alertId: string; status: string } | null = null;
+    if (amlAssessment.shouldCreateAlert) {
+      amlAlert = await createAmlAlert(client, {
+        userId: senderUserId,
+        relatedUserId: recipientUserId,
+        market: 'p2p',
+        eventType: 'transfer',
+        amountGbp: eligibilityAmountGbp,
+        referenceId: transferId,
+        ruleCode: 'P2P_TRANSFER',
+        notes: payload.note,
+        context: {
+          senderUserId,
+          recipientUserId,
+          izeAmount: normalizedIzeAmount,
+          fiatAmount,
+          fiatCurrency,
+          ratePerGram: fiatRate.ratePerGram,
+        },
+        assessment: amlAssessment,
+      });
+    }
+
+    if (amlAssessment.shouldBlock) {
+      throw createApiError('P2P_TRANSFER_AML_BLOCKED', 'P2P transfer blocked by AML controls', {
+        riskScore: amlAssessment.riskScore,
+        riskLevel: amlAssessment.riskLevel,
+        reasons: amlAssessment.reasons,
+        alertId: amlAlert?.alertId ?? null,
+      });
+    }
+
+    await recordIzeTransfer(client, {
+      transferId,
+      senderUserId,
+      recipientUserId,
+      izeAmount: normalizedIzeAmount,
+      fiatAmount,
+      fiatCurrency,
+      ratePerGram: fiatRate.ratePerGram,
+      eligibilityCode: 'ALLOWED',
+      amlRiskScore: amlAssessment.riskScore,
+      amlRiskLevel: amlAssessment.riskLevel,
+      amlAlertId: amlAlert?.alertId ?? null,
+      senderCountry: policyDecision.senderCountry,
+      recipientCountry: policyDecision.recipientCountry,
+      travelRulePayload: policyDecision.requiresTravelRule
+        ? {
+          thresholdMg: config.onezeTravelRuleThresholdMg,
+          originator: {
+            userId: senderUserId,
+            country: policyDecision.senderCountry,
+          },
+          beneficiary: {
+            userId: recipientUserId,
+            country: policyDecision.recipientCountry,
+          },
+          contextType: payload.contextType ?? null,
+          contextId: payload.contextId ?? null,
+        }
+        : {},
+      metadata: {
+        note: payload.note,
+        contextType: payload.contextType ?? null,
+        contextId: payload.contextId ?? null,
+        amountMg,
+        ...(payload.metadata ?? {}),
+      },
+    });
+
+    const senderWallet = await ensureWallet(client, senderUserId, fiatCurrency);
+    const recipientWallet = await ensureWallet(client, recipientUserId, fiatCurrency);
+    const walletTxId = createRuntimeId('wtx');
+
+    const [senderBalanceAfterMg, recipientBalanceAfterMg] = await Promise.all([
+      applyWalletLedgerDelta(client, {
+        walletId: senderWallet.id,
+        txId: walletTxId,
+        asset: '1ZE',
+        amount: -amountMg,
+        kind: 'TRANSFER_SEND',
+        refType: payload.contextType ?? 'p2p_transfer',
+        refId: payload.contextId ?? transferId,
+        goldRateInrPerG: inrRate.ratePerGram,
+        metadata: {
+          transferId,
+          counterpartyUserId: recipientUserId,
+          note: payload.note ?? null,
+        },
+      }),
+      applyWalletLedgerDelta(client, {
+        walletId: recipientWallet.id,
+        txId: walletTxId,
+        asset: '1ZE',
+        amount: amountMg,
+        kind: 'TRANSFER_RECEIVE',
+        refType: payload.contextType ?? 'p2p_transfer',
+        refId: payload.contextId ?? transferId,
+        goldRateInrPerG: inrRate.ratePerGram,
+        metadata: {
+          transferId,
+          counterpartyUserId: senderUserId,
+          note: payload.note ?? null,
+        },
+      }),
+    ]);
+
+    const [senderIzeBalance, recipientIzeBalance] = await Promise.all([
+      getLedgerAccountBalance(client, 'user', senderUserId, 'ize_wallet', 'IZE'),
+      getLedgerAccountBalance(client, 'user', recipientUserId, 'ize_wallet', 'IZE'),
+    ]);
+
+    const responsePayload: Record<string, unknown> = {
+      ok: true,
+      transfer: {
+        id: transferId,
+        senderUserId,
+        recipientUserId,
+        amountMg,
+        izeAmount: onezeAmountFromMg,
+        fiatAmount,
+        fiatCurrency,
+        amountGbp: eligibilityAmountGbp,
+        ratePerGram: fiatRate.ratePerGram,
+        rateSource: fiatRate.source,
+        senderEligibilityCode: senderEligibility.code,
+        recipientEligibilityCode: recipientEligibility.code,
+        senderCountry: policyDecision.senderCountry,
+        recipientCountry: policyDecision.recipientCountry,
+        isCrossBorder: policyDecision.senderCountry !== policyDecision.recipientCountry,
+        travelRuleApplied: policyDecision.requiresTravelRule,
+        amlRiskScore: amlAssessment.riskScore,
+        amlRiskLevel: amlAssessment.riskLevel,
+        amlAlertId: amlAlert?.alertId ?? null,
+      },
+      balances: {
+        senderIze: senderIzeBalance,
+        recipientIze: recipientIzeBalance,
+        senderWalletMg: senderBalanceAfterMg,
+        senderWalletOneze: mgToOnezeAmount(senderBalanceAfterMg),
+        recipientWalletMg: recipientBalanceAfterMg,
+        recipientWalletOneze: mgToOnezeAmount(recipientBalanceAfterMg),
+      },
+    };
+
+    if (payload.idempotencyKey && idempotencyRequestHash) {
+      await saveWalletIdempotentResponse(client, {
+        userId: senderUserId,
+        operation: 'p2p_transfer',
+        idempotencyKey: payload.idempotencyKey,
+        requestHash: idempotencyRequestHash,
+        responsePayload,
+      });
+    }
+
+    await client.query('COMMIT');
+
+    await appendComplianceAuditSafe(request, {
+      eventType: 'wallet.ize.transfer.committed',
+      subjectUserId: senderUserId,
+      payload: {
+        transferId,
+        senderUserId,
+        recipientUserId,
+        izeAmount: normalizedIzeAmount,
+        fiatAmount,
+        fiatCurrency,
+        amountGbp: eligibilityAmountGbp,
+        amountMg,
+        senderCountry: policyDecision.senderCountry,
+        recipientCountry: policyDecision.recipientCountry,
+        contextType: payload.contextType ?? null,
+        contextId: payload.contextId ?? null,
+        amlRiskScore: amlAssessment.riskScore,
+        amlRiskLevel: amlAssessment.riskLevel,
+        amlAlertId: amlAlert?.alertId ?? null,
+      },
+    });
+
+    reply.code(201);
+    return responsePayload;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    const apiError = getApiError(error);
+    if (apiError) {
+      reply.code(statusCodeForApiError(apiError.code));
+      return {
+        ok: false,
+        error: apiError.message,
+        details: apiError.details,
+      };
+    }
+
+    request.log.error({ err: error, senderUserId, recipientUserId }, 'Failed to execute P2P 1ze transfer');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to execute P2P 1ze transfer',
+    };
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/wallet/1ze/withdrawals/quote', async (request, reply) => {
+  const bodySchema = z.object({
+    userId: z.string().min(2).optional(),
+    amountMg: z.number().int().positive().optional(),
+    amountOneze: z.number().positive().optional(),
+    targetCurrency: z.string().length(3).default('INR'),
+    payoutDestination: z.record(z.unknown()).optional(),
+    forceRefresh: z.coerce.boolean().default(false),
+    idempotencyKey: z.string().min(8).max(140).optional(),
+    metadata: z.record(z.unknown()).optional(),
+  });
+
+  const payload = bodySchema.parse(request.body ?? {});
+  const actorUserId = resolveAuthenticatedUserId(request, payload.userId);
+
+  const providedAmountCount = Number(payload.amountMg !== undefined) + Number(payload.amountOneze !== undefined);
+  if (providedAmountCount !== 1) {
+    reply.code(400);
+    return {
+      ok: false,
+      error: 'Provide exactly one of amountMg or amountOneze',
+    };
+  }
+
+  if (!(await onezeArchitectureTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze wallet architecture tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    await ensureUserExists(actorUserId);
+
+    const amountMg = payload.amountMg ?? onezeAmountToMg(Number((payload.amountOneze ?? 0).toFixed(6)));
+    if (!Number.isSafeInteger(amountMg) || amountMg <= 0) {
+      throw createApiError('WITHDRAWAL_AMOUNT_INVALID', 'Withdrawal amount cannot be represented safely in mg');
+    }
+
+    const targetCurrency = payload.targetCurrency.toUpperCase();
+    const idempotencyRequestHash = payload.idempotencyKey
+      ? hashWalletIdempotencyPayload({
+          userId: actorUserId,
+          amountMg,
+          targetCurrency,
+          payoutDestination: payload.payoutDestination ?? {},
+        })
+      : null;
+
+    if (payload.idempotencyKey && idempotencyRequestHash) {
+      const idempotentResponse = await getWalletIdempotentResponse(client, {
+        userId: actorUserId,
+        operation: 'withdraw_quote',
+        idempotencyKey: payload.idempotencyKey,
+        requestHash: idempotencyRequestHash,
+      });
+
+      if (idempotentResponse) {
+        await client.query('COMMIT');
+        return idempotentResponse;
+      }
+    }
+
+    const corridor = await resolvePayoutCorridor(client, targetCurrency);
+    if (!corridor || !corridor.enabled) {
+      throw createApiError('WITHDRAWAL_CORRIDOR_UNAVAILABLE', 'Target payout corridor is unavailable', {
+        targetCurrency,
+      });
+    }
+
+    const fxRate = await resolveXauFxRate(client, targetCurrency, {
+      forceRefresh: payload.forceRefresh,
+    });
+
+    const amountOneze = mgToOnezeAmount(amountMg);
+    const grossMinor = toFiatMinor(amountOneze * fxRate.rate, targetCurrency);
+    const spreadMinor = Math.round((grossMinor * Number(corridor.spread_bps)) / 10_000);
+    const networkFeeMinor = Number(corridor.network_fee_minor);
+    const netMinor = grossMinor - spreadMinor - networkFeeMinor;
+    const minAmountMinor = Number(corridor.min_amount_minor);
+    const maxAmountMinor = Number(corridor.max_amount_minor);
+
+    if (grossMinor < minAmountMinor || grossMinor > maxAmountMinor) {
+      throw createApiError(
+        'WITHDRAWAL_AMOUNT_OUT_OF_RANGE',
+        'Withdrawal amount is outside corridor limits',
+        {
+          targetCurrency,
+          minAmountMinor,
+          maxAmountMinor,
+          requestedGrossMinor: grossMinor,
+        }
+      );
+    }
+
+    if (netMinor <= 0) {
+      throw createApiError('WITHDRAWAL_NET_AMOUNT_INVALID', 'Withdrawal net payout must be positive', {
+        targetCurrency,
+        grossMinor,
+        spreadMinor,
+        networkFeeMinor,
+        netMinor,
+      });
+    }
+
+    const withdrawalId = createRuntimeId('wdq');
+    const rateExpiresAt = new Date(Date.now() + config.onezeWithdrawalQuoteTtlSeconds * 1_000).toISOString();
+    const withdrawalResult = await client.query<WithdrawalRow>(
+      `
+        INSERT INTO withdrawals (
+          id,
+          user_id,
+          burn_tx_id,
+          amount_mg,
+          target_currency,
+          gross_minor,
+          spread_minor,
+          network_fee_minor,
+          net_minor,
+          rate_locked,
+          rate_expires_at,
+          rail,
+          rail_ref,
+          status,
+          payout_destination,
+          metadata
+        )
+        VALUES (
+          $1,
+          $2,
+          NULL,
+          $3,
+          $4,
+          $5,
+          $6,
+          $7,
+          $8,
+          $9,
+          $10,
+          $11,
+          NULL,
+          'QUOTED',
+          $12::jsonb,
+          $13::jsonb
+        )
+        RETURNING
+          id,
+          user_id,
+          burn_tx_id,
+          amount_mg::text,
+          target_currency,
+          gross_minor::text,
+          spread_minor::text,
+          network_fee_minor::text,
+          net_minor::text,
+          rate_locked::text,
+          rate_expires_at::text,
+          rail,
+          rail_ref,
+          status,
+          payout_destination,
+          metadata,
+          created_at::text,
+          completed_at::text
+      `,
+      [
+        withdrawalId,
+        actorUserId,
+        amountMg,
+        targetCurrency,
+        grossMinor,
+        spreadMinor,
+        networkFeeMinor,
+        netMinor,
+        fxRate.rate,
+        rateExpiresAt,
+        corridor.rail,
+        toJsonString(payload.payoutDestination ?? {}),
+        toJsonString({
+          quoteSource: fxRate.source,
+          quoteObservedAt: fxRate.observedAt,
+          quoteValidForSeconds: config.onezeWithdrawalQuoteTtlSeconds,
+          corridor: {
+            currency: targetCurrency,
+            rail: corridor.rail,
+            spreadBps: corridor.spread_bps,
+            settlementSlaHours: corridor.settlement_sla_hours,
+          },
+          ...(payload.metadata ?? {}),
+        }),
+      ]
+    );
+
+    const withdrawal = toWithdrawalPayload(withdrawalResult.rows[0]);
+    const responsePayload: Record<string, unknown> = {
+      ok: true,
+      withdrawal,
+      quote: {
+        validForSeconds: config.onezeWithdrawalQuoteTtlSeconds,
+        expiresAt: withdrawal.rateExpiresAt,
+        source: fxRate.source,
+      },
+      corridor: {
+        currency: targetCurrency,
+        rail: corridor.rail,
+        spreadBps: corridor.spread_bps,
+        networkFeeMinor,
+        minAmountMinor,
+        maxAmountMinor,
+      },
+    };
+
+    if (payload.idempotencyKey && idempotencyRequestHash) {
+      await saveWalletIdempotentResponse(client, {
+        userId: actorUserId,
+        operation: 'withdraw_quote',
+        idempotencyKey: payload.idempotencyKey,
+        requestHash: idempotencyRequestHash,
+        responsePayload,
+      });
+    }
+
+    await client.query('COMMIT');
+    reply.code(201);
+    return responsePayload;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    const apiError = getApiError(error);
+    if (apiError) {
+      reply.code(statusCodeForApiError(apiError.code));
+      return {
+        ok: false,
+        error: apiError.message,
+        details: apiError.details,
+      };
+    }
+
+    request.log.error({ err: error, userId: actorUserId }, 'Failed to quote 1ze withdrawal');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to quote 1ze withdrawal',
+    };
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/wallet/1ze/withdrawals/:withdrawalId/accept', async (request, reply) => {
+  const paramsSchema = z.object({
+    withdrawalId: z.string().min(3),
+  });
+
+  const bodySchema = z.object({
+    userId: z.string().min(2).optional(),
+    idempotencyKey: z.string().min(8).max(140).optional(),
+    metadata: z.record(z.unknown()).optional(),
+  });
+
+  const { withdrawalId } = paramsSchema.parse(request.params);
+  const payload = bodySchema.parse(request.body ?? {});
+  const actorUserId = resolveAuthenticatedUserId(request, payload.userId);
+
+  if (!(await onezeArchitectureTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze wallet architecture tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    const idempotencyRequestHash = payload.idempotencyKey
+      ? hashWalletIdempotencyPayload({
+          actorUserId,
+          withdrawalId,
+        })
+      : null;
+
+    if (payload.idempotencyKey && idempotencyRequestHash) {
+      const idempotentResponse = await getWalletIdempotentResponse(client, {
+        userId: actorUserId,
+        operation: 'withdraw_accept',
+        idempotencyKey: payload.idempotencyKey,
+        requestHash: idempotencyRequestHash,
+      });
+
+      if (idempotentResponse) {
+        await client.query('COMMIT');
+        return idempotentResponse;
+      }
+    }
+
+    const withdrawal = await loadWithdrawalById(client, withdrawalId, { forUpdate: true });
+    if (!withdrawal) {
+      throw createApiError('WITHDRAWAL_NOT_FOUND', 'Withdrawal quote not found', { withdrawalId });
+    }
+
+    if (request.authUser?.role !== 'admin' && withdrawal.user_id !== actorUserId) {
+      throw createApiError('FORBIDDEN_USER_CONTEXT', 'Forbidden: withdrawal does not belong to user context', {
+        authUserId: actorUserId,
+        withdrawalUserId: withdrawal.user_id,
+      });
+    }
+
+    if (withdrawal.status === 'RESERVED' || withdrawal.status === 'PAID_OUT') {
+      const wallet = await ensureWallet(client, withdrawal.user_id, withdrawal.target_currency);
+      const responsePayload: Record<string, unknown> = {
+        ok: true,
+        alreadyReserved: true,
+        withdrawal: toWithdrawalPayload(withdrawal),
+        wallet: toWalletPayload(wallet),
+      };
+
+      if (payload.idempotencyKey && idempotencyRequestHash) {
+        await saveWalletIdempotentResponse(client, {
+          userId: actorUserId,
+          operation: 'withdraw_accept',
+          idempotencyKey: payload.idempotencyKey,
+          requestHash: idempotencyRequestHash,
+          responsePayload,
+        });
+      }
+
+      await client.query('COMMIT');
+      return responsePayload;
+    }
+
+    if (!canTransitionWithdrawalStatus(withdrawal.status, 'RESERVED')) {
+      throw createApiError('WITHDRAWAL_STATE_INVALID', 'Withdrawal cannot be reserved from current status', {
+        withdrawalId,
+        status: withdrawal.status,
+      });
+    }
+
+    const expiresAtMs = Date.parse(withdrawal.rate_expires_at);
+    if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
+      throw createApiError('WITHDRAWAL_QUOTE_EXPIRED', 'Withdrawal quote has expired', {
+        withdrawalId,
+        rateExpiresAt: withdrawal.rate_expires_at,
+      });
+    }
+
+    const amountMg = Number(withdrawal.amount_mg);
+    const requiresQueuedExecution = amountMg > config.onezeWithdrawalInstantLimitMg;
+    const wallet = await ensureWallet(client, withdrawal.user_id, withdrawal.target_currency);
+    const inrRate = await resolveGoldRate(client, 'INR', {
+      forceRefresh: false,
+    });
+    const burnTxId = withdrawal.burn_tx_id ?? createRuntimeId('wdburn');
+
+    const walletBalanceAfterMg = await applyWalletLedgerDelta(client, {
+      walletId: wallet.id,
+      txId: burnTxId,
+      asset: '1ZE',
+      amount: -amountMg,
+      kind: 'WITHDRAWAL_RESERVED',
+      refType: 'withdrawal',
+      refId: withdrawal.id,
+      goldRateInrPerG: inrRate.ratePerGram,
+      metadata: {
+        withdrawalId: withdrawal.id,
+        actorUserId,
+        targetCurrency: withdrawal.target_currency,
+        ...(payload.metadata ?? {}),
+      },
+    });
+
+    const updatedResult = await client.query<WithdrawalRow>(
+      `
+        UPDATE withdrawals
+        SET
+          burn_tx_id = $2,
+          status = 'RESERVED',
+          metadata = metadata || $3::jsonb
+        WHERE id = $1
+        RETURNING
+          id,
+          user_id,
+          burn_tx_id,
+          amount_mg::text,
+          target_currency,
+          gross_minor::text,
+          spread_minor::text,
+          network_fee_minor::text,
+          net_minor::text,
+          rate_locked::text,
+          rate_expires_at::text,
+          rail,
+          rail_ref,
+          status,
+          payout_destination,
+          metadata,
+          created_at::text,
+          completed_at::text
+      `,
+      [
+        withdrawal.id,
+        burnTxId,
+        toJsonString({
+          acceptedAt: new Date().toISOString(),
+          acceptedBy: actorUserId,
+          ...(payload.metadata ?? {}),
+        }),
+      ]
+    );
+
+    const updatedWithdrawal = updatedResult.rows[0];
+    const responsePayload: Record<string, unknown> = {
+      ok: true,
+      withdrawal: toWithdrawalPayload(updatedWithdrawal),
+      wallet: {
+        walletId: wallet.id,
+        onezeBalanceMg: walletBalanceAfterMg,
+        onezeBalance: mgToOnezeAmount(walletBalanceAfterMg),
+      },
+      execution: {
+        mode: requiresQueuedExecution ? 'queued' : 'manual',
+        queued: requiresQueuedExecution,
+        instantLimitMg: config.onezeWithdrawalInstantLimitMg,
+      },
+    };
+
+    await client.query('COMMIT');
+
+    if (requiresQueuedExecution) {
+      try {
+        await enqueueOnezeWithdrawalExecuteJob({
+          withdrawalId: updatedWithdrawal.id,
+          initiatedBy: actorUserId,
+          reason: 'threshold_queue',
+        });
+      } catch (queueError) {
+        request.log.error(
+          { err: queueError, withdrawalId: updatedWithdrawal.id },
+          'Failed to enqueue threshold-based 1ze withdrawal execution'
+        );
+
+        const execution = responsePayload.execution as Record<string, unknown>;
+        execution.queued = false;
+        execution.queueError = 'queue_enqueue_failed';
+      }
+    }
+
+    if (payload.idempotencyKey && idempotencyRequestHash) {
+      await saveWalletIdempotentResponse(client, {
+        userId: actorUserId,
+        operation: 'withdraw_accept',
+        idempotencyKey: payload.idempotencyKey,
+        requestHash: idempotencyRequestHash,
+        responsePayload,
+      });
+    }
+
+    return responsePayload;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    const apiError = getApiError(error);
+    if (apiError) {
+      reply.code(statusCodeForApiError(apiError.code));
+      return {
+        ok: false,
+        error: apiError.message,
+        details: apiError.details,
+      };
+    }
+
+    request.log.error({ err: error, withdrawalId, userId: actorUserId }, 'Failed to accept 1ze withdrawal');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to accept 1ze withdrawal',
+    };
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/wallet/1ze/withdrawals/:withdrawalId/execute', async (request, reply) => {
+  const paramsSchema = z.object({
+    withdrawalId: z.string().min(3),
+  });
+
+  const bodySchema = z.object({
+    railRef: z.string().min(4).max(180).optional(),
+    metadata: z.record(z.unknown()).optional(),
+  });
+
+  const securityAdminError = ensureSecurityAdminAccess(request, reply);
+  if (securityAdminError) {
+    return securityAdminError;
+  }
+
+  const { withdrawalId } = paramsSchema.parse(request.params);
+  const payload = bodySchema.parse(request.body ?? {});
+
+  if (!(await onezeArchitectureTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze wallet architecture tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    const execution = await executeReservedWithdrawal(client, {
+      withdrawalId,
+      railRef: payload.railRef,
+      metadata: {
+        ...(payload.metadata ?? {}),
+        source: 'admin_execute_endpoint',
+      },
+    });
+
+    await client.query('COMMIT');
+
+    if (execution.alreadySettled) {
+      return {
+        ok: true,
+        alreadySettled: true,
+        withdrawal: execution.withdrawal,
+      };
+    }
+
+    return {
+      ok: true,
+      withdrawal: execution.withdrawal,
+      settlement: execution.settlement,
+      wallet: execution.wallet,
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    const apiError = getApiError(error);
+    if (apiError) {
+      reply.code(statusCodeForApiError(apiError.code));
+      return {
+        ok: false,
+        error: apiError.message,
+        details: apiError.details,
+      };
+    }
+
+    request.log.error({ err: error, withdrawalId }, 'Failed to execute 1ze withdrawal');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to execute 1ze withdrawal',
+    };
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/wallet/1ze/withdrawals/:withdrawalId/fail', async (request, reply) => {
+  const paramsSchema = z.object({
+    withdrawalId: z.string().min(3),
+  });
+
+  const bodySchema = z.object({
+    reason: z.string().min(3).max(280).optional(),
+    metadata: z.record(z.unknown()).optional(),
+  });
+
+  const securityAdminError = ensureSecurityAdminAccess(request, reply);
+  if (securityAdminError) {
+    return securityAdminError;
+  }
+
+  const { withdrawalId } = paramsSchema.parse(request.params);
+  const payload = bodySchema.parse(request.body ?? {});
+
+  if (!(await onezeArchitectureTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze wallet architecture tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    const withdrawal = await loadWithdrawalById(client, withdrawalId, { forUpdate: true });
+    if (!withdrawal) {
+      throw createApiError('WITHDRAWAL_NOT_FOUND', 'Withdrawal not found', { withdrawalId });
+    }
+
+    if (withdrawal.status === 'FAILED' || withdrawal.status === 'REVERSED') {
+      await client.query('COMMIT');
+      return {
+        ok: true,
+        alreadyFailed: true,
+        withdrawal: toWithdrawalPayload(withdrawal),
+      };
+    }
+
+    if (!canTransitionWithdrawalStatus(withdrawal.status, 'FAILED')) {
+      throw createApiError('WITHDRAWAL_STATE_INVALID', 'Withdrawal cannot be failed from current status', {
+        withdrawalId,
+        status: withdrawal.status,
+      });
+    }
+
+    const amountMg = Number(withdrawal.amount_mg);
+    let walletInfo: { walletId: string; onezeBalanceMg: number; onezeBalance: number } | null = null;
+
+    if (withdrawal.status === 'RESERVED') {
+      const inrRate = await resolveGoldRate(client, 'INR', {
+        forceRefresh: false,
+      });
+
+      const wallet = await ensureWallet(client, withdrawal.user_id, withdrawal.target_currency);
+      const walletBalanceAfterMg = await applyWalletLedgerDelta(client, {
+        walletId: wallet.id,
+        txId: withdrawal.burn_tx_id ?? createRuntimeId('wdburn'),
+        asset: '1ZE',
+        amount: amountMg,
+        kind: 'WITHDRAWAL_REVERSED',
+        refType: 'withdrawal',
+        refId: withdrawal.id,
+        goldRateInrPerG: inrRate.ratePerGram,
+        metadata: {
+          withdrawalId,
+          reason: payload.reason ?? 'execution_failed',
+          ...(payload.metadata ?? {}),
+        },
+      });
+
+      walletInfo = {
+        walletId: wallet.id,
+        onezeBalanceMg: walletBalanceAfterMg,
+        onezeBalance: mgToOnezeAmount(walletBalanceAfterMg),
+      };
+    }
+
+    const updatedResult = await client.query<WithdrawalRow>(
+      `
+        UPDATE withdrawals
+        SET
+          status = 'FAILED',
+          completed_at = NOW(),
+          metadata = metadata || $2::jsonb
+        WHERE id = $1
+        RETURNING
+          id,
+          user_id,
+          burn_tx_id,
+          amount_mg::text,
+          target_currency,
+          gross_minor::text,
+          spread_minor::text,
+          network_fee_minor::text,
+          net_minor::text,
+          rate_locked::text,
+          rate_expires_at::text,
+          rail,
+          rail_ref,
+          status,
+          payout_destination,
+          metadata,
+          created_at::text,
+          completed_at::text
+      `,
+      [
+        withdrawal.id,
+        toJsonString({
+          failedAt: new Date().toISOString(),
+          reason: payload.reason ?? 'execution_failed',
+          ...(payload.metadata ?? {}),
+        }),
+      ]
+    );
+
+    await client.query('COMMIT');
+    return {
+      ok: true,
+      withdrawal: toWithdrawalPayload(updatedResult.rows[0]),
+      wallet: walletInfo,
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    const apiError = getApiError(error);
+    if (apiError) {
+      reply.code(statusCodeForApiError(apiError.code));
+      return {
+        ok: false,
+        error: apiError.message,
+        details: apiError.details,
+      };
+    }
+
+    request.log.error({ err: error, withdrawalId }, 'Failed to fail/reverse 1ze withdrawal');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to fail/reverse 1ze withdrawal',
+    };
+  } finally {
+    client.release();
+  }
+});
+
+app.get('/wallet/1ze/:userId/withdrawals', async (request, reply) => {
+  const paramsSchema = z.object({
+    userId: z.string().min(2),
+  });
+
+  const querySchema = z.object({
+    status: z
+      .enum(['all', 'QUOTED', 'ACCEPTED', 'RESERVED', 'PAID_OUT', 'FAILED', 'REVERSED'])
+      .default('all'),
+    limit: z.coerce.number().int().min(1).max(200).default(60),
+  });
+
+  const { userId } = paramsSchema.parse(request.params);
+  const { status, limit } = querySchema.parse(request.query);
+  resolveAuthenticatedUserId(request, userId);
+
+  if (!(await onezeArchitectureTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze wallet architecture tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const result = await db.query<WithdrawalRow>(
+    `
+      SELECT
+        id,
+        user_id,
+        burn_tx_id,
+        amount_mg::text,
+        target_currency,
+        gross_minor::text,
+        spread_minor::text,
+        network_fee_minor::text,
+        net_minor::text,
+        rate_locked::text,
+        rate_expires_at::text,
+        rail,
+        rail_ref,
+        status,
+        payout_destination,
+        metadata,
+        created_at::text,
+        completed_at::text
+      FROM withdrawals
+      WHERE user_id = $1
+        AND ($2 = 'all' OR status = $2)
+      ORDER BY created_at DESC
+      LIMIT $3
+    `,
+    [userId, status, limit]
+  );
+
+  return {
+    ok: true,
+    items: result.rows.map((row) => toWithdrawalPayload(row)),
+  };
+});
+
+app.get('/wallet/1ze/:userId/balance', async (request, reply) => {
+  const paramsSchema = z.object({
+    userId: z.string().min(2),
+  });
+
+  const querySchema = z.object({
+    fiatCurrency: z.string().length(3).optional(),
+  });
+
+  const { userId } = paramsSchema.parse(request.params);
+  const { fiatCurrency } = querySchema.parse(request.query);
+  resolveAuthenticatedUserId(request, userId);
+
+  if (!(await onezeArchitectureTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze wallet architecture tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    await ensureUserExists(userId);
+
+    const wallet = await ensureWallet(client, userId, fiatCurrency?.toUpperCase() ?? DEFAULT_WALLET_FIAT_CURRENCY);
+    const [legacyIzeBalance, latestReconciliation] = await Promise.all([
+      (await ledgerTablesAvailable(client))
+        ? getLedgerAccountBalance(client, 'user', userId, 'ize_wallet', 'IZE')
+        : Promise.resolve(0),
+      client.query<{
+        id: string;
+        circulating_mg: string;
+        reserve_active_mg: string;
+        within_invariant: boolean;
+        created_at: string;
+      }>(
+        `
+          SELECT id, circulating_mg::text, reserve_active_mg::text, within_invariant, created_at::text
+          FROM oneze_reconciliation_snapshots
+          ORDER BY created_at DESC
+          LIMIT 1
+        `
+      ),
+    ]);
+
+    await client.query('COMMIT');
+
+    const latestSnapshot = latestReconciliation.rows[0];
+    return {
+      ok: true,
+      userId,
+      wallet: toWalletPayload(wallet),
+      legacyLedgerIzeBalance: legacyIzeBalance,
+      reconciliation: latestSnapshot
+        ? {
+            id: latestSnapshot.id,
+            circulatingMg: Number(latestSnapshot.circulating_mg),
+            reserveActiveMg: Number(latestSnapshot.reserve_active_mg),
+            withinInvariant: latestSnapshot.within_invariant,
+            createdAt: latestSnapshot.created_at,
+          }
+        : null,
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    const apiError = getApiError(error);
+    if (apiError) {
+      reply.code(statusCodeForApiError(apiError.code));
+      return {
+        ok: false,
+        error: apiError.message,
+        details: apiError.details,
+      };
+    }
+
+    request.log.error({ err: error, userId }, 'Failed to load 1ze wallet balance');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to load 1ze wallet balance',
+    };
+  } finally {
+    client.release();
+  }
+});
+
+app.get('/wallet/1ze/:userId/ledger', async (request, reply) => {
+  const paramsSchema = z.object({
+    userId: z.string().min(2),
+  });
+
+  const querySchema = z.object({
+    asset: z.enum(['ALL', '1ZE', 'FIAT']).default('ALL'),
+    limit: z.coerce.number().int().min(1).max(300).default(100),
+  });
+
+  const { userId } = paramsSchema.parse(request.params);
+  const { asset, limit } = querySchema.parse(request.query);
+  resolveAuthenticatedUserId(request, userId);
+
+  if (!(await onezeArchitectureTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze wallet architecture tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    await ensureUserExists(userId);
+    const wallet = await ensureWallet(client, userId);
+
+    const result = await client.query<WalletLedgerRow>(
+      `
+        SELECT
+          id,
+          wallet_id,
+          tx_id,
+          asset,
+          amount::text,
+          balance_after::text,
+          kind,
+          ref_type,
+          ref_id,
+          gold_rate_inr_per_g::text,
+          metadata,
+          created_at::text
+        FROM wallet_ledger
+        WHERE wallet_id = $1
+          AND ($2 = 'ALL' OR asset = $2)
+        ORDER BY id DESC
+        LIMIT $3
+      `,
+      [wallet.id, asset, limit]
+    );
+
+    await client.query('COMMIT');
+    return {
+      ok: true,
+      wallet: toWalletPayload(wallet),
+      items: result.rows.map((row) => toWalletLedgerPayload(row)),
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    const apiError = getApiError(error);
+    if (apiError) {
+      reply.code(statusCodeForApiError(apiError.code));
+      return {
+        ok: false,
+        error: apiError.message,
+        details: apiError.details,
+      };
+    }
+
+    request.log.error({ err: error, userId }, 'Failed to load 1ze wallet ledger');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to load 1ze wallet ledger',
+    };
+  } finally {
+    client.release();
+  }
+});
+
+app.get('/wallet/1ze/:userId/transfers', async (request, reply) => {
+  const paramsSchema = z.object({
+    userId: z.string().min(2),
+  });
+  const querySchema = z.object({
+    direction: z.enum(['all', 'inbound', 'outbound']).default('all'),
+    limit: z.coerce.number().int().min(1).max(200).default(60),
+  });
+
+  const { userId } = paramsSchema.parse(request.params);
+  const { direction, limit } = querySchema.parse(request.query);
+  resolveAuthenticatedUserId(request, userId);
+
+  if (!(await onezeTablesAvailable(db)) || !(await onezeP2pTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze P2P transfer tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const result = await db.query<WalletIzeTransferRow>(
+    `
+      SELECT
+        id,
+        sender_user_id,
+        recipient_user_id,
+        ize_amount::text,
+        fiat_amount::text,
+        fiat_currency,
+        rate_per_gram::text,
+        status,
+        eligibility_code,
+        aml_risk_score::text,
+        aml_risk_level,
+        aml_alert_id,
+        metadata,
+        created_at::text,
+        committed_at::text
+      FROM wallet_ize_transfers
+      WHERE (
+        ($2 = 'all' AND (sender_user_id = $1 OR recipient_user_id = $1))
+        OR ($2 = 'outbound' AND sender_user_id = $1)
+        OR ($2 = 'inbound' AND recipient_user_id = $1)
+      )
+      ORDER BY created_at DESC
+      LIMIT $3
+    `,
+    [userId, direction, limit]
+  );
+
+  return {
+    ok: true,
+    items: result.rows.map((row) => {
+      const payload = toWalletIzeTransferPayload(row);
+      const transferDirection = payload.senderUserId === userId ? 'outbound' : 'inbound';
+
+      return {
+        ...payload,
+        direction: transferDirection,
+      };
+    }),
+  };
 });
 
 app.get('/wallet/1ze/:userId/position', async (request, reply) => {
@@ -14980,9 +18176,18 @@ const start = async () => {
       handleAuctionSweepJob: async ({ reason }) => {
         await sweepExpiredAuctions(reason);
       },
+      handleOnezeWithdrawalExecuteJob: async ({ withdrawalId, initiatedBy, reason }) => {
+        await processQueuedOnezeWithdrawalExecution({
+          withdrawalId,
+          initiatedBy,
+          reason,
+        });
+      },
     });
 
     startAuctionSweepScheduler();
+    startOnezeReconciliationScheduler();
+    startOnezeDailyAttestationScheduler();
 
     await app.listen({ port: config.port, host: '0.0.0.0' });
     app.log.info(`API running on :${config.port}`);
@@ -15001,6 +18206,8 @@ const shutdown = async () => {
   isShuttingDown = true;
 
   stopAuctionSweepScheduler();
+  stopOnezeReconciliationScheduler();
+  stopOnezeDailyAttestationScheduler();
 
   try {
     await app.close();

@@ -15,9 +15,18 @@ export interface AuctionSweepJobData {
   reason: 'interval' | 'manual';
 }
 
+export interface OnezeWithdrawalExecuteJobData {
+  withdrawalId: string;
+  initiatedBy: string;
+  reason: 'threshold_queue' | 'manual_queue';
+}
+
+type InfraJobData = AuctionSweepJobData | OnezeWithdrawalExecuteJobData;
+
 interface QueueHandlers {
   handlePushJob: (job: PushJobData) => Promise<void>;
   handleAuctionSweepJob: (job: AuctionSweepJobData) => Promise<void>;
+  handleOnezeWithdrawalExecuteJob: (job: OnezeWithdrawalExecuteJobData) => Promise<void>;
 }
 
 const queueConnection = new IORedis(config.redisUrl, {
@@ -37,12 +46,12 @@ const pushQueue = new Queue<PushJobData>(PUSH_QUEUE_NAME, {
   connection: queueConnection,
 });
 
-const infraQueue = new Queue<AuctionSweepJobData>(INFRA_QUEUE_NAME, {
+const infraQueue = new Queue<InfraJobData>(INFRA_QUEUE_NAME, {
   connection: queueConnection,
 });
 
 let pushWorker: Worker<PushJobData> | null = null;
-let infraWorker: Worker<AuctionSweepJobData> | null = null;
+let infraWorker: Worker<InfraJobData> | null = null;
 
 export function startBackgroundWorkers(handlers: QueueHandlers): void {
   if (!pushWorker) {
@@ -73,11 +82,16 @@ export function startBackgroundWorkers(handlers: QueueHandlers): void {
   }
 
   if (!infraWorker) {
-    infraWorker = new Worker<AuctionSweepJobData>(
+    infraWorker = new Worker<InfraJobData>(
       INFRA_QUEUE_NAME,
       async (job) => {
         try {
-          await handlers.handleAuctionSweepJob(job.data);
+          if (job.name === 'auction_sweep') {
+            await handlers.handleAuctionSweepJob(job.data as AuctionSweepJobData);
+          } else if (job.name === 'oneze_withdraw_execute') {
+            await handlers.handleOnezeWithdrawalExecuteJob(job.data as OnezeWithdrawalExecuteJobData);
+          }
+
           recordBackgroundJob({
             queue: INFRA_QUEUE_NAME,
             job: job.name,
@@ -122,6 +136,23 @@ export async function enqueueAuctionSweepJob(reason: 'interval' | 'manual' = 'in
       jobId: `auction_sweep_${timeBucket}`,
       removeOnComplete: true,
       removeOnFail: 100,
+    }
+  );
+}
+
+export async function enqueueOnezeWithdrawalExecuteJob(input: OnezeWithdrawalExecuteJobData): Promise<void> {
+  await infraQueue.add(
+    'oneze_withdraw_execute',
+    input,
+    {
+      jobId: `oneze_withdraw_execute_${input.withdrawalId}`,
+      attempts: 3,
+      backoff: {
+        type: 'exponential',
+        delay: 2_000,
+      },
+      removeOnComplete: true,
+      removeOnFail: 200,
     }
   );
 }

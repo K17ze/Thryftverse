@@ -230,7 +230,7 @@ export default function MyProfileScreen() {
     [syndicateHoldings]
   );
 
-  // â”€â”€ Parallax scroll for cover â”€â”€
+  // Parallax scroll for cover
   const scrollY = useSharedValue(0);
   const scrollHandler = useAnimatedScrollHandler({
     onScroll: (e) => {
@@ -334,7 +334,7 @@ export default function MyProfileScreen() {
         onScroll={scrollHandler}
         scrollEventThrottle={16}
       >
-        {/* â”€â”€ Profile Hero â”€â”€ */}
+        {/* Profile Hero */}
         <View style={styles.heroSection}>
           <View style={styles.heroTop}>
             <AnimatedPressable style={styles.avatarWrap} onPress={pickAvatar} activeOpacity={0.85}>
@@ -356,7 +356,7 @@ export default function MyProfileScreen() {
           <Text style={styles.heroName} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>{MY_USER.username.toUpperCase()}</Text>
           <Text style={styles.heroHandle}>@{MY_USER.username}</Text>
           <Text style={styles.heroMeta}>
-            {MY_USER.location} Â· {MY_USER.reviewCount} reviews Â· last seen {MY_USER.lastSeen.toLowerCase()}
+            {MY_USER.location} | {MY_USER.reviewCount} reviews | last seen {MY_USER.lastSeen.toLowerCase()}
           </Text>
 
           <View style={styles.profileActionRow}>
@@ -406,7 +406,7 @@ export default function MyProfileScreen() {
             </View>
             <View style={styles.statDivider} />
             <View style={styles.statItem}>
-              <Text style={styles.statNumber}>{MY_USER.rating}â˜…</Text>
+              <Text style={styles.statNumber}>{MY_USER.rating}*</Text>
               <Text style={styles.statLabel}>RATING</Text>
             </View>
           </Reanimated.View>
@@ -510,7 +510,7 @@ export default function MyProfileScreen() {
           )}
         </View>
 
-        {/* â”€â”€ My Wardrobe Preview (horizontal scroll â€” original Thryftverse layout) â”€â”€ */}
+        {/* My Wardrobe Preview */}
         <View style={styles.wardrobeSection}>
           <View style={styles.wardrobeHeader}>
             <View>
@@ -552,7 +552,7 @@ export default function MyProfileScreen() {
           </ScrollView>
         </View>
 
-        {/* â”€â”€ Badges Section â”€â”€ */}
+        {/* Badges Section */}
         <View style={styles.badgesCard}>
           <Text style={styles.badgesTitle}>Badges</Text>
           <View style={styles.badgeRow}>
@@ -580,7 +580,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   scrollContent: { paddingBottom: 120 },
 
-  // Cover (new â€” parallax banner)
+  // Cover (parallax banner)
   coverWrap: {
     position: 'absolute',
     top: 0,
@@ -642,7 +642,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
 
-  // Hero â€” enhanced from original
+  // Hero
   heroSection: {
     alignItems: 'center',
     paddingHorizontal: 20,
@@ -858,7 +858,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
 
-  // Stats â€” now with animated counters
+  // Stats
   statsRow: {
     flexDirection: 'row',
     alignItems: 'center',

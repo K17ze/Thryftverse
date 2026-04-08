@@ -259,11 +259,11 @@ export default function BalanceScreen({ navigation }: Props) {
           </View>
           <View style={styles.loadSummaryRow}>
             <Text style={styles.loadSummaryLabel}>Platform fee ({loadFeeRateLabel})</Text>
-            <Text style={styles.loadSummaryValue}>{formatIzeAmount(loadFeeIze)} Â· {formatFromFiat(loadFeeFiat, currencyCode, { displayMode: 'fiat' })}</Text>
+            <Text style={styles.loadSummaryValue}>{formatIzeAmount(loadFeeIze)} | {formatFromFiat(loadFeeFiat, currencyCode, { displayMode: 'fiat' })}</Text>
           </View>
           <View style={[styles.loadSummaryRow, styles.loadSummaryRowTotal]}>
             <Text style={styles.loadSummaryTotalLabel}>Net 1ze credited</Text>
-            <Text style={styles.loadSummaryTotalValue}>{formatIzeAmount(loadNetIze)} Â· {formatFromIze(loadNetIze, { displayMode: 'fiat' })}</Text>
+            <Text style={styles.loadSummaryTotalValue}>{formatIzeAmount(loadNetIze)} | {formatFromIze(loadNetIze, { displayMode: 'fiat' })}</Text>
           </View>
 
           <AnimatedPressable
@@ -322,7 +322,7 @@ export default function BalanceScreen({ navigation }: Props) {
                 <View>
                   <Text style={styles.txTitle}>{tx.title}</Text>
                   <Text style={styles.txDate}>
-                      {tx.date} â€¢ <Text style={tx.status === 'pending' ? styles.txStatusPending : styles.txStatusCompleted}>{tx.status}</Text>
+                      {tx.date} | <Text style={tx.status === 'pending' ? styles.txStatusPending : styles.txStatusCompleted}>{tx.status}</Text>
                   </Text>
                 </View>
               </View>

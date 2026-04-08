@@ -251,7 +251,7 @@ export default function CreateSyndicateScreen() {
           <View style={styles.prefillBanner}>
             <Ionicons name="sparkles-outline" size={14} color={BRAND} />
             <Text style={styles.prefillBannerText}>
-              Imported from Sell flow Â· {prefill.offeringWindowHours}h offer window Â· {prefill.authPhotos?.length ?? 0} auth photos
+              Imported from Sell flow | {prefill.offeringWindowHours}h offer window | {prefill.authPhotos?.length ?? 0} auth photos
             </Text>
           </View>
         ) : null}

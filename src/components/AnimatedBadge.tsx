@@ -8,6 +8,7 @@ import Reanimated, {
   withTiming,
 } from 'react-native-reanimated';
 import { Colors } from '../constants/colors';
+import { Typography } from '../constants/typography';
 
 interface AnimatedBadgeProps {
   count: number;
@@ -66,7 +67,7 @@ const styles = StyleSheet.create({
   },
   text: {
     color: '#fff',
-    fontFamily: 'Inter_700Bold',
+    fontFamily: Typography.family.bold,
     includeFontPadding: false,
     textAlign: 'center',
   },

@@ -45,3 +45,29 @@ export async function assertS3BucketConnectivity() {
     })
   );
 }
+
+export async function putJsonObject(
+  key: string,
+  payload: unknown,
+  options?: {
+    cacheControl?: string;
+    metadata?: Record<string, string>;
+  }
+): Promise<{ bucket: string; key: string; publicUrl: string }> {
+  await internalS3.send(
+    new PutObjectCommand({
+      Bucket: config.s3Bucket,
+      Key: key,
+      Body: JSON.stringify(payload, null, 2),
+      ContentType: 'application/json',
+      CacheControl: options?.cacheControl ?? 'public, max-age=31536000, immutable',
+      Metadata: options?.metadata,
+    })
+  );
+
+  return {
+    bucket: config.s3Bucket,
+    key,
+    publicUrl: `${config.s3PublicEndpoint.replace(/\/$/, '')}/${config.s3Bucket}/${key}`,
+  };
+}

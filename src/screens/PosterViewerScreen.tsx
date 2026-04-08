@@ -164,7 +164,7 @@ export default function PosterViewerScreen() {
               contentFit="cover"
             />
             <Text style={styles.authorName}>@{activePoster.uploader?.username ?? 'seller'}</Text>
-            <Text style={styles.postedTime}>â€¢ {postedTimeLabel}</Text>
+            <Text style={styles.postedTime}>| {postedTimeLabel}</Text>
           </View>
 
           <AnimatedPressable style={styles.closeBtn} onPress={() => navigation.goBack()} activeOpacity={0.8}>

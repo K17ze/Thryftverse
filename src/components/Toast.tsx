@@ -1,10 +1,13 @@
-﻿import React, { useEffect } from 'react';
+import React, { useEffect } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useToast, ToastType } from '../context/ToastContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AnimatedPressable } from './AnimatedPressable';
 import { Typography } from '../constants/typography';
+import { Motion } from '../constants/motion';
+import Reanimated, { useSharedValue, useAnimatedStyle, withSpring, withTiming, runOnJS } from 'react-native-reanimated';
+
 
 const TYPE_CONFIG: Record<ToastType, { borderColor: string; icon: keyof typeof Ionicons.glyphMap; iconColor: string }> = {
   success: { borderColor: '#4CAF50', icon: 'checkmark-circle', iconColor: '#4CAF50' },
@@ -22,20 +25,40 @@ function ToastItem({ id, message, type }: ToastItemProps) {
   const { dismiss } = useToast();
   const config = TYPE_CONFIG[type];
 
+  const translateY = useSharedValue(-60);
+  const opacity = useSharedValue(0);
+
   useEffect(() => {
+    translateY.value = withSpring(0, Motion.spring.flagshipPop);
+    opacity.value = withTiming(1, { duration: 150 });
+    
     const timer = setTimeout(() => {
-      dismiss(id);
+      handleDismiss();
     }, 3200);
 
     return () => clearTimeout(timer);
-  }, [dismiss, id]);
+  }, []);
+
+  const handleDismiss = () => {
+    translateY.value = withTiming(-60, { duration: 250 });
+    opacity.value = withTiming(0, { duration: 200 }, (finished) => {
+      if (finished) {
+        runOnJS(dismiss)(id);
+      }
+    });
+  };
+
+  const animStyle = useAnimatedStyle(() => ({
+    opacity: opacity.value,
+    transform: [{ translateY: translateY.value }],
+  }));
 
   return (
-    <View style={[styles.toast, { borderLeftColor: config.borderColor }]}>
+    <Reanimated.View style={[styles.toast, { borderLeftColor: config.borderColor }, animStyle]}>
       <Ionicons name={config.icon} size={20} color={config.iconColor} />
       <Text style={styles.message} numberOfLines={2}>{message}</Text>
       <AnimatedPressable
-        onPress={() => dismiss(id)}
+        onPress={handleDismiss}
         style={styles.closeBtn}
         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         disableAnimation
@@ -43,7 +66,7 @@ function ToastItem({ id, message, type }: ToastItemProps) {
       >
         <Ionicons name="close" size={16} color="#888" />
       </AnimatedPressable>
-    </View>
+    </Reanimated.View>
   );
 }
 
@@ -87,10 +110,10 @@ const styles = StyleSheet.create({
   },
   message: {
     flex: 1,
-    fontSize: 14,
+    fontSize: Typography.size.body,
     fontFamily: Typography.family.medium,
     color: '#f3ede3',
-    letterSpacing: 0.08,
+    letterSpacing: Typography.tracking.normal,
     lineHeight: 19,
   },
   closeBtn: {

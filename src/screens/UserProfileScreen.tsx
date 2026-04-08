@@ -1,4 +1,4 @@
-﻿import React, { useState } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -29,6 +29,7 @@ import { Listing, MOCK_USERS, MY_USER } from '../data/mockData';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useBackendData } from '../context/BackendDataContext';
 import { useToast } from '../context/ToastContext';
+import { Typography } from '../constants/typography';
 
 type Props = StackScreenProps<RootStackParamList, 'UserProfile'>;
 
@@ -174,7 +175,7 @@ export default function UserProfileScreen({ navigation, route }: Props) {
       <View style={styles.gridInfo}>
         <Text style={styles.gridPrice}>{formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}</Text>
         <Text style={styles.gridBrand} numberOfLines={1} ellipsizeMode="tail">{item.brand}</Text>
-        <Text style={styles.gridSizeCondition}>{item.size} â€¢ {item.condition}</Text>
+        <Text style={styles.gridSizeCondition}>{item.size} | {item.condition}</Text>
       </View>
     </AnimatedPressable>
   );
@@ -516,16 +517,18 @@ const styles = StyleSheet.create({
   statsCard: {
     flexDirection: 'row',
     backgroundColor: CARD,
-    borderWidth: 1,
-    borderColor: BORDER,
-    borderRadius: 20,
-    paddingVertical: 16,
-    marginBottom: 24,
+    borderRadius: 24,
+    paddingVertical: 18,
+    marginBottom: 28,
+    shadowColor: Colors.textPrimary,
+    shadowOpacity: IS_LIGHT ? 0.04 : 0,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 4 },
   },
   statCol: { flex: 1, alignItems: 'center' },
-  statValue: { fontSize: 20, fontFamily: 'Inter_700Bold', color: TEXT, marginBottom: 2 },
-  statLabel: { fontSize: 12, fontFamily: 'Inter_500Medium', color: MUTED },
-  statDivider: { width: 1, backgroundColor: BORDER },
+  statValue: { fontSize: Typography.size.title, fontFamily: Typography.family.bold, color: TEXT, marginBottom: 2 },
+  statLabel: { fontSize: Typography.size.caption, fontFamily: Typography.family.medium, color: MUTED },
+  statDivider: { width: StyleSheet.hairlineWidth, backgroundColor: BORDER },
   
   heroActionRow: {
     flexDirection: 'row',
@@ -595,14 +598,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 28,
     paddingVertical: 12,
     borderRadius: 24,
-    borderWidth: 1,
-    borderColor: BORDER,
-    backgroundColor: CARD,
+    backgroundColor: CARD_ALT,
     alignItems: 'center',
   },
-  tabPillActive: { backgroundColor: Colors.accent, borderColor: Colors.accent },
-  tabText: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: MUTED },
-  tabTextActive: { color: Colors.textInverse, fontFamily: 'Inter_700Bold' },
+  tabPillActive: { backgroundColor: Colors.accent },
+  tabText: { fontSize: Typography.size.body, fontFamily: Typography.family.medium, color: MUTED },
+  tabTextActive: { color: Colors.textInverse, fontFamily: Typography.family.bold },
 
   tabContentArea: {
     backgroundColor: BG,
@@ -617,12 +618,10 @@ const styles = StyleSheet.create({
   gridItem: { width: ITEM_SIZE },
   gridImageWrap: {
     width: ITEM_SIZE,
-    height: ITEM_SIZE * 1.2,
-    borderRadius: 16,
+    height: ITEM_SIZE * 1.3,
+    borderRadius: 20,
     overflow: 'hidden',
     backgroundColor: CARD,
-    borderWidth: 1,
-    borderColor: BORDER,
     marginBottom: 12,
   },
   gridImage: { width: '100%', height: '100%' },
@@ -633,66 +632,68 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   gridInfo: { paddingHorizontal: 4, minHeight: 56 },
-  gridPrice: { color: TEXT, fontSize: 18, fontFamily: 'Inter_700Bold', marginBottom: 2 },
-  gridBrand: { color: Colors.textSecondary, fontSize: 11, fontFamily: 'Inter_700Bold', textTransform: 'uppercase', letterSpacing: 0.25, marginBottom: 3 },
-  gridSizeCondition: { color: MUTED, fontSize: 13, fontFamily: 'Inter_500Medium' },
+  gridPrice: { color: TEXT, fontSize: Typography.size.bodyLarge, fontFamily: Typography.family.bold, marginBottom: 2 },
+  gridBrand: { color: Colors.textSecondary, fontSize: Typography.size.caption - 1, fontFamily: Typography.family.bold, textTransform: 'uppercase', letterSpacing: Typography.tracking.caps, marginBottom: 3 },
+  gridSizeCondition: { color: MUTED, fontSize: Typography.size.caption + 1, fontFamily: Typography.family.medium },
 
   // Reviews Tab
   reviewsContent: { paddingHorizontal: 0 },
   ratingHero: { alignItems: 'center', paddingVertical: 40 },
-  ratingBigNumber: { fontSize: 72, fontFamily: 'Inter_700Bold', color: TEXT, letterSpacing: -2, lineHeight: 80 },
-  ratingTotalText: { fontSize: 15, fontFamily: 'Inter_500Medium', color: MUTED, marginTop: 12 },
+  ratingBigNumber: { fontSize: Typography.size.giant, fontFamily: Typography.family.bold, color: TEXT, letterSpacing: -2, lineHeight: 80 },
+  ratingTotalText: { fontSize: Typography.size.body, fontFamily: Typography.family.medium, color: MUTED, marginTop: 12 },
   
   reviewsFilterRow: { paddingHorizontal: 20, marginBottom: 24 },
-  filterChip: { paddingHorizontal: 20, paddingVertical: 12, borderRadius: 24, borderWidth: 1, borderColor: BORDER, backgroundColor: CARD },
-  filterChipActive: { backgroundColor: Colors.accent, borderColor: Colors.accent },
-  filterChipText: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: MUTED },
-  filterChipTextActive: { color: Colors.textInverse, fontFamily: 'Inter_700Bold' },
+  filterChip: { paddingHorizontal: 20, paddingVertical: 12, borderRadius: 24, backgroundColor: CARD_ALT },
+  filterChipActive: { backgroundColor: Colors.accent },
+  filterChipText: { fontSize: Typography.size.body, fontFamily: Typography.family.medium, color: MUTED },
+  filterChipTextActive: { color: Colors.textInverse, fontFamily: Typography.family.bold },
   
   reviewsList: { paddingHorizontal: 20 },
   reviewBlock: {
     flexDirection: 'row',
     backgroundColor: CARD,
-    borderWidth: 1,
-    borderColor: BORDER,
-    borderRadius: 20,
-    padding: 20,
-    gap: 14,
+    borderRadius: 24,
+    padding: 24,
+    gap: 16,
+    shadowColor: Colors.textPrimary,
+    shadowOpacity: IS_LIGHT ? 0.03 : 0,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 4 },
   },
-  reviewerAvatar: { width: 44, height: 44, borderRadius: 22, borderWidth: 1, borderColor: BORDER, backgroundColor: CARD_ALT, alignItems: 'center', justifyContent: 'center' },
+  reviewerAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: CARD_ALT, alignItems: 'center', justifyContent: 'center' },
   reviewerAvatarAuto: { width: 44, height: 44, borderRadius: 22, backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center' },
-  reviewerAvatarAutoText: { fontSize: 18, fontFamily: 'Inter_700Bold', color: Colors.textInverse },
+  reviewerAvatarAutoText: { fontSize: Typography.size.bodyLarge, fontFamily: Typography.family.bold, color: Colors.textInverse },
   reviewBlockInfo: { flex: 1 },
   reviewSenderRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
-  reviewSenderName: { fontSize: 15, fontFamily: 'Inter_700Bold', color: TEXT },
-  reviewTime: { fontSize: 13, fontFamily: 'Inter_400Regular', color: MUTED },
-  reviewBody: { fontSize: 14, fontFamily: 'Inter_400Regular', color: TEXT, marginTop: 8, lineHeight: 22 },
+  reviewSenderName: { fontSize: Typography.size.body, fontFamily: Typography.family.bold, color: TEXT },
+  reviewTime: { fontSize: Typography.size.caption + 1, fontFamily: Typography.family.regular, color: MUTED },
+  reviewBody: { fontSize: Typography.size.body, fontFamily: Typography.family.regular, color: TEXT, marginTop: 8, lineHeight: 22 },
 
   // About Tab
   aboutContent: { paddingHorizontal: 20 },
   aboutBannerImage: {
-    height: 180,
+    height: 200,
     backgroundColor: CARD,
-    borderWidth: 1,
-    borderColor: BORDER,
     borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 24,
+    marginBottom: 28,
   },
-  aboutBigName: { fontSize: 32, fontFamily: 'Inter_700Bold', color: TEXT, letterSpacing: -1, marginBottom: 32 },
+  aboutBigName: { fontSize: Typography.size.heading, fontFamily: Typography.family.bold, color: TEXT, letterSpacing: -1, marginBottom: 32 },
   
   aboutInfoCard: {
     backgroundColor: CARD,
-    borderWidth: 1,
-    borderColor: BORDER,
-    borderRadius: 20,
-    padding: 24,
-    marginBottom: 16,
+    borderRadius: 24,
+    padding: 28,
+    marginBottom: 20,
+    shadowColor: Colors.textPrimary,
+    shadowOpacity: IS_LIGHT ? 0.03 : 0,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 4 },
   },
-  aboutSectionHeading: { fontSize: 13, fontFamily: 'Inter_700Bold', color: MUTED, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 16 },
-  aboutRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
-  aboutRowText: { fontSize: 15, fontFamily: 'Inter_500Medium', color: TEXT },
+  aboutSectionHeading: { fontSize: Typography.size.caption + 1, fontFamily: Typography.family.bold, color: MUTED, textTransform: 'uppercase', letterSpacing: Typography.tracking.caps, marginBottom: 20 },
+  aboutRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 16 },
+  aboutRowText: { fontSize: Typography.size.body, fontFamily: Typography.family.medium, color: TEXT },
 });
 
 

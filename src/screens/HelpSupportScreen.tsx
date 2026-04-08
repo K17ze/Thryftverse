@@ -78,7 +78,7 @@ export default function HelpSupportScreen({ navigation }: Props) {
       },
       {
         q: 'How do I withdraw my balance?',
-        a: 'Go to Profile â†’ Balance â†’ Withdraw. Add a bank account first if you haven\'t already. Withdrawals typically take 1â€“3 business days.',
+        a: 'Go to Profile -> Balance -> Withdraw. Add a bank account first if you haven\'t already. Withdrawals typically take 1-3 business days.',
       },
       {
         q: 'What fees does Thryftverse charge?',
@@ -191,7 +191,7 @@ export default function HelpSupportScreen({ navigation }: Props) {
           ))}
         </View>
 
-        <Text style={styles.version}>Thryftverse v1.0.0 â€¢ response time ~2 hours</Text>
+        <Text style={styles.version}>Thryftverse v1.0.0 | response time ~2 hours</Text>
       </ScrollView>
     </SafeAreaView>
   );

@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -23,6 +23,7 @@ import Reanimated, {
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '../constants/colors';
+import { Typography } from '../constants/typography';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { RootStackParamList } from '../navigation/types';
 import { useStore } from '../store/useStore';
@@ -128,7 +129,7 @@ export default function FilterScreen() {
     return { opacity };
   });
 
-  const MOCK_BRANDS = ['Nike', 'Adidas', 'StÃ¼ssy', 'Carhartt', 'Arc\'teryx', 'Levi\'s', 'Off-White', 'Zara'];
+  const MOCK_BRANDS = ['Nike', 'Adidas', 'Stussy', 'Carhartt', 'Arc\'teryx', 'Levi\'s', 'Off-White', 'Zara'];
   const MOCK_SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
   const MOCK_CONDITIONS: ConditionOption[] = ['Any', 'New with tags', 'Very good', 'Good', 'Satisfactory'];
 
@@ -448,8 +449,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     paddingBottom: 20,
   },
-  headerTitle: { fontSize: 22, fontFamily: 'Inter_700Bold', color: Colors.textPrimary, letterSpacing: -0.5 },
-  clearText: { color: '#d7b98f', fontSize: 16, fontFamily: 'Inter_600SemiBold' },
+  headerTitle: { fontSize: Typography.size.heading, fontFamily: Typography.family.bold, color: Colors.textPrimary, letterSpacing: Typography.tracking.tight },
+  clearText: { color: Colors.accent, fontSize: Typography.size.body, fontFamily: Typography.family.semibold },
   statusRow: {
     paddingHorizontal: 24,
     paddingBottom: 10,
@@ -460,8 +461,8 @@ const styles = StyleSheet.create({
   },
   statusMeta: {
     color: Colors.textMuted,
-    fontSize: 12,
-    fontFamily: 'Inter_500Medium',
+    fontSize: Typography.size.caption,
+    fontFamily: Typography.family.medium,
   },
   syncRetryBanner: {
     marginHorizontal: 24,
@@ -491,12 +492,12 @@ const styles = StyleSheet.create({
   },
   
   sectionHeading: {
-    fontSize: 16,
-    fontFamily: 'Inter_700Bold',
+    fontSize: Typography.size.bodyLarge,
+    fontFamily: Typography.family.bold,
     color: Colors.textPrimary,
     paddingHorizontal: 20,
     marginBottom: 16,
-    letterSpacing: -0.2,
+    letterSpacing: Typography.tracking.tight,
   },
   sectionHeaderRow: {
     flexDirection: 'row',
@@ -505,7 +506,7 @@ const styles = StyleSheet.create({
     paddingRight: 20,
     marginBottom: 16,
   },
-  seeAllText: { color: '#d7b98f', fontSize: 14, fontFamily: 'Inter_600SemiBold' },
+  seeAllText: { color: Colors.accent, fontSize: Typography.size.body, fontFamily: Typography.family.semibold },
 
   hScroll: { paddingHorizontal: 20, gap: 10 },
   
@@ -527,8 +528,8 @@ const styles = StyleSheet.create({
   sizeChip: { minWidth: 64, alignItems: 'center' },
   chipActive: { backgroundColor: Colors.textPrimary, borderColor: Colors.textPrimary },
   
-  chipText: { fontSize: 15, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary },
-  chipTextActive: { color: Colors.background, fontFamily: 'Inter_700Bold' },
+  chipText: { fontSize: Typography.size.body, fontFamily: Typography.family.semibold, color: Colors.textPrimary },
+  chipTextActive: { color: Colors.background, fontFamily: Typography.family.bold },
 
   sectionDivider: {
     height: 1,
@@ -559,9 +560,9 @@ const styles = StyleSheet.create({
   },
   applyBtnText: {
     color: Colors.background,
-    fontSize: 18,
-    fontFamily: 'Inter_700Bold',
-    letterSpacing: -0.5,
+    fontSize: Typography.size.button,
+    fontFamily: Typography.family.bold,
+    letterSpacing: Typography.tracking.button,
   },
   applyBtnTextDisabled: {
     color: Colors.textMuted,

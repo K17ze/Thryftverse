@@ -105,16 +105,7 @@ export default function TabNavigator() {
           component={HomeScreen}
           options={{
             tabBarIcon: ({ color, focused }) => (
-              <TabIcon name={focused ? 'documents' : 'documents-outline'} color={color} focused={focused} />
-            ),
-          }}
-        />
-        <Tab.Screen
-          name="TradeHub"
-          component={TradeHubScreen}
-          options={{
-            tabBarIcon: ({ color, focused }) => (
-              <TabIcon name={focused ? 'stats-chart' : 'stats-chart-outline'} color={color} focused={focused} />
+              <TabIcon name={focused ? 'home' : 'home-outline'} color={color} focused={focused} />
             ),
           }}
         />
@@ -123,7 +114,7 @@ export default function TabNavigator() {
           component={SearchScreen}
           options={{
             tabBarIcon: ({ color, focused }) => (
-              <TabIcon name={focused ? 'bookmark' : 'bookmark-outline'} color={color} focused={focused} />
+              <TabIcon name={focused ? 'search' : 'search-outline'} color={color} focused={focused} />
             ),
           }}
         />
@@ -133,6 +124,15 @@ export default function TabNavigator() {
           options={{
             tabBarIcon: ({ color, focused }) => (
               <TabIcon name={focused ? 'add-circle' : 'add-circle-outline'} color={color} focused={focused} />
+            ),
+          }}
+        />
+        <Tab.Screen
+          name="TradeHub"
+          component={TradeHubScreen}
+          options={{
+            tabBarIcon: ({ color, focused }) => (
+              <TabIcon name={focused ? 'pulse' : 'pulse-outline'} color={color} focused={focused} />
             ),
           }}
         />

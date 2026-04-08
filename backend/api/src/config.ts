@@ -124,4 +124,16 @@ export const config = {
   otelExporterOtlpHttpUrl:
     process.env.OTEL_EXPORTER_OTLP_HTTP_URL ?? 'http://localhost:4318/v1/traces',
   auctionSweepIntervalMs: asNumber(process.env.AUCTION_SWEEP_INTERVAL_MS, 30_000),
+  onezeReconcileIntervalMs: asNumber(process.env.ONEZE_RECONCILE_INTERVAL_MS, 60 * 60 * 1000),
+  onezeWithdrawalQuoteTtlSeconds: asNumber(process.env.ONEZE_WITHDRAWAL_QUOTE_TTL_SECONDS, 60),
+  onezeWithdrawalInstantLimitMg: asNumber(process.env.ONEZE_WITHDRAWAL_INSTANT_LIMIT_MG, 20_000),
+  onezeTravelRuleThresholdMg: asNumber(process.env.ONEZE_TRAVEL_RULE_THRESHOLD_MG, 11_000),
+  onezeDailyAttestationIntervalMs: asNumber(
+    process.env.ONEZE_DAILY_ATTESTATION_INTERVAL_MS,
+    24 * 60 * 60 * 1000
+  ),
+  onezeAttestationSigningSecret: requiredSecret(
+    'ONEZE_ATTESTATION_SIGNING_SECRET',
+    'dev-only-oneze-attestation-signing-secret'
+  ),
 };

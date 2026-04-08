@@ -32,26 +32,16 @@ import { fetchConversationsFromApi } from '../services/chatApi';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 const ACCENT = Colors.accent;
-const IS_LIGHT = ActiveTheme === 'light';
-const BRAND = IS_LIGHT ? '#2f251b' : ACCENT;
 const PANEL_BG = Colors.card;
-const PANEL_ALT = Colors.cardAlt;
 
 type ConvoItem = Conversation;
 type InboxSegment = 'all' | 'unread' | 'groups' | 'direct';
-type InboxSortMode = 'latest' | 'unread_first' | 'groups_first';
 
 const SEGMENT_OPTIONS: Array<{ key: InboxSegment; label: string }> = [
-  { key: 'all', label: 'All' },
+  { key: 'direct', label: 'Direct' },
   { key: 'unread', label: 'Unread' },
   { key: 'groups', label: 'Groups' },
-  { key: 'direct', label: 'Direct' },
-];
-
-const SORT_OPTIONS: Array<{ key: InboxSortMode; label: string }> = [
-  { key: 'latest', label: 'Latest' },
-  { key: 'unread_first', label: 'Unread First' },
-  { key: 'groups_first', label: 'Groups First' },
+  { key: 'all', label: 'All' },
 ];
 
 export default function InboxScreen() {
@@ -66,8 +56,7 @@ export default function InboxScreen() {
   const markConversationRead = useStore((state) => state.markConversationRead);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [segment, setSegment] = useState<InboxSegment>('all');
-  const [sortMode, setSortMode] = useState<InboxSortMode>('latest');
+  const [segment, setSegment] = useState<InboxSegment>('direct');
 
   const scrollY = useSharedValue(0);
   const scrollHandler = useAnimatedScrollHandler({
@@ -93,20 +82,6 @@ export default function InboxScreen() {
   };
 
   const AnimatedFlatList = Reanimated.createAnimatedComponent(FlatList);
-
-  const inboxStats = useMemo(() => {
-    const unreadCount = conversations.filter((item) => item.unread).length;
-    const groupCount = conversations.filter((item) => item.type === 'group').length;
-    const directCount = conversations.length - groupCount;
-    const botConversationCount = conversations.filter((item) => (item.botIds?.length ?? 0) > 0).length;
-
-    return {
-      unreadCount,
-      groupCount,
-      directCount,
-      botConversationCount,
-    };
-  }, [conversations]);
 
   const filteredConversations = useMemo(() => {
     const normalizedQuery = searchQuery.trim().toLowerCase();
@@ -144,56 +119,11 @@ export default function InboxScreen() {
   }, [conversations, listings, searchQuery, segment]);
 
   const visibleConversations = useMemo(() => {
-    if (sortMode === 'latest') {
-      return filteredConversations;
-    }
-
     const ordered = [...filteredConversations];
-
-    if (sortMode === 'unread_first') {
-      ordered.sort((a, b) => Number(b.unread) - Number(a.unread));
-      return ordered;
-    }
-
-    ordered.sort((a, b) => {
-      const groupDelta = Number(b.type === 'group') - Number(a.type === 'group');
-      if (groupDelta !== 0) {
-        return groupDelta;
-      }
-
-      return Number(b.unread) - Number(a.unread);
-    });
+    ordered.sort((a, b) => Number(b.unread) - Number(a.unread));
 
     return ordered;
-  }, [filteredConversations, sortMode]);
-
-  const handleMarkVisibleRead = useCallback(() => {
-    const unreadTargets = visibleConversations.filter((conversation) => conversation.unread);
-    if (!unreadTargets.length) {
-      show('No unread conversations in this view', 'info');
-      return;
-    }
-
-    unreadTargets.forEach((conversation) => {
-      markConversationRead(conversation.id);
-    });
-
-    show(`${unreadTargets.length} conversation${unreadTargets.length === 1 ? '' : 's'} marked read`, 'success');
-  }, [markConversationRead, show, visibleConversations]);
-
-  const handleArchiveResolved = useCallback(() => {
-    const resolvedTargets = visibleConversations.filter((conversation) => !conversation.unread);
-    if (!resolvedTargets.length) {
-      show('No resolved conversations in this view', 'info');
-      return;
-    }
-
-    resolvedTargets.forEach((conversation) => {
-      archiveConversation(conversation.id);
-    });
-
-    show(`${resolvedTargets.length} resolved conversation${resolvedTargets.length === 1 ? '' : 's'} archived`, 'info');
-  }, [archiveConversation, show, visibleConversations]);
+  }, [filteredConversations]);
 
   const handleDelete = useCallback((id: string) => {
     deleteConversation(id);
@@ -269,23 +199,20 @@ export default function InboxScreen() {
                 <Text style={styles.time}>{item.lastMessageTime}</Text>
               </View>
 
-              <View style={styles.channelMetaRow}>
-                <View style={styles.channelTypeBadge}>
-                  <Text style={styles.channelTypeBadgeText}>{isGroup ? 'GROUP' : 'DIRECT'}</Text>
-                </View>
-                {item.unread ? (
-                  <View style={styles.priorityBadge}>
-                    <Text style={styles.priorityBadgeText}>UNREAD</Text>
-                  </View>
-                ) : null}
-              </View>
-
               {isGroup ? (
                 <View style={styles.groupMetaRow}>
                   <Text style={styles.groupMetaText}>{memberCount} members</Text>
                   {deployedBotCount > 0 ? (
                     <Text style={styles.groupMetaText}>{deployedBotCount} bot{deployedBotCount === 1 ? '' : 's'}</Text>
                   ) : null}
+                </View>
+              ) : (
+                <Text style={styles.groupMetaText}>Direct message</Text>
+              )}
+
+              {item.unread ? (
+                <View style={styles.unreadBadge}>
+                  <Text style={styles.unreadBadgeText}>Unread</Text>
                 </View>
               ) : null}
 
@@ -353,29 +280,6 @@ export default function InboxScreen() {
           ) : null}
         </View>
 
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.kpiStrip}
-        >
-          <View style={styles.kpiCard}>
-            <Text style={styles.kpiLabel}>Unread Threads</Text>
-            <Text style={styles.kpiValue}>{inboxStats.unreadCount}</Text>
-          </View>
-          <View style={styles.kpiCard}>
-            <Text style={styles.kpiLabel}>Group Rooms</Text>
-            <Text style={styles.kpiValue}>{inboxStats.groupCount}</Text>
-          </View>
-          <View style={styles.kpiCard}>
-            <Text style={styles.kpiLabel}>Bot Enabled</Text>
-            <Text style={styles.kpiValue}>{inboxStats.botConversationCount}</Text>
-          </View>
-          <View style={styles.kpiCard}>
-            <Text style={styles.kpiLabel}>Direct Channels</Text>
-            <Text style={styles.kpiValue}>{inboxStats.directCount}</Text>
-          </View>
-        </ScrollView>
-
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.segmentStrip}>
           {SEGMENT_OPTIONS.map((option) => {
             const active = option.key === segment;
@@ -392,41 +296,9 @@ export default function InboxScreen() {
           })}
         </ScrollView>
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.sortStrip}>
-          {SORT_OPTIONS.map((option) => {
-            const active = option.key === sortMode;
-            return (
-              <AnimatedPressable
-                key={option.key}
-                style={[styles.sortChip, active && styles.sortChipActive]}
-                onPress={() => setSortMode(option.key)}
-                activeOpacity={0.85}
-              >
-                <Text style={[styles.sortChipText, active && styles.sortChipTextActive]}>{option.label}</Text>
-              </AnimatedPressable>
-            );
-          })}
-        </ScrollView>
-
-        <View style={styles.bulkActionRow}>
-          <AnimatedPressable
-            style={styles.bulkActionBtn}
-            onPress={handleMarkVisibleRead}
-            activeOpacity={0.85}
-          >
-            <Ionicons name="checkmark-done-outline" size={16} color={Colors.textPrimary} />
-            <Text style={styles.bulkActionText}>Mark Visible Read</Text>
-          </AnimatedPressable>
-
-          <AnimatedPressable
-            style={styles.bulkActionBtn}
-            onPress={handleArchiveResolved}
-            activeOpacity={0.85}
-          >
-            <Ionicons name="archive-outline" size={16} color={Colors.textPrimary} />
-            <Text style={styles.bulkActionText}>Archive Resolved</Text>
-          </AnimatedPressable>
-        </View>
+        <Text style={styles.listMeta}>
+          {visibleConversations.length} conversation{visibleConversations.length === 1 ? '' : 's'} | {conversations.filter((item) => item.unread).length} unread
+        </Text>
       </View>
 
       <View style={{ flex: 1 }}>
@@ -453,8 +325,8 @@ export default function InboxScreen() {
           ListEmptyComponent={
             <EmptyState
               icon="chatbubbles-outline"
-              title={searchQuery || segment !== 'all' ? 'No matching conversations' : 'No conversations yet'}
-              subtitle={searchQuery || segment !== 'all'
+              title={searchQuery || segment !== 'direct' ? 'No matching conversations' : 'No conversations yet'}
+              subtitle={searchQuery || segment !== 'direct'
                 ? 'Try another keyword or filter.'
                 : 'Message a seller to start a chat.'}
               ctaLabel="Browse listings"
@@ -474,21 +346,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingTop: 10,
     paddingBottom: 18,
-  },
-  headerOverline: {
-    fontSize: 11,
-    color: Colors.textMuted,
-    fontFamily: 'Inter_600SemiBold',
-    textTransform: 'uppercase',
-    letterSpacing: 1.1,
-    marginBottom: 4,
-  },
-  headerLabel: {
-    fontSize: 11,
-    fontFamily: 'Inter_600SemiBold',
-    color: BRAND,
-    letterSpacing: 1.5,
-    marginBottom: 4,
   },
   hugeTitle: {
     fontSize: 32,
@@ -557,31 +414,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: Colors.cardAlt,
   },
-  kpiStrip: {
-    gap: 10,
-    paddingRight: 12,
-    marginBottom: 12,
-  },
-  kpiCard: {
-    width: 132,
-    borderRadius: 14,
-    backgroundColor: Colors.cardAlt,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  kpiLabel: {
-    fontSize: 11,
-    color: Colors.textMuted,
-    fontFamily: 'Inter_600SemiBold',
-    letterSpacing: 0.2,
-    marginBottom: 6,
-  },
-  kpiValue: {
-    fontSize: 20,
-    color: Colors.textPrimary,
-    fontFamily: 'Inter_700Bold',
-    letterSpacing: -0.3,
-  },
   segmentStrip: {
     gap: 8,
     paddingRight: 20,
@@ -608,50 +440,11 @@ const styles = StyleSheet.create({
   segmentChipTextActive: {
     color: Colors.textInverse,
   },
-  sortStrip: {
-    gap: 8,
-    paddingRight: 20,
-    marginBottom: 10,
-  },
-  sortChip: {
-    height: 30,
-    borderRadius: 15,
-    backgroundColor: Colors.card,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 12,
-  },
-  sortChipActive: {
-    backgroundColor: Colors.cardAlt,
-  },
-  sortChipText: {
-    color: Colors.textSecondary,
-    fontSize: 11,
-    fontFamily: 'Inter_600SemiBold',
+  listMeta: {
+    color: Colors.textMuted,
+    fontSize: 12,
+    fontFamily: 'Inter_500Medium',
     letterSpacing: 0.2,
-  },
-  sortChipTextActive: {
-    color: Colors.textPrimary,
-  },
-  bulkActionRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  bulkActionBtn: {
-    flex: 1,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: Colors.cardAlt,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 6,
-  },
-  bulkActionText: {
-    color: Colors.textPrimary,
-    fontSize: 11,
-    fontFamily: 'Inter_600SemiBold',
-    letterSpacing: 0.1,
   },
   listContent: {
     paddingHorizontal: 20,
@@ -695,31 +488,15 @@ const styles = StyleSheet.create({
   },
   messageBody: { flex: 1 },
   messageTop: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
-  channelMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
-  },
-  channelTypeBadge: {
-    borderRadius: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    backgroundColor: Colors.surface,
-  },
-  channelTypeBadgeText: {
-    color: Colors.textMuted,
-    fontSize: 10,
-    fontFamily: 'Inter_600SemiBold',
-    letterSpacing: 0.2,
-  },
-  priorityBadge: {
+  unreadBadge: {
     borderRadius: 10,
     paddingHorizontal: 8,
     paddingVertical: 3,
     backgroundColor: Colors.accent,
+    alignSelf: 'flex-start',
+    marginBottom: 8,
   },
-  priorityBadgeText: {
+  unreadBadgeText: {
     color: Colors.textInverse,
     fontSize: 10,
     fontFamily: 'Inter_700Bold',
@@ -738,6 +515,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: 'Inter_500Medium',
     letterSpacing: 0.2,
+    marginBottom: 8,
   },
   snippet: { color: Colors.textSecondary, fontSize: 14, fontFamily: 'Inter_400Regular', lineHeight: 20, marginBottom: 10 },
 

@@ -229,7 +229,7 @@ export default function TradeScreen() {
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <Text style={styles.assetTitle}>{asset.title}</Text>
         <Text style={styles.assetMeta}>
-          Market {formatIzeAmount(marketPrice)} Â· {formatFromIze(marketPrice, { displayMode: 'fiat' })} Â· {asset.availableUnits} available
+          Market {formatIzeAmount(marketPrice)} | {formatFromIze(marketPrice, { displayMode: 'fiat' })} | {asset.availableUnits} available
         </Text>
 
         <View style={styles.pegCard}>
@@ -291,15 +291,15 @@ export default function TradeScreen() {
           </View>
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Gross</Text>
-            <Text style={styles.summaryValue}>{formatIzeAmount(quote.grossValue)} Â· {formatFromIze(quote.grossValue, { displayMode: 'fiat' })}</Text>
+            <Text style={styles.summaryValue}>{formatIzeAmount(quote.grossValue)} | {formatFromIze(quote.grossValue, { displayMode: 'fiat' })}</Text>
           </View>
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Fee ({(SYNDICATE_FEE_RATE * 100).toFixed(0)}%)</Text>
-            <Text style={styles.summaryValue}>{formatIzeAmount(quote.fee)} Â· {formatFromIze(quote.fee, { displayMode: 'fiat' })}</Text>
+            <Text style={styles.summaryValue}>{formatIzeAmount(quote.fee)} | {formatFromIze(quote.fee, { displayMode: 'fiat' })}</Text>
           </View>
           <View style={[styles.summaryRow, styles.summaryRowTotal]}>
             <Text style={styles.summaryTotalLabel}>{side === 'buy' ? 'Total Cost' : 'Net Receive'}</Text>
-            <Text style={styles.summaryTotalValue}>{formatIzeAmount(quote.netValue)} Â· {formatFromIze(quote.netValue, { displayMode: 'fiat' })}</Text>
+            <Text style={styles.summaryTotalValue}>{formatIzeAmount(quote.netValue)} | {formatFromIze(quote.netValue, { displayMode: 'fiat' })}</Text>
           </View>
         </View>
 

@@ -154,7 +154,7 @@ export default function AddBankAccountScreen({ navigation }: Props) {
           <View style={styles.infoCard}>
             <Ionicons name="information-circle-outline" size={16} color={MUTED} />
             <Text style={styles.infoText}>
-              Withdrawals typically take 1â€“3 business days. You'll receive a confirmation email once initiated.
+              Withdrawals typically take 1-3 business days. You'll receive a confirmation email once initiated.
             </Text>
           </View>
         </ScrollView>

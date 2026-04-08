@@ -340,17 +340,17 @@ export default function SyndicateOrderHistoryScreen() {
 
         <View style={styles.rowBody}>
           <View style={styles.rowTitleLine}>
-            <Text style={styles.rowTitle}>{isBuy ? 'Buy' : 'Sell'} Â· {item.assetId.toUpperCase()}</Text>
+            <Text style={styles.rowTitle}>{isBuy ? 'Buy' : 'Sell'} | {item.assetId.toUpperCase()}</Text>
             <View style={[styles.statusPill, { borderColor: statusStyle.borderColor, backgroundColor: statusStyle.backgroundColor }]}>
               <Text style={[styles.statusPillText, { color: statusStyle.textColor }]}>{item.status.toUpperCase()}</Text>
             </View>
           </View>
 
           <Text style={styles.rowMeta}>
-            {item.quantity} units Â· {item.type.toUpperCase()} Â· {formatFromFiat(item.pricePerShare, 'GBP', { displayMode: 'fiat' })}/unit
+            {item.quantity} units | {item.type.toUpperCase()} | {formatFromFiat(item.pricePerShare, 'GBP', { displayMode: 'fiat' })}/unit
           </Text>
           <Text style={styles.rowNote}>
-            Filled {item.filledQuantity}/{item.quantity} Â· {ts.toLocaleDateString()} {ts.toLocaleTimeString()}
+            Filled {item.filledQuantity}/{item.quantity} | {ts.toLocaleDateString()} {ts.toLocaleTimeString()}
           </Text>
         </View>
 

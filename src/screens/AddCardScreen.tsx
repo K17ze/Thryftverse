@@ -118,7 +118,7 @@ export default function AddCardScreen({ navigation }: Props) {
           {/* Card Preview */}
           <View style={styles.cardPreview}>
             <Text style={styles.cardPreviewNumber}>
-              {cardNumber || 'â€¢â€¢â€¢â€¢ â€¢â€¢â€¢â€¢ â€¢â€¢â€¢â€¢ â€¢â€¢â€¢â€¢'}
+              {cardNumber || '**** **** **** ****'}
             </Text>
             <View style={styles.cardPreviewBottom}>
               <View>
@@ -170,7 +170,7 @@ export default function AddCardScreen({ navigation }: Props) {
                   style={styles.fieldInput}
                   value={cvv}
                   onChangeText={v => setCvv(v.replace(/\D/g, '').slice(0, 4))}
-                  placeholder="â€¢â€¢â€¢"
+                  placeholder="***"
                   placeholderTextColor={MUTED}
                   keyboardType="number-pad"
                   selectionColor={BRAND}
