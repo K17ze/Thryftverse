@@ -560,9 +560,9 @@ const styles = StyleSheet.create({
   },
   applyBtnText: {
     color: Colors.background,
-    fontSize: Typography.size.button,
+    fontSize: Typography.size.bodyLarge,
     fontFamily: Typography.family.bold,
-    letterSpacing: Typography.tracking.button,
+    letterSpacing: Typography.tracking.wide,
   },
   applyBtnTextDisabled: {
     color: Colors.textMuted,
