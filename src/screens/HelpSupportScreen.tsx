@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+﻿import React, { useRef, useState } from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -23,7 +23,7 @@ import { useToast } from '../context/ToastContext';
 type Props = StackScreenProps<RootStackParamList, 'HelpSupport'>;
 
 const IS_LIGHT = ActiveTheme === 'light';
-const TEAL = IS_LIGHT ? '#2f251b' : '#e8dcc8';
+const ACCENT = IS_LIGHT ? '#2f251b' : '#d7b98f';
 const BG = Colors.background;
 const CARD = Colors.card;
 const BORDER = Colors.border;
@@ -78,7 +78,7 @@ export default function HelpSupportScreen({ navigation }: Props) {
       },
       {
         q: 'How do I withdraw my balance?',
-        a: 'Go to Profile → Balance → Withdraw. Add a bank account first if you haven\'t already. Withdrawals typically take 1–3 business days.',
+        a: 'Go to Profile â†’ Balance â†’ Withdraw. Add a bank account first if you haven\'t already. Withdrawals typically take 1â€“3 business days.',
       },
       {
         q: 'What fees does Thryftverse charge?',
@@ -117,7 +117,7 @@ export default function HelpSupportScreen({ navigation }: Props) {
           ].map(a => (
             <AnimatedPressable key={a.label} style={styles.quickBtn} onPress={a.onPress}>
               <View style={styles.quickIcon}>
-                <Ionicons name={a.icon as any} size={22} color={TEAL} />
+                <Ionicons name={a.icon as any} size={22} color={ACCENT} />
               </View>
               <Text style={styles.quickLabel}>{a.label}</Text>
             </AnimatedPressable>
@@ -191,7 +191,7 @@ export default function HelpSupportScreen({ navigation }: Props) {
           ))}
         </View>
 
-        <Text style={styles.version}>Thryftverse v1.0.0 • response time ~2 hours</Text>
+        <Text style={styles.version}>Thryftverse v1.0.0 â€¢ response time ~2 hours</Text>
       </ScrollView>
     </SafeAreaView>
   );
@@ -224,3 +224,5 @@ const styles = StyleSheet.create({
   linkText: { flex: 1, fontSize: 14, color: TEXT },
   version: { fontSize: 11, color: MUTED, textAlign: 'center' },
 });
+
+

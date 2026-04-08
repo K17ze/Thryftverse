@@ -272,7 +272,7 @@ export default function SyndicateScreen() {
     if (remoteAssets.length > 0) {
       return {
         tone: 'live' as const,
-        label: 'Live pools',
+        label: 'Synced',
       };
     }
 
@@ -285,7 +285,7 @@ export default function SyndicateScreen() {
 
     return {
       tone: 'offline' as const,
-      label: 'No pools yet',
+      label: 'No pools',
     };
   }, [isSyncingAssets, marketAssets.length, remoteAssets.length, syncError]);
 
@@ -392,7 +392,6 @@ export default function SyndicateScreen() {
     <View>
       <View style={styles.heroHeader}>
         <Text style={styles.heroTitle}>Syndicate</Text>
-        <Text style={styles.heroSubtitle}>Tokenize. Split. Trade in 1ze.</Text>
       </View>
 
       <View style={styles.heroQuickRow}>
@@ -448,7 +447,7 @@ export default function SyndicateScreen() {
       <AnimatedPressable style={styles.complianceCard} activeOpacity={0.9} onPress={() => setComplianceModalVisible(true)}>
         <View style={styles.complianceTopRow}>
           <Ionicons name="shield-checkmark-outline" size={16} color={BRAND} />
-          <Text style={styles.complianceTitle}>Regulatory Guardrails</Text>
+          <Text style={styles.complianceTitle}>Compliance</Text>
           <Ionicons name="chevron-forward" size={14} color={Colors.textMuted} />
         </View>
         <Text style={styles.complianceText}>
@@ -465,7 +464,6 @@ export default function SyndicateScreen() {
       <View style={styles.issueRow}>
         <View>
           <Text style={styles.issueTitle}>Issuer Console</Text>
-          <Text style={styles.issueHint}>Tokenize a listing into buyable unit lots</Text>
         </View>
 
         <AnimatedPressable
@@ -480,7 +478,7 @@ export default function SyndicateScreen() {
 
       {syncError ? (
         <SyncRetryBanner
-          message="Live syndicate pools are delayed. Showing local portfolio state."
+          message="Syndicate pools are delayed. Showing local portfolio state."
           onRetry={() => void syncSyndicateAssets()}
           isRetrying={isSyncingAssets}
           telemetryContext="syndicate_market_sync"
@@ -530,7 +528,7 @@ export default function SyndicateScreen() {
       <View style={styles.pegCard}>
         <Ionicons name="sparkles-outline" size={14} color={BRAND} />
         <Text style={styles.pegCardText}>
-          1 {STABLE_COIN} = 1 gram of gold. Live local value: {formatFromIze(1, { displayMode: 'fiat' })}.
+          1 {STABLE_COIN} = 1 gram of gold. Local value: {formatFromIze(1, { displayMode: 'fiat' })}.
         </Text>
       </View>
     </View>
@@ -779,11 +777,7 @@ export default function SyndicateScreen() {
         />
 
         <View style={styles.complianceModalCard}>
-          <Text style={styles.complianceModalLabel}>COMPLIANCE SETUP</Text>
           <Text style={styles.complianceModalTitle}>Jurisdiction & KYC</Text>
-          <Text style={styles.complianceModalHint}>
-            Configure regional eligibility checks before issuing or trading syndicate units.
-          </Text>
 
           <Text style={styles.complianceFieldLabel}>Country</Text>
           <View style={styles.countryChipsWrap}>
@@ -914,11 +908,6 @@ export default function SyndicateScreen() {
             <EmptyState
               icon="pie-chart-outline"
               title={activeView === 'HOLDINGS' ? 'No holdings yet' : 'No open syndicates'}
-              subtitle={
-                activeView === 'HOLDINGS'
-                  ? 'Buy fractions from an open pool to see your syndicate positions here.'
-                  : 'Create a new syndicate to tokenize a listing and open fractional ownership.'
-              }
               ctaLabel={activeView === 'HOLDINGS' ? 'Browse Market' : 'Issue Syndicate'}
               onCtaPress={() =>
                 activeView === 'HOLDINGS'

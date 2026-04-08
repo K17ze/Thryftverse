@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -92,8 +92,8 @@ export default function FavouritesScreen() {
         ListEmptyComponent={
           <EmptyState
             icon="heart-outline"
-            title="Nothing here yet. Your taste is too rare."
-            subtitle="Double-tap pieces you love and this vault fills up fast."
+            title="No saved items yet"
+            subtitle="Items you save will appear here."
             ctaLabel="Browse Closet"
             onCtaPress={() => (navigation as any).navigate('MainTabs', { screen: 'Search' })}
           />
@@ -127,7 +127,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   headerLabel: {
-    color: '#e8dcc8',
+    color: '#d7b98f',
     fontSize: 10,
     fontFamily: 'Inter_700Bold',
     letterSpacing: 0.7,

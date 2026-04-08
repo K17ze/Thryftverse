@@ -13,9 +13,9 @@ import { View,
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CachedImage } from '../components/CachedImage';
 import Reanimated, { useSharedValue, useAnimatedStyle, withSpring, withSequence, withDelay, useAnimatedScrollHandler, FadeInDown, runOnJS } from 'react-native-reanimated';
-import * as Haptics from 'expo-haptics';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { ActiveTheme, Colors } from '../constants/colors';
+import { Motion } from '../constants/motion';
 import { Ionicons } from '@expo/vector-icons';
 import { RouteProp, useNavigation, useRoute, useScrollToTop } from '@react-navigation/native';
 import { RefreshIndicator } from '../components/RefreshIndicator';
@@ -29,6 +29,7 @@ import { useToast } from '../context/ToastContext';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useBackendData } from '../context/BackendDataContext';
 import { getBackendSyncStatus } from '../utils/syncStatus';
+import { useHaptic } from '../hooks/useHaptic';
 
 const { width } = Dimensions.get('window');
 const GRID_SPACING = 16;
@@ -67,23 +68,24 @@ function getSubcategoryToken(categoryId: string, subcategoryId?: string, title?:
 
 const BrowseGridItem = ({ item, index, navigation, wishlist, toggleWishlist, showToast, formatPrice }: any) => {
   const isWishlisted = wishlist.includes(item.id);
+  const haptic = useHaptic();
   const heartScale = useSharedValue(0);
   const likeBtnScale = useSharedValue(1);
 
   const performLikeSequence = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    haptic.heavy();
     
     // Bubble big heart overlaid on image
     heartScale.value = withSequence(
-      withSpring(1.2, { damping: 10 }),
-      withSpring(1, { damping: 12 }),
-      withDelay(600, withSpring(0, { damping: 15 }))
+      withSpring(1.2, Motion.spring.flagshipPop),
+      withSpring(1, Motion.spring.flagship),
+      withDelay(600, withSpring(0, Motion.spring.flagship))
     );
 
     // Spring the mini corner button
     likeBtnScale.value = withSequence(
-      withSpring(1.4, { damping: 5 }),
-      withSpring(1, { damping: 15 })
+      withSpring(1.35, Motion.spring.flagshipPop),
+      withSpring(1, Motion.spring.flagship)
     );
 
     if (!isWishlisted) {
@@ -139,7 +141,7 @@ const BrowseGridItem = ({ item, index, navigation, wishlist, toggleWishlist, sho
             style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' }}
             activeOpacity={0.8}
             onPress={() => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              haptic.light();
               toggleWishlist(item.id);
               if (!isWishlisted) showToast('Added to wishlist ♥', 'success');
             }}

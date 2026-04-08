@@ -11,9 +11,16 @@ import {
   KeyboardAvoidingView,
   Platform
 } from 'react-native';
+import Reanimated, {
+  interpolateColor,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { ActiveTheme, Colors } from '../constants/colors';
+import { Motion } from '../constants/motion';
 import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
 import { useStore } from '../store/useStore';
@@ -30,9 +37,11 @@ const TRENDING_TAGS = ['#y2k', '#gorpcore', 'archive', 'japanese denim', 'techwe
 
 export default function GlobalSearchScreen({ navigation }: Props) {
   const [query, setQuery] = useState('');
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
   const inputRef = useRef<TextInput>(null);
   const updateBrowseFilters = useStore((state) => state.updateBrowseFilters);
   const { listings, source, isSyncing, lastError, refreshListings } = useBackendData();
+  const focusProgress = useSharedValue(0);
 
   // Auto-focus the search bar when the screen mounts
   useEffect(() => {
@@ -41,6 +50,30 @@ export default function GlobalSearchScreen({ navigation }: Props) {
     }, 100);
     return () => clearTimeout(timeout);
   }, []);
+
+  useEffect(() => {
+    focusProgress.value = withTiming(isSearchFocused ? 1 : 0, { duration: Motion.timing.focus });
+  }, [focusProgress, isSearchFocused]);
+
+  const animatedSearchShellStyle = useAnimatedStyle(() => {
+    const borderColor = interpolateColor(
+      focusProgress.value,
+      [0, 1],
+      [Colors.glassBorder, Colors.accent],
+    );
+
+    const backgroundColor = interpolateColor(
+      focusProgress.value,
+      [0, 1],
+      [Colors.card, Colors.cardAlt],
+    );
+
+    return {
+      borderColor,
+      backgroundColor,
+      transform: [{ scale: 1 + focusProgress.value * 0.012 }],
+    };
+  });
 
   const handleSearchSubmit = () => {
     const trimmedQuery = query.trim();
@@ -130,26 +163,28 @@ export default function GlobalSearchScreen({ navigation }: Props) {
         <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={26} color={Colors.textPrimary} />
         </AnimatedPressable>
-        
-        <View style={styles.inputContainer}>
+
+        <Reanimated.View style={[styles.inputContainer, animatedSearchShellStyle]}>
           <TextInput
             ref={inputRef}
             style={styles.searchInput}
-            placeholder="Search for items, brands..."
+            placeholder="Search listings, brands, sellers"
             placeholderTextColor={Colors.textMuted}
             value={query}
             onChangeText={setQuery}
             onSubmitEditing={handleSearchSubmit}
+            onFocus={() => setIsSearchFocused(true)}
+            onBlur={() => setIsSearchFocused(false)}
             returnKeyType="search"
             autoCapitalize="none"
-            selectionColor="#e8dcc8"
+            selectionColor={Colors.accent}
           />
           {query.length > 0 && (
             <AnimatedPressable style={styles.clearBtn} onPress={() => setQuery('')}>
               <Ionicons name="close-circle" size={20} color={Colors.textSecondary} />
             </AnimatedPressable>
           )}
-        </View>
+        </Reanimated.View>
       </View>
 
       <View style={styles.statusRow}>
@@ -231,6 +266,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: Colors.card,
     borderRadius: 24,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.glassBorder,
     paddingHorizontal: 20,
     height: 56,
   },
@@ -288,8 +325,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: 'Inter_700Bold',
     color: Colors.textSecondary,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
+    letterSpacing: 0.25,
     paddingHorizontal: 20,
     marginBottom: 12,
   },
@@ -298,12 +334,12 @@ const styles = StyleSheet.create({
     marginBottom: 40,
   },
   trendingPill: {
-    backgroundColor: Colors.card,
+    backgroundColor: ActiveTheme === 'light' ? 'rgba(255,255,255,0.78)' : 'rgba(255,255,255,0.08)',
     paddingHorizontal: 20,
     paddingVertical: 12,
     borderRadius: 20,
-    borderWidth: 1,
-    borderColor: Colors.border,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.glassBorder,
   },
   trendingPillText: {
     fontSize: 15,

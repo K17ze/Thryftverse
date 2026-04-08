@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, ViewStyle, StyleProp, ImageStyle } from 'react-native';
-import { Image, ImageContentFit } from 'expo-image';
+import { View, StyleSheet, ViewStyle, StyleProp, ImageStyle, Image as NativeImage } from 'react-native';
+import { Image as ExpoImage, ImageContentFit } from 'expo-image';
 import Reanimated, {
   cancelAnimation,
   useSharedValue,
@@ -83,6 +83,23 @@ export function CachedImage({
 
   const effectivePriority = isVisible ? priority : 'low';
   const effectiveTransition = reducedMotionEnabled ? 0 : transition;
+  const useNativeImage = /^content:\/\//i.test(uri);
+
+  const nativeResizeMode = React.useMemo(() => {
+    switch (contentFit) {
+      case 'contain':
+        return 'contain';
+      case 'fill':
+        return 'stretch';
+      case 'none':
+        return 'center';
+      case 'scale-down':
+        return 'contain';
+      case 'cover':
+      default:
+        return 'cover';
+    }
+  }, [contentFit]);
 
   const handleLoad = React.useCallback(() => {
     setLoaded(true);
@@ -112,7 +129,7 @@ export function CachedImage({
 
       {previewUri && !loaded && (
         <Reanimated.View pointerEvents="none" style={[StyleSheet.absoluteFill, previewStyle]}>
-          <Image
+          <ExpoImage
             source={{ uri: previewUri }}
             style={[styles.image, style]}
             contentFit={contentFit}
@@ -125,18 +142,28 @@ export function CachedImage({
       )}
 
       <Reanimated.View style={[StyleSheet.absoluteFill, imageStyle]}>
-        <Image
-          source={{ uri }}
-          style={[styles.image, style]}
-          contentFit={contentFit}
-          transition={effectiveTransition}
-          placeholder={blurhash ? { blurhash } : undefined}
-          cachePolicy="memory-disk"
-          priority={effectivePriority}
-          onLoad={handleLoad}
-          onError={handleError}
-          recyclingKey={uri}
-        />
+        {useNativeImage ? (
+          <NativeImage
+            source={{ uri }}
+            style={[styles.image, style]}
+            resizeMode={nativeResizeMode}
+            onLoad={handleLoad}
+            onError={handleError}
+          />
+        ) : (
+          <ExpoImage
+            source={{ uri }}
+            style={[styles.image, style]}
+            contentFit={contentFit}
+            transition={effectiveTransition}
+            placeholder={blurhash ? { blurhash } : undefined}
+            cachePolicy="memory-disk"
+            priority={effectivePriority}
+            onLoad={handleLoad}
+            onError={handleError}
+            recyclingKey={uri}
+          />
+        )}
       </Reanimated.View>
     </View>
   );

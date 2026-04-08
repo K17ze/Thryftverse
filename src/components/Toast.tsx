@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+﻿import React, { useEffect } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useToast, ToastType } from '../context/ToastContext';
@@ -9,7 +9,7 @@ import { Typography } from '../constants/typography';
 const TYPE_CONFIG: Record<ToastType, { borderColor: string; icon: keyof typeof Ionicons.glyphMap; iconColor: string }> = {
   success: { borderColor: '#4CAF50', icon: 'checkmark-circle', iconColor: '#4CAF50' },
   error: { borderColor: '#FF4D4D', icon: 'alert-circle', iconColor: '#FF4D4D' },
-  info: { borderColor: '#e8dcc8', icon: 'information-circle', iconColor: '#e8dcc8' },
+  info: { borderColor: '#d7b98f', icon: 'information-circle', iconColor: '#d7b98f' },
 };
 
 interface ToastItemProps {
@@ -97,3 +97,4 @@ const styles = StyleSheet.create({
     padding: 2,
   },
 });
+

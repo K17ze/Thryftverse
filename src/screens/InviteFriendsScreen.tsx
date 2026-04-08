@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -18,7 +18,7 @@ import { ActiveTheme, Colors } from '../constants/colors';
 type Props = StackScreenProps<RootStackParamList, 'InviteFriends'>;
 
 const IS_LIGHT = ActiveTheme === 'light';
-const TEAL = IS_LIGHT ? '#2f251b' : '#e8dcc8';
+const ACCENT = IS_LIGHT ? '#2f251b' : '#d7b98f';
 const BG = Colors.background;
 const CARD = IS_LIGHT ? '#ffffff' : '#111111';
 const CARD_ALT = IS_LIGHT ? '#f3eee7' : '#151515';
@@ -60,7 +60,7 @@ export default function InviteFriendsScreen({ navigation }: Props) {
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {/* Hero */}
         <View style={styles.heroCard}>
-          <Ionicons name="gift-outline" size={48} color={TEAL} />
+          <Ionicons name="gift-outline" size={48} color={ACCENT} />
           <Text style={styles.heroTitle}>Invite & earn</Text>
           <Text style={styles.heroSubtitle}>
             Invite friends to Thryftverse. When they make their first sale, you both get a reward.
@@ -75,7 +75,7 @@ export default function InviteFriendsScreen({ navigation }: Props) {
               {inviteLink}
             </Text>
             <AnimatedPressable style={styles.copyBtn} onPress={handleShare}>
-              <Ionicons name="copy-outline" size={16} color={TEAL} />
+              <Ionicons name="copy-outline" size={16} color={ACCENT} />
               <Text style={styles.copyText}>Copy</Text>
             </AnimatedPressable>
           </View>
@@ -86,7 +86,7 @@ export default function InviteFriendsScreen({ navigation }: Props) {
           {[
             { icon: 'logo-whatsapp', label: 'WhatsApp', color: '#25D366' },
             { icon: 'logo-instagram', label: 'Instagram', color: '#E1306C' },
-            { icon: 'mail-outline', label: 'Email', color: TEAL },
+            { icon: 'mail-outline', label: 'Email', color: ACCENT },
             { icon: 'share-social-outline', label: 'More', color: MUTED },
           ].map(s => (
             <AnimatedPressable key={s.label} style={styles.shareIconBtn} onPress={handleShare}>
@@ -166,7 +166,7 @@ const styles = StyleSheet.create({
   },
   linkText: { flex: 1, fontSize: 14, color: MUTED },
   copyBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  copyText: { fontSize: 13, color: TEAL, fontWeight: '600' },
+  copyText: { fontSize: 13, color: ACCENT, fontWeight: '600' },
   shareRow: {
     flexDirection: 'row',
     justifyContent: 'space-around',
@@ -201,16 +201,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginRight: 14,
   },
-  avatarText: { fontSize: 14, fontWeight: '700', color: TEAL },
+  avatarText: { fontSize: 14, fontWeight: '700', color: ACCENT },
   contactName: { flex: 1, fontSize: 15, fontWeight: '500', color: TEXT },
   inviteBtn: {
     borderWidth: 1,
-    borderColor: TEAL,
+    borderColor: ACCENT,
     backgroundColor: CARD_ALT,
     borderRadius: 20,
     paddingHorizontal: 14,
     paddingVertical: 6,
   },
-  inviteBtnText: { fontSize: 13, color: TEAL, fontWeight: '600' },
+  inviteBtnText: { fontSize: 13, color: ACCENT, fontWeight: '600' },
   divider: { height: 1, backgroundColor: BORDER, marginHorizontal: 18 },
 });
+
+

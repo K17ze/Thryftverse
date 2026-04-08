@@ -16,8 +16,8 @@ const DARK_COLORS = {
   borderLight: '#3a342d',
 
   // Accent / CTAs
-  accent: '#e8dcc8',
-  accentPress: '#d7c6ab',
+  accent: '#d7b98f',
+  accentPress: '#c49f72',
 
   // Financial accent (SYNDICATE + 1ze only)
   accentGold: '#d4a94a',
@@ -38,7 +38,7 @@ const DARK_COLORS = {
   star: '#ffc107',
 
   // Tab bar
-  tabActive: '#e8dcc8',
+  tabActive: '#d7b98f',
   tabInactive: '#7c7469',
 
   // Transparent overlays
@@ -80,7 +80,7 @@ const LIGHT_COLORS = {
   // Status
   sold: '#221f1b',
   danger: '#b64242',
-  success: '#2f8a66',
+  success: '#3d7a52',
   star: '#b18e2a',
 
   // Tab bar

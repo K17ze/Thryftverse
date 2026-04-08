@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -88,7 +88,7 @@ export default function PortfolioScreen() {
           <Image source={{ uri: item.image }} style={styles.holdingImage} />
           <View style={styles.holdingInfo}>
             <Text style={styles.holdingTitle} numberOfLines={1}>{item.title}</Text>
-            <Text style={styles.holdingMeta}>{item.yourUnits} shares · Avg {formatFromFiat(avg, 'GBP', { displayMode: 'fiat' })}</Text>
+            <Text style={styles.holdingMeta}>{item.yourUnits} shares Â· Avg {formatFromFiat(avg, 'GBP', { displayMode: 'fiat' })}</Text>
           </View>
           <View style={styles.holdingRight}>
             <Text style={styles.holdingValue}>{formatFromFiat(value, 'GBP', { displayMode: 'fiat' })}</Text>
@@ -144,7 +144,7 @@ export default function PortfolioScreen() {
                       styles.mixBar,
                       {
                         width: `${Math.max(6, bar.ratio * 100)}%`,
-                        backgroundColor: idx % 2 === 0 ? '#e8dcc8' : '#9dd6ff',
+                        backgroundColor: idx % 2 === 0 ? '#d7b98f' : '#9dd6ff',
                       },
                     ]}
                   />
@@ -250,7 +250,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_700Bold',
   },
   pnlUp: {
-    color: '#e8dcc8',
+    color: '#d7b98f',
   },
   pnlDown: {
     color: '#ff9d9d',
@@ -290,7 +290,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_700Bold',
   },
   sectionLink: {
-    color: '#e8dcc8',
+    color: '#d7b98f',
     fontSize: 12,
     fontFamily: 'Inter_600SemiBold',
   },
@@ -339,3 +339,4 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_700Bold',
   },
 });
+

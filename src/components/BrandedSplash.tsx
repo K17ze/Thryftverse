@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import Reanimated, {
   FadeInDown,
@@ -88,9 +88,10 @@ const styles = StyleSheet.create({
   },
   tagline: {
     marginTop: 14,
-    color: '#e8dcc8',
+    color: '#d7b98f',
     fontFamily: Typography.family.medium,
     fontSize: 13,
     letterSpacing: 0.22,
   },
 });
+

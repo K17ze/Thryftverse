@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -22,6 +22,10 @@ import { resolveAssetMarketState } from '../data/mockSyndicateData';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 
 type NavT = StackNavigationProp<RootStackParamList>;
+const IS_LIGHT = ActiveTheme === 'light';
+const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111111';
+const PANEL_BORDER = IS_LIGHT ? '#d8d1c6' : '#2a2a2a';
+const CONTROL_BG = IS_LIGHT ? '#f7f4ef' : '#121212';
 
 export default function AssetLeaderboardScreen() {
   const navigation = useNavigation<NavT>();
@@ -46,7 +50,7 @@ export default function AssetLeaderboardScreen() {
   const renderList = (title: string, icon: keyof typeof Ionicons.glyphMap, data: SyndicateAsset[], metric: (asset: SyndicateAsset) => string) => (
     <View style={styles.sectionCard}>
       <View style={styles.sectionHeader}>
-        <Ionicons name={icon} size={16} color="#e8dcc8" />
+        <Ionicons name={icon} size={16} color="#d7b98f" />
         <Text style={styles.sectionTitle}>{title}</Text>
       </View>
 
@@ -112,8 +116,8 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#272727',
-    backgroundColor: '#121212',
+    borderColor: PANEL_BORDER,
+    backgroundColor: CONTROL_BG,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -130,8 +134,8 @@ const styles = StyleSheet.create({
   sectionCard: {
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
-    backgroundColor: '#111111',
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
     paddingHorizontal: 10,
     paddingVertical: 10,
   },
@@ -178,8 +182,9 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_500Medium',
   },
   metric: {
-    color: '#e8dcc8',
+    color: '#d7b98f',
     fontSize: 11,
     fontFamily: 'Inter_700Bold',
   },
 });
+

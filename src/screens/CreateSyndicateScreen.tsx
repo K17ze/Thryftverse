@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -34,7 +34,7 @@ type RouteT = RouteProp<RootStackParamList, 'CreateSyndicate'>;
 const STABLE_COIN = '1ze';
 const COUNTRY_OPTIONS = ['GB', 'EU', 'SG', 'AE', 'US', 'CA'] as const;
 const IS_LIGHT = ActiveTheme === 'light';
-const BRAND = IS_LIGHT ? '#2f251b' : '#e8dcc8';
+const BRAND = IS_LIGHT ? '#2f251b' : '#d7b98f';
 const PANEL_BG = IS_LIGHT ? '#ffffff' : '#121212';
 const PANEL_SOFT_BG = IS_LIGHT ? '#f7f4ef' : '#151515';
 const PANEL_BORDER = IS_LIGHT ? '#d8d1c6' : '#2d2d2d';
@@ -251,7 +251,7 @@ export default function CreateSyndicateScreen() {
           <View style={styles.prefillBanner}>
             <Ionicons name="sparkles-outline" size={14} color={BRAND} />
             <Text style={styles.prefillBannerText}>
-              Imported from Sell flow · {prefill.offeringWindowHours}h offer window · {prefill.authPhotos?.length ?? 0} auth photos
+              Imported from Sell flow Â· {prefill.offeringWindowHours}h offer window Â· {prefill.authPhotos?.length ?? 0} auth photos
             </Text>
           </View>
         ) : null}
@@ -668,3 +668,4 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.accentGold,
   },
 });
+

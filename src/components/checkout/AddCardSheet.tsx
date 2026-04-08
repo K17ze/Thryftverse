@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TextInput, ScrollView, Platform } from 'react-native';
 import { BottomSheet } from '../BottomSheet';
 import { AnimatedPressable } from '../AnimatedPressable';
@@ -17,7 +17,7 @@ const BORDER = IS_LIGHT ? '#d8d1c6' : '#2a2a2a';
 const DIVIDER = IS_LIGHT ? '#e4ded3' : '#1c1c1c';
 const MUTED = Colors.textMuted;
 const TEXT = Colors.textPrimary;
-const BRAND = IS_LIGHT ? '#2f251b' : '#e8dcc8';
+const BRAND = IS_LIGHT ? '#2f251b' : '#d7b98f';
 const CARD_PREVIEW_BG = IS_LIGHT ? '#f1ede6' : '#1a2a1a';
 const CARD_PREVIEW_BORDER = IS_LIGHT ? '#d0c3af' : `${BRAND}44`;
 
@@ -112,7 +112,7 @@ export function AddCardSheet({ visible, onDismiss, onSuccess }: Props) {
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.cardPreview}>
           <Text style={styles.cardPreviewNumber}>
-            {cardNumber || '•••• •••• •••• ••••'}
+            {cardNumber || 'â€¢â€¢â€¢â€¢ â€¢â€¢â€¢â€¢ â€¢â€¢â€¢â€¢ â€¢â€¢â€¢â€¢'}
           </Text>
           <View style={styles.cardPreviewBottom}>
             <View>
@@ -163,7 +163,7 @@ export function AddCardSheet({ visible, onDismiss, onSuccess }: Props) {
                 style={styles.fieldInput}
                 value={cvv}
                 onChangeText={v => setCvv(v.replace(/\D/g, '').slice(0, 4))}
-                placeholder="•••"
+                placeholder="â€¢â€¢â€¢"
                 placeholderTextColor={MUTED}
                 keyboardType="number-pad"
                 selectionColor={BRAND}
@@ -240,3 +240,4 @@ const styles = StyleSheet.create({
   saveBtn: { backgroundColor: Colors.accent, borderRadius: 30, paddingVertical: 16, alignItems: 'center' },
   saveBtnText: { fontSize: 16, fontWeight: '700', color: Colors.textInverse },
 });
+

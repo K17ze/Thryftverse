@@ -34,6 +34,7 @@ import { AnimatedHeart } from '../components/AnimatedHeart';
 import { useToast } from '../context/ToastContext';
 import { useHaptic } from '../hooks/useHaptic';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
+import { Motion } from '../constants/motion';
 import { SyncStatusPill } from '../components/SyncStatusPill';
 import { SyncRetryBanner } from '../components/SyncRetryBanner';
 import { useBackendData } from '../context/BackendDataContext';
@@ -41,11 +42,10 @@ import { getBackendSyncStatus } from '../utils/syncStatus';
 
 const { width, height } = Dimensions.get('window');
 const IS_LIGHT = ActiveTheme === 'light';
-const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111111';
-const PANEL_ALT_BG = IS_LIGHT ? '#f3eee7' : '#1a1a1a';
-const PANEL_BORDER = IS_LIGHT ? '#d8d1c6' : '#2a2a2a';
-const FOOTER_BG = IS_LIGHT ? 'rgba(236,234,230,0.97)' : 'rgba(10,10,10,0.95)';
-const TOP_SCRIM_BG = IS_LIGHT ? 'rgba(236,234,230,0.46)' : 'rgba(0,0,0,0.35)';
+const PANEL_BG = Colors.card;
+const PANEL_ALT_BG = Colors.cardAlt;
+const PANEL_BORDER = Colors.border;
+const TOP_SCRIM_BG = IS_LIGHT ? 'rgba(236,234,230,0.42)' : 'rgba(0,0,0,0.34)';
 
 export default function ItemDetailScreen() {
   const route = useRoute<any>();
@@ -59,10 +59,6 @@ export default function ItemDetailScreen() {
   const { itemId } = route.params || {};
   const fallbackItem = listings[0] || MOCK_LISTINGS[0];
   const item: Listing = listings.find(l => l.id === itemId) || fallbackItem;
-  const hasExactListing = React.useMemo(
-    () => (itemId ? listings.some((listing) => listing.id === itemId) : true),
-    [itemId, listings],
-  );
   const seller: User = MOCK_USERS.find(u => u.id === item.sellerId) || MOCK_USERS[0];
   const sellerItems = listings.filter(l => l.sellerId === seller.id && l.id !== item.id);
 
@@ -77,7 +73,7 @@ export default function ItemDetailScreen() {
         source,
         hasError: Boolean(lastError),
         labels: {
-          live: 'Live listing',
+          live: 'Synced listing',
         },
       }),
     [isSyncing, lastError, source],
@@ -107,10 +103,11 @@ export default function ItemDetailScreen() {
 
   const heroStyle = useAnimatedStyle(() => {
     const overscroll = Math.min(scrollY.value, 0);
-    const translateY = interpolate(overscroll, [-100, 0], [-50, 0], Extrapolation.CLAMP);
-    const scale = interpolate(overscroll, [-100, 0], [1.2, 1], Extrapolation.CLAMP);
+    const pullDownTranslate = interpolate(overscroll, [-120, 0], [-56, 0], Extrapolation.CLAMP);
+    const parallaxTranslate = interpolate(scrollY.value, [0, 360], [0, 90], Extrapolation.CLAMP);
+    const scale = interpolate(overscroll, [-120, 0], [1.16, 1], Extrapolation.CLAMP);
     return {
-      transform: [{ translateY }, { scale }],
+      transform: [{ translateY: pullDownTranslate + parallaxTranslate }, { scale }],
     };
   });
 
@@ -127,7 +124,7 @@ export default function ItemDetailScreen() {
     
     bigHeartOpacity.value = 1;
     bigHeartScale.value = withSequence(
-      withSpring(1.5, { damping: 12 }),
+      withSpring(1.5, Motion.spring.flagshipPop),
       withTiming(1.5, { duration: 400 }),
       withTiming(0, { duration: 200 })
     );
@@ -202,9 +199,6 @@ export default function ItemDetailScreen() {
             <View style={styles.syncStatusTopRow}>
               <SyncStatusPill tone={detailStatus.tone} label={detailStatus.label} compact />
             </View>
-            <Text style={styles.syncStatusHint}>
-              {lastError ? 'Live item updates are delayed. Displaying cached listing data.' : 'Listing details auto-refresh when backend data changes.'}
-            </Text>
             {lastError ? (
               <SyncRetryBanner
                 message="Pull latest listing changes now."
@@ -213,9 +207,6 @@ export default function ItemDetailScreen() {
                 telemetryContext="item_detail_listing_sync"
                 containerStyle={styles.syncRetryBanner}
               />
-            ) : null}
-            {!hasExactListing && itemId ? (
-              <Text style={styles.syncFallbackHint}>This item is temporarily unavailable. Showing a nearby listing while reconnecting.</Text>
             ) : null}
           </View>
 
@@ -277,7 +268,6 @@ export default function ItemDetailScreen() {
               <Ionicons name="flash-outline" size={16} color={Colors.textInverse} />
               <Text style={styles.buyBtnText}>Buy now</Text>
             </View>
-            <Text style={styles.actionBtnMetaPrimary}>Instant checkout</Text>
           </AnimatedPressable>
           <AnimatedPressable
             style={[styles.actionBtn, styles.offerBtn]}
@@ -288,7 +278,6 @@ export default function ItemDetailScreen() {
               <Ionicons name="chatbubbles-outline" size={15} color={Colors.textPrimary} />
               <Text style={styles.offerBtnText}>Make offer</Text>
             </View>
-            <Text style={styles.actionBtnMeta}>Negotiate price</Text>
           </AnimatedPressable>
         </Reanimated.View>
       )}
@@ -313,19 +302,23 @@ const styles = StyleSheet.create({
   headerRight: { flexDirection: 'row', gap: 12 },
   blurBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center' },
   detailsContainer: { paddingHorizontal: 20, paddingTop: 24 },
-  price: { fontSize: 40, fontFamily: 'Inter_700Bold', color: Colors.textPrimary, letterSpacing: -1.2, marginBottom: 2 },
-  brand: { fontSize: 15, fontFamily: 'Inter_700Bold', color: Colors.textSecondary, textTransform: 'uppercase', letterSpacing: 0.9, marginBottom: 8 },
+  price: { fontSize: 38, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary, letterSpacing: -0.9, marginBottom: 2 },
+  brand: { fontSize: 15, fontFamily: 'Inter_300Light', color: Colors.textSecondary, letterSpacing: 0.34, marginBottom: 8 },
   protectionText: { fontSize: 12, color: Colors.textSecondary, fontFamily: 'Inter_400Regular', marginBottom: 12 },
-  title: { fontSize: 20, fontFamily: 'Inter_400Regular', color: Colors.textSecondary, marginBottom: 12, lineHeight: 28 },
-  sizeCondition: { fontSize: 15, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary },
+  title: { fontSize: 22, fontFamily: 'Inter_500Medium', color: Colors.textPrimary, marginBottom: 12, lineHeight: 30 },
+  sizeCondition: { fontSize: 15, fontFamily: 'Inter_500Medium', color: Colors.textSecondary },
   syncStatusCard: {
     marginTop: 14,
     borderRadius: 14,
-    borderWidth: 1,
-    borderColor: PANEL_BORDER,
-    backgroundColor: PANEL_BG,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.borderLight,
+    backgroundColor: PANEL_ALT_BG,
     paddingHorizontal: 12,
     paddingVertical: 10,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
   },
   syncStatusTopRow: {
     flexDirection: 'row',
@@ -350,18 +343,45 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     fontFamily: 'Inter_500Medium',
   },
-  descriptionBox: { marginTop: 24, backgroundColor: PANEL_BG, borderWidth: 1, borderColor: PANEL_BORDER, padding: 20, borderRadius: 24 },
+  descriptionBox: {
+    marginTop: 24,
+    backgroundColor: PANEL_ALT_BG,
+    padding: 20,
+    borderRadius: 24,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+  },
   description: { fontSize: 15, fontFamily: 'Inter_400Regular', color: Colors.textSecondary, lineHeight: 24 },
   timePosted: { fontSize: 12, fontFamily: 'Inter_500Medium', color: Colors.textMuted, marginTop: 12 },
   statsRow: { flexDirection: 'row', alignItems: 'center', marginTop: 12 },
   statsText: { fontSize: 12, color: Colors.textSecondary, marginLeft: 6, fontFamily: 'Inter_500Medium' },
-  sellerCard: { flexDirection: 'row', alignItems: 'center', marginTop: 26, paddingHorizontal: 14, paddingVertical: 14, borderWidth: 1, borderColor: PANEL_BORDER, borderRadius: 20, backgroundColor: PANEL_BG, gap: 16 },
+  sellerCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 26,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderRadius: 20,
+    backgroundColor: PANEL_BG,
+    gap: 16,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+  },
   sellerAvatar: { width: 56, height: 56, borderRadius: 28 },
   sellerInfo: { flex: 1 },
   sellerName: { fontSize: 16, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary },
   sellerStats: { fontSize: 13, fontFamily: 'Inter_500Medium', color: Colors.textMuted, marginTop: 4 },
   sellerLastSeen: { fontSize: 11, fontFamily: 'Inter_400Regular', color: Colors.textMuted, marginTop: 2 },
-  followBtn: { backgroundColor: PANEL_ALT_BG, borderWidth: 1, borderColor: PANEL_BORDER, paddingHorizontal: 20, paddingVertical: 10, borderRadius: 20 },
+  followBtn: {
+    backgroundColor: PANEL_ALT_BG,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 20,
+  },
   followBtnText: { color: Colors.textPrimary, fontSize: 13, fontFamily: 'Inter_600SemiBold' },
   sellerItemsSection: { marginTop: 24, paddingBottom: 32 },
   sectionTitle: { fontSize: 16, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary, marginBottom: 16 },

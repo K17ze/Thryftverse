@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -91,7 +91,7 @@ function statusPillStyle(status: HistoryEntry['status']) {
       return {
         borderColor: '#2f4944',
         backgroundColor: '#152520',
-        textColor: '#e8dcc8',
+        textColor: '#d7b98f',
       };
     case 'pending':
       return {
@@ -334,23 +334,23 @@ export default function SyndicateOrderHistoryScreen() {
           <Ionicons
             name={isBuy ? 'arrow-down-outline' : 'arrow-up-outline'}
             size={15}
-            color={isBuy ? '#e8dcc8' : '#ff9d9d'}
+            color={isBuy ? '#d7b98f' : '#ff9d9d'}
           />
         </View>
 
         <View style={styles.rowBody}>
           <View style={styles.rowTitleLine}>
-            <Text style={styles.rowTitle}>{isBuy ? 'Buy' : 'Sell'} · {item.assetId.toUpperCase()}</Text>
+            <Text style={styles.rowTitle}>{isBuy ? 'Buy' : 'Sell'} Â· {item.assetId.toUpperCase()}</Text>
             <View style={[styles.statusPill, { borderColor: statusStyle.borderColor, backgroundColor: statusStyle.backgroundColor }]}>
               <Text style={[styles.statusPillText, { color: statusStyle.textColor }]}>{item.status.toUpperCase()}</Text>
             </View>
           </View>
 
           <Text style={styles.rowMeta}>
-            {item.quantity} units · {item.type.toUpperCase()} · {formatFromFiat(item.pricePerShare, 'GBP', { displayMode: 'fiat' })}/unit
+            {item.quantity} units Â· {item.type.toUpperCase()} Â· {formatFromFiat(item.pricePerShare, 'GBP', { displayMode: 'fiat' })}/unit
           </Text>
           <Text style={styles.rowNote}>
-            Filled {item.filledQuantity}/{item.quantity} · {ts.toLocaleDateString()} {ts.toLocaleTimeString()}
+            Filled {item.filledQuantity}/{item.quantity} Â· {ts.toLocaleDateString()} {ts.toLocaleTimeString()}
           </Text>
         </View>
 
@@ -441,8 +441,8 @@ export default function SyndicateOrderHistoryScreen() {
             onRefresh={() => {
               void syncRemoteHistory();
             }}
-            tintColor="#e8dcc8"
-            colors={['#e8dcc8']}
+            tintColor="#d7b98f"
+            colors={['#d7b98f']}
             progressBackgroundColor="#161616"
           />
         }
@@ -530,7 +530,7 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   filterChipActive: {
-    borderColor: '#e8dcc8',
+    borderColor: '#d7b98f',
     backgroundColor: '#17302b',
   },
   filterText: {
@@ -540,7 +540,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   filterTextActive: {
-    color: '#e8dcc8',
+    color: '#d7b98f',
   },
   assetChip: {
     borderRadius: 10,
@@ -551,7 +551,7 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   assetChipActive: {
-    borderColor: '#e8dcc8',
+    borderColor: '#d7b98f',
     backgroundColor: '#17302b',
   },
   assetChipText: {
@@ -561,7 +561,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.45,
   },
   assetChipTextActive: {
-    color: '#e8dcc8',
+    color: '#d7b98f',
   },
   content: {
     paddingHorizontal: 16,
@@ -640,6 +640,7 @@ const styles = StyleSheet.create({
     color: '#ff9d9d',
   },
   rowAmountSell: {
-    color: '#e8dcc8',
+    color: '#d7b98f',
   },
 });
+

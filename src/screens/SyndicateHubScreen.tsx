@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -106,7 +106,7 @@ export default function SyndicateHubScreen() {
               <Ionicons
                 name={isPositive ? 'trending-up-outline' : 'trending-down-outline'}
                 size={12}
-                color={isPositive ? '#e8dcc8' : '#ff9d9d'}
+                color={isPositive ? '#d7b98f' : '#ff9d9d'}
               />
               <Text style={[styles.moveText, isPositive ? styles.moveTextUp : styles.moveTextDown]}>
                 {isPositive ? '+' : ''}{item.marketMovePct24h.toFixed(1)}%
@@ -175,13 +175,12 @@ export default function SyndicateHubScreen() {
                 onPress={() => navigation.navigate('MarketLedger')}
               >
                 <Ionicons name="pulse-outline" size={15} color={Colors.textPrimary} />
-                <Text style={styles.backBtnText}>Market Tape</Text>
+                <Text style={styles.backBtnText}>Activity</Text>
               </AnimatedPressable>
             </View>
 
             <Text style={styles.headerLabel}>SYNDICATE MARKET</Text>
             <Text style={styles.headerTitle}>Syndicate Hub</Text>
-            <Text style={styles.headerSubtitle}>Tokenized fashion assets with live fractional trading.</Text>
 
             <View style={styles.searchWrap}>
               <Ionicons name="search" size={18} color={Colors.textMuted} />
@@ -305,7 +304,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   headerLabel: {
-    color: '#e8dcc8',
+    color: '#d7b98f',
     fontSize: 11,
     fontFamily: 'Inter_700Bold',
     letterSpacing: 1,
@@ -404,7 +403,7 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   sortChipActive: {
-    borderColor: '#e8dcc8',
+    borderColor: '#d7b98f',
     backgroundColor: '#17302b',
   },
   sortChipText: {
@@ -414,7 +413,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   sortChipTextActive: {
-    color: '#e8dcc8',
+    color: '#d7b98f',
   },
   issueBtn: {
     marginTop: 12,
@@ -481,7 +480,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_700Bold',
   },
   moveTextUp: {
-    color: '#e8dcc8',
+    color: '#d7b98f',
   },
   moveTextDown: {
     color: '#ff9d9d',
@@ -538,3 +537,4 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_700Bold',
   },
 });
+

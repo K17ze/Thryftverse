@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -33,7 +33,7 @@ import { useToast } from '../context/ToastContext';
 type Props = StackScreenProps<RootStackParamList, 'UserProfile'>;
 
 const IS_LIGHT = ActiveTheme === 'light';
-const TEAL = IS_LIGHT ? '#2f251b' : '#e8dcc8';
+const ACCENT = IS_LIGHT ? '#2f251b' : '#d7b98f';
 const BG = Colors.background;
 const CARD = IS_LIGHT ? '#ffffff' : '#111111';
 const CARD_ALT = IS_LIGHT ? '#f3eee7' : '#1a1a1a';
@@ -72,8 +72,10 @@ const AnimatedScrollView = Reanimated.createAnimatedComponent(ScrollView);
 
 export default function UserProfileScreen({ navigation, route }: Props) {
   const insets = useSafeAreaInsets();
+  const currentUser = useStore(state => state.currentUser);
   const userAvatar = useStore(state => state.userAvatar);
   const userCover = useStore(state => state.userCover);
+  const profileMediaOverrides = useStore(state => state.profileMediaOverrides);
   const { show } = useToast();
   const [activeTab, setActiveTab] = useState<Tab>('Listings');
   const [following, setFollowing] = useState(false);
@@ -100,12 +102,24 @@ export default function UserProfileScreen({ navigation, route }: Props) {
     [route.params.isMe, route.params.userId]
   );
 
-  const displayUsername = route.params.isMe ? MY_USER.username : profileUser.username;
+  const isSelfProfile =
+    route.params.isMe ||
+    route.params.userId === currentUser?.id ||
+    route.params.userId === MY_USER.id;
+
+  const mediaOverride =
+    profileMediaOverrides[route.params.userId]
+    ?? profileMediaOverrides[profileUser.id]
+    ?? null;
+
+  const displayUsername = isSelfProfile
+    ? currentUser?.username ?? MY_USER.username
+    : profileUser.username;
   const displayHandle = `@${displayUsername}`;
-  const displayAvatar = route.params.isMe ? userAvatar || MY_USER.avatar : profileUser.avatar;
-  const displayCover = route.params.isMe
-    ? userCover || MY_USER.coverPhoto || COVER_IMAGE
-    : profileUser.coverPhoto || COVER_IMAGE;
+  const displayAvatar = mediaOverride?.avatar
+    || (isSelfProfile ? userAvatar || MY_USER.avatar : profileUser.avatar);
+  const displayCover = mediaOverride?.cover
+    || (isSelfProfile ? userCover || MY_USER.coverPhoto || COVER_IMAGE : profileUser.coverPhoto || COVER_IMAGE);
 
   const handleShare = React.useCallback(async () => {
     try {
@@ -140,7 +154,7 @@ export default function UserProfileScreen({ navigation, route }: Props) {
       style={styles.gridItem}
       activeOpacity={0.9}
       onPress={() => {
-        if (route.params?.isMe) {
+        if (isSelfProfile) {
           navigation.navigate('ManageListing', { itemId: item.id });
         } else {
           navigation.navigate('ItemDetail', { itemId: item.id });
@@ -160,7 +174,7 @@ export default function UserProfileScreen({ navigation, route }: Props) {
       <View style={styles.gridInfo}>
         <Text style={styles.gridPrice}>{formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}</Text>
         <Text style={styles.gridBrand} numberOfLines={1} ellipsizeMode="tail">{item.brand}</Text>
-        <Text style={styles.gridSizeCondition}>{item.size} • {item.condition}</Text>
+        <Text style={styles.gridSizeCondition}>{item.size} â€¢ {item.condition}</Text>
       </View>
     </AnimatedPressable>
   );
@@ -172,7 +186,7 @@ export default function UserProfileScreen({ navigation, route }: Props) {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" />
+      <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={BG} />
 
       {/* Floating Translucent Header Layer */}
       <Reanimated.View style={[styles.floatingHeader, { paddingTop: insets.top }, headerOpacityStyle]}>
@@ -243,9 +257,9 @@ export default function UserProfileScreen({ navigation, route }: Props) {
 
           <View style={styles.heroActionRow}>
             <AnimatedPressable
-              style={[styles.heroActionPrimary, following && !route.params.isMe && styles.heroActionPrimaryActive]}
+              style={[styles.heroActionPrimary, following && !isSelfProfile && styles.heroActionPrimaryActive]}
               onPress={() => {
-                if (route.params.isMe) {
+                if (isSelfProfile) {
                   navigation.navigate('EditProfile');
                   return;
                 }
@@ -259,8 +273,8 @@ export default function UserProfileScreen({ navigation, route }: Props) {
               }}
               activeOpacity={0.85}
             >
-              <Text style={[styles.heroActionPrimaryText, following && !route.params.isMe && styles.heroActionPrimaryTextActive]}>
-                {route.params.isMe ? 'Edit profile' : isBlocked ? 'Blocked' : following ? 'Following' : 'Follow user'}
+              <Text style={[styles.heroActionPrimaryText, following && !isSelfProfile && styles.heroActionPrimaryTextActive]}>
+                {isSelfProfile ? 'Edit profile' : isBlocked ? 'Blocked' : following ? 'Following' : 'Follow user'}
               </Text>
             </AnimatedPressable>
 
@@ -364,11 +378,11 @@ export default function UserProfileScreen({ navigation, route }: Props) {
               <View style={styles.aboutInfoCard}>
                 <Text style={styles.aboutSectionHeading}>Verified Details</Text>
                 <View style={styles.aboutRow}>
-                  <Ionicons name="checkmark-circle" size={20} color={TEAL} />
+                  <Ionicons name="checkmark-circle" size={20} color={ACCENT} />
                   <Text style={styles.aboutRowText}>Facebook Connected</Text>
                 </View>
                 <View style={styles.aboutRow}>
-                  <Ionicons name="checkmark-circle" size={20} color={TEAL} />
+                  <Ionicons name="checkmark-circle" size={20} color={ACCENT} />
                   <Text style={styles.aboutRowText}>Email Verified</Text>
                 </View>
               </View>
@@ -411,7 +425,7 @@ export default function UserProfileScreen({ navigation, route }: Props) {
             style={{ paddingVertical: 16, flexDirection: 'row', alignItems: 'center', gap: 12 }}
             onPress={() => {
               setActionSheetVisible(false);
-              if (route.params.isMe) {
+              if (isSelfProfile) {
                 show('You cannot block your own profile.', 'info');
                 return;
               }
@@ -646,7 +660,7 @@ const styles = StyleSheet.create({
     gap: 14,
   },
   reviewerAvatar: { width: 44, height: 44, borderRadius: 22, borderWidth: 1, borderColor: BORDER, backgroundColor: CARD_ALT, alignItems: 'center', justifyContent: 'center' },
-  reviewerAvatarAuto: { width: 44, height: 44, borderRadius: 22, backgroundColor: TEAL, alignItems: 'center', justifyContent: 'center' },
+  reviewerAvatarAuto: { width: 44, height: 44, borderRadius: 22, backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center' },
   reviewerAvatarAutoText: { fontSize: 18, fontFamily: 'Inter_700Bold', color: Colors.textInverse },
   reviewBlockInfo: { flex: 1 },
   reviewSenderRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
@@ -680,3 +694,5 @@ const styles = StyleSheet.create({
   aboutRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
   aboutRowText: { fontSize: 15, fontFamily: 'Inter_500Medium', color: TEXT },
 });
+
+

@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -30,7 +30,7 @@ import { deactivateNotificationDevice, registerNotificationDevice } from '../ser
 type Props = StackScreenProps<RootStackParamList, 'PushNotifications'>;
 
 const IS_LIGHT = ActiveTheme === 'light';
-const TEAL = IS_LIGHT ? '#2f251b' : '#e8dcc8';
+const ACCENT = IS_LIGHT ? '#2f251b' : '#d7b98f';
 const BG = Colors.background;
 const CARD = Colors.card;
 const BORDER = Colors.border;
@@ -211,7 +211,7 @@ export default function PushNotificationsScreen({ navigation }: Props) {
                 <Switch
                   value={toggles[item.key]}
                   onValueChange={() => void toggle(item.key)}
-                  trackColor={{ false: BORDER, true: TEAL }}
+                  trackColor={{ false: BORDER, true: ACCENT }}
                   thumbColor={Colors.textInverse}
                 />
               </View>
@@ -344,3 +344,5 @@ const styles = StyleSheet.create({
   footerNote: { fontSize: 12, color: MUTED, textAlign: 'center', lineHeight: 18, paddingHorizontal: 10 },
   footerMeta: { marginTop: 10, fontSize: 12, color: MUTED, textAlign: 'center' },
 });
+
+

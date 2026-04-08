@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -34,6 +34,13 @@ const START_WINDOWS = [
   { label: '1h', minutes: 60 },
   { label: '3h', minutes: 180 },
 ];
+const IS_LIGHT = ActiveTheme === 'light';
+const PANEL_BG = IS_LIGHT ? '#ffffff' : '#121212';
+const PANEL_ALT_BG = IS_LIGHT ? '#f7f4ef' : '#141414';
+const PANEL_BORDER = IS_LIGHT ? '#d8d1c6' : '#2d2d2d';
+const INPUT_BG = IS_LIGHT ? '#ffffff' : '#111111';
+const ACTIVE_SURFACE = IS_LIGHT ? '#efe5d5' : '#162523';
+const PREVIEW_META_TEXT = IS_LIGHT ? '#f2e8d9' : '#d7b98f';
 
 export default function CreateAuctionScreen() {
   const navigation = useNavigation<NavT>();
@@ -174,7 +181,7 @@ export default function CreateAuctionScreen() {
         </View>
         {selected ? (
           <View style={styles.selectedTick}>
-            <Ionicons name="checkmark" size={12} color={Colors.background} />
+            <Ionicons name="checkmark" size={12} color={Colors.textInverse} />
           </View>
         ) : null}
       </AnimatedPressable>
@@ -193,7 +200,6 @@ export default function CreateAuctionScreen() {
         </AnimatedPressable>
 
         <View>
-          <Text style={styles.headerLabel}>SELLER STUDIO</Text>
           <Text style={styles.headerTitle}>Launch Auction</Text>
         </View>
 
@@ -309,8 +315,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 8,
     paddingBottom: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: '#1c1c1c',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.border,
   },
   closeBtn: {
     width: 36,
@@ -318,10 +324,12 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#151515',
+    backgroundColor: PANEL_ALT_BG,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: PANEL_BORDER,
   },
   headerLabel: {
-    color: '#e8dcc8',
+    color: '#d7b98f',
     fontSize: 10,
     letterSpacing: 1,
     fontFamily: 'Inter_600SemiBold',
@@ -340,7 +348,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   launchBtnText: {
-    color: Colors.background,
+    color: Colors.textInverse,
     fontSize: 12,
     fontFamily: 'Inter_700Bold',
   },
@@ -354,9 +362,9 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#2a2a2a',
+    borderColor: PANEL_BORDER,
     marginBottom: 16,
-    backgroundColor: '#121212',
+    backgroundColor: PANEL_BG,
   },
   previewImage: {
     width: '100%',
@@ -378,7 +386,7 @@ const styles = StyleSheet.create({
   },
   previewMeta: {
     marginTop: 3,
-    color: '#8fdcd4',
+    color: PREVIEW_META_TEXT,
     fontSize: 11,
     fontFamily: 'Inter_600SemiBold',
   },
@@ -409,14 +417,14 @@ const styles = StyleSheet.create({
   windowChip: {
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#2d2d2d',
+    borderColor: PANEL_BORDER,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    backgroundColor: '#141414',
+    backgroundColor: PANEL_ALT_BG,
   },
   windowChipActive: {
-    borderColor: '#e8dcc8',
-    backgroundColor: '#162523',
+    borderColor: Colors.accent,
+    backgroundColor: ACTIVE_SURFACE,
   },
   windowChipText: {
     color: Colors.textSecondary,
@@ -424,7 +432,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_600SemiBold',
   },
   windowChipTextActive: {
-    color: '#e8dcc8',
+    color: Colors.accent,
   },
   inputLabel: {
     color: Colors.textSecondary,
@@ -435,12 +443,12 @@ const styles = StyleSheet.create({
   input: {
     height: 42,
     borderWidth: 1,
-    borderColor: '#2d2d2d',
+    borderColor: PANEL_BORDER,
     borderRadius: 12,
     paddingHorizontal: 12,
     color: Colors.textPrimary,
     fontFamily: 'Inter_600SemiBold',
-    backgroundColor: '#111111',
+    backgroundColor: INPUT_BG,
     marginBottom: 10,
   },
   buyNowRow: {
@@ -453,14 +461,14 @@ const styles = StyleSheet.create({
   toggleWrap: {
     flexDirection: 'row',
     borderWidth: 1,
-    borderColor: '#2d2d2d',
+    borderColor: PANEL_BORDER,
     borderRadius: 12,
     overflow: 'hidden',
   },
   toggleBtn: {
     paddingHorizontal: 12,
     paddingVertical: 6,
-    backgroundColor: '#131313',
+    backgroundColor: PANEL_ALT_BG,
   },
   toggleBtnActive: {
     backgroundColor: Colors.accent,
@@ -481,12 +489,12 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#2d2d2d',
-    backgroundColor: '#121212',
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
   },
   listingCardSelected: {
-    borderColor: '#e8dcc8',
-    backgroundColor: '#15201f',
+    borderColor: Colors.accent,
+    backgroundColor: ACTIVE_SURFACE,
   },
   listingImage: {
     width: '100%',
@@ -519,3 +527,4 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.accent,
   },
 });
+

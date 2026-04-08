@@ -29,6 +29,10 @@ import {
   getStoredThemePreference,
   subscribeThemePreferenceChange,
 } from './src/theme/themePreference';
+import { restoreAuthSession } from './src/services/authApi';
+import { useStore } from './src/store/useStore';
+import { getStoredProfileMedia } from './src/preferences/profileMediaPreferences';
+import { getStoredAuthSnapshot } from './src/preferences/authSnapshot';
 
 SplashScreen.preventAutoHideAsync().catch(() => {
   // Keep app startup resilient even if splash API rejects.
@@ -99,9 +103,31 @@ export default function App() {
   React.useEffect(() => {
     let mounted = true;
 
-    const initializeThemePreference = async () => {
+    const initializeAppBootstrapState = async () => {
       const preference = await getStoredThemePreference();
       applyThemePreference(preference);
+
+      const [storedProfileMedia, localAuthSnapshot] = await Promise.all([
+        getStoredProfileMedia(),
+        getStoredAuthSnapshot(),
+      ]);
+
+      const store = useStore.getState();
+
+      if (localAuthSnapshot?.user) {
+        store.login(localAuthSnapshot.user);
+        store.setTwoFactorEnabled(localAuthSnapshot.twoFactorEnabled);
+      }
+
+      if (storedProfileMedia.avatar) {
+        store.updateUserAvatar(storedProfileMedia.avatar);
+      }
+
+      if (storedProfileMedia.cover) {
+        store.updateUserCover(storedProfileMedia.cover);
+      }
+
+      store.hydrateProfileMediaOverrides(storedProfileMedia.byUserId);
 
       if (!mounted) {
         return;
@@ -110,10 +136,24 @@ export default function App() {
       const navigatorModule = require('./src/navigation/AppNavigator');
       setThemeReadyNavigator(() => navigatorModule.default);
       setThemeInitialized(true);
+
+      restoreAuthSession()
+        .then((restoredSession) => {
+          if (!restoredSession) {
+            return;
+          }
+
+          const latestStore = useStore.getState();
+          latestStore.login(restoredSession.storeUser);
+          latestStore.setTwoFactorEnabled(restoredSession.user.twoFactorEnabled);
+        })
+        .catch(() => {
+          // Session refresh is best-effort and should not interrupt app usage.
+        });
     };
 
-    initializeThemePreference().catch(() => {
-      // Theme preference read failures should never block app startup.
+    initializeAppBootstrapState().catch(() => {
+      // Bootstrap failures should never block app startup.
 
       if (!mounted) {
         return;

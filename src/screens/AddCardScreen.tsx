@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -31,7 +31,7 @@ const BORDER = Colors.border;
 const DIVIDER = Colors.border;
 const MUTED = Colors.textMuted;
 const TEXT = Colors.textPrimary;
-const BRAND = IS_LIGHT ? '#2f251b' : '#e8dcc8';
+const BRAND = IS_LIGHT ? '#2f251b' : '#d7b98f';
 const CARD_PREVIEW_BG = IS_LIGHT ? '#f1ede6' : '#1a2a1a';
 const CARD_PREVIEW_BORDER = IS_LIGHT ? '#d0c3af' : `${BRAND}44`;
 
@@ -118,7 +118,7 @@ export default function AddCardScreen({ navigation }: Props) {
           {/* Card Preview */}
           <View style={styles.cardPreview}>
             <Text style={styles.cardPreviewNumber}>
-              {cardNumber || '•••• •••• •••• ••••'}
+              {cardNumber || 'â€¢â€¢â€¢â€¢ â€¢â€¢â€¢â€¢ â€¢â€¢â€¢â€¢ â€¢â€¢â€¢â€¢'}
             </Text>
             <View style={styles.cardPreviewBottom}>
               <View>
@@ -170,7 +170,7 @@ export default function AddCardScreen({ navigation }: Props) {
                   style={styles.fieldInput}
                   value={cvv}
                   onChangeText={v => setCvv(v.replace(/\D/g, '').slice(0, 4))}
-                  placeholder="•••"
+                  placeholder="â€¢â€¢â€¢"
                   placeholderTextColor={MUTED}
                   keyboardType="number-pad"
                   selectionColor={BRAND}
@@ -251,3 +251,4 @@ const styles = StyleSheet.create({
   saveBtn: { backgroundColor: Colors.accent, borderRadius: 30, paddingVertical: 16, alignItems: 'center' },
   saveBtnText: { fontSize: 16, fontWeight: '700', color: Colors.textInverse },
 });
+

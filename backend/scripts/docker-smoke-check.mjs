@@ -53,7 +53,11 @@ async function main() {
   assert(health.ok === true, 'API health check did not return ok=true');
 
   console.log('[check] API deep health (db/redis/ml/s3)');
-  const deep = await requestJson(`${API_BASE}/health/deep`);
+  const deep = await requestJson(`${API_BASE}/health/deep`, {
+    headers: {
+      'x-security-admin-token': API_SECURITY_ADMIN_TOKEN,
+    },
+  });
   assert(deep.ok === true, 'Deep health failed');
 
   console.log('[check] ML health');
@@ -140,6 +144,44 @@ async function main() {
 
     assert(compliance.ok === true, `Compliance webhook failed for user ${userId}`);
     assert(compliance.profile?.tradingEnabled === true, `Trading was not enabled for user ${userId}`);
+  }
+
+  console.log('[check] Compliance consent acceptance for syndicate trading');
+  const riskDisclosureDocuments = await requestJson(
+    `${API_BASE}/compliance/consents/documents?docType=risk_disclosure&activeOnly=true&limit=10`,
+    {
+      headers: authHeaders,
+    }
+  );
+  assert(riskDisclosureDocuments.ok === true, 'Risk disclosure document fetch failed');
+
+  const activeRiskDisclosure = (riskDisclosureDocuments.items ?? []).find(
+    (item) => item.docType === 'risk_disclosure' && item.isActive === true
+  );
+  assert(
+    typeof activeRiskDisclosure?.id === 'string' && activeRiskDisclosure.id.length > 3,
+    'Missing active risk disclosure document required for syndicate trading'
+  );
+
+  for (const actor of [
+    { userId: smokeUserId, headers: authHeaders },
+    { userId: sellerUserId, headers: sellerAuthHeaders },
+  ]) {
+    const consent = await requestJson(`${API_BASE}/compliance/consents/accept`, {
+      method: 'POST',
+      headers: { ...actor.headers, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        userId: actor.userId,
+        documentId: activeRiskDisclosure.id,
+        accepted: true,
+        evidence: {
+          source: 'docker_smoke_check',
+        },
+      }),
+    });
+
+    assert(consent.ok === true, `Risk disclosure consent failed for user ${actor.userId}`);
+    assert(consent.consent?.accepted === true, `Risk disclosure was not accepted for user ${actor.userId}`);
   }
 
   console.log('[check] Commerce lifecycle (address/payment/order/pay)');

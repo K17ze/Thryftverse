@@ -1,6 +1,7 @@
 import React from 'react';
 import { createStackNavigator, CardStyleInterpolators } from '@react-navigation/stack';
 import { RootStackParamList } from './types';
+import { useStore } from '../store/useStore';
 
 import AuthLandingScreen from '../screens/AuthLandingScreen';
 import LoginScreen from '../screens/LoginScreen';
@@ -78,8 +79,19 @@ import ReportScreen from '../screens/ReportScreen';
 const Stack = createStackNavigator<RootStackParamList>();
 
 export default function AppNavigator() {
+  const isAuthenticated = useStore((state) => state.isAuthenticated);
+
   return (
-    <Stack.Navigator initialRouteName="AuthLanding" screenOptions={{ headerShown: false, cardStyleInterpolator: CardStyleInterpolators.forHorizontalIOS, gestureEnabled: true, gestureDirection: 'horizontal' }}>
+    <Stack.Navigator
+      key={isAuthenticated ? 'authenticated' : 'anonymous'}
+      initialRouteName={isAuthenticated ? 'MainTabs' : 'AuthLanding'}
+      screenOptions={{
+        headerShown: false,
+        cardStyleInterpolator: CardStyleInterpolators.forHorizontalIOS,
+        gestureEnabled: true,
+        gestureDirection: 'horizontal',
+      }}
+    >
       
       {/* Auth Flow */}
       <Stack.Screen name="AuthLanding" component={AuthLandingScreen} />

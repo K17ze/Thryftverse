@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+﻿import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -368,12 +368,12 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   primaryBtn: {
-    backgroundColor: '#e8dcc8',
+    backgroundColor: '#d7b98f',
     height: 56,
     borderRadius: 28,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#e8dcc8',
+    shadowColor: '#d7b98f',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.25,
     shadowRadius: 16,
@@ -435,3 +435,4 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
 });
+

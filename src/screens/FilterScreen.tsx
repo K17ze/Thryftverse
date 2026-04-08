@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -128,7 +128,7 @@ export default function FilterScreen() {
     return { opacity };
   });
 
-  const MOCK_BRANDS = ['Nike', 'Adidas', 'Stüssy', 'Carhartt', 'Arc\'teryx', 'Levi\'s', 'Off-White', 'Zara'];
+  const MOCK_BRANDS = ['Nike', 'Adidas', 'StÃ¼ssy', 'Carhartt', 'Arc\'teryx', 'Levi\'s', 'Off-White', 'Zara'];
   const MOCK_SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
   const MOCK_CONDITIONS: ConditionOption[] = ['Any', 'New with tags', 'Very good', 'Good', 'Satisfactory'];
 
@@ -449,7 +449,7 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
   },
   headerTitle: { fontSize: 22, fontFamily: 'Inter_700Bold', color: Colors.textPrimary, letterSpacing: -0.5 },
-  clearText: { color: '#e8dcc8', fontSize: 16, fontFamily: 'Inter_600SemiBold' },
+  clearText: { color: '#d7b98f', fontSize: 16, fontFamily: 'Inter_600SemiBold' },
   statusRow: {
     paddingHorizontal: 24,
     paddingBottom: 10,
@@ -505,7 +505,7 @@ const styles = StyleSheet.create({
     paddingRight: 20,
     marginBottom: 16,
   },
-  seeAllText: { color: '#e8dcc8', fontSize: 14, fontFamily: 'Inter_600SemiBold' },
+  seeAllText: { color: '#d7b98f', fontSize: 14, fontFamily: 'Inter_600SemiBold' },
 
   hScroll: { paddingHorizontal: 20, gap: 10 },
   
@@ -567,3 +567,4 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
   },
 });
+

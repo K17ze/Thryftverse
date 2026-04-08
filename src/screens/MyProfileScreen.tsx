@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import {
   View,
   Text,
@@ -34,6 +34,13 @@ import { AnimatedPressable } from '../components/AnimatedPressable';
 import { AnimatedCounter } from '../components/AnimatedCounter';
 import { CachedImage } from '../components/CachedImage';
 import { useToast } from '../context/ToastContext';
+import {
+  setStoredUserAvatar,
+  setStoredUserAvatarForUser,
+  setStoredUserCover,
+  setStoredUserCoverForUser,
+} from '../preferences/profileMediaPreferences';
+import { persistProfileMediaUri } from '../utils/profileMediaAsset';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -41,9 +48,9 @@ const COVER_HEIGHT = 170;
 const AVATAR_SIZE = 82;
 const HERO_MEDIA_GAP = 6;
 const HERO_MEDIA_TILE = (SCREEN_WIDTH - 40 - HERO_MEDIA_GAP * 2) / 3;
-const TEAL = '#e8dcc8';
+const ACCENT = '#d7b98f';
 const IS_LIGHT = ActiveTheme === 'light';
-const BRAND = IS_LIGHT ? '#2f251b' : TEAL;
+const BRAND = IS_LIGHT ? '#2f251b' : ACCENT;
 const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111';
 const PANEL_SOFT = IS_LIGHT ? '#f4efe7' : '#171717';
 const PANEL_ICON = IS_LIGHT ? '#ece5d9' : '#1a1a1a';
@@ -73,8 +80,55 @@ export default function MyProfileScreen() {
   
   const userAvatar = useStore((state) => state.userAvatar);
   const userCover = useStore((state) => state.userCover);
+  const currentUser = useStore((state) => state.currentUser);
   const updateUserAvatar = useStore((state) => state.updateUserAvatar);
   const updateUserCover = useStore((state) => state.updateUserCover);
+
+  React.useEffect(() => {
+    let canceled = false;
+
+    const migrateStoredProfileMediaUris = async () => {
+      if (userCover) {
+        const persistedCoverUri = await persistProfileMediaUri(userCover, 'cover');
+        if (!canceled && persistedCoverUri !== userCover) {
+          updateUserCover(persistedCoverUri);
+          Promise.all([
+            setStoredUserCover(persistedCoverUri),
+            setStoredUserCoverForUser(MY_USER.id, persistedCoverUri),
+            currentUser?.id
+              ? setStoredUserCoverForUser(currentUser.id, persistedCoverUri)
+              : Promise.resolve(),
+          ]).catch(() => {
+            // Keep UX responsive when local persistence fails.
+          });
+        }
+      }
+
+      if (userAvatar) {
+        const persistedAvatarUri = await persistProfileMediaUri(userAvatar, 'avatar');
+        if (!canceled && persistedAvatarUri !== userAvatar) {
+          updateUserAvatar(persistedAvatarUri);
+          Promise.all([
+            setStoredUserAvatar(persistedAvatarUri),
+            setStoredUserAvatarForUser(MY_USER.id, persistedAvatarUri),
+            currentUser?.id
+              ? setStoredUserAvatarForUser(currentUser.id, persistedAvatarUri)
+              : Promise.resolve(),
+          ]).catch(() => {
+            // Keep UX responsive when local persistence fails.
+          });
+        }
+      }
+    };
+
+    migrateStoredProfileMediaUris().catch(() => {
+      // Silent fallback: upload flow still works even when migration fails.
+    });
+
+    return () => {
+      canceled = true;
+    };
+  }, [currentUser?.id, updateUserAvatar, updateUserCover, userAvatar, userCover]);
 
   const pickCover = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -92,7 +146,15 @@ export default function MyProfileScreen() {
       });
 
       if (!result.canceled && result.assets?.[0]?.uri) {
-        updateUserCover(result.assets[0].uri);
+        const nextCoverUri = await persistProfileMediaUri(result.assets[0].uri, 'cover');
+        updateUserCover(nextCoverUri);
+        Promise.all([
+          setStoredUserCover(nextCoverUri),
+          setStoredUserCoverForUser(MY_USER.id, nextCoverUri),
+          currentUser?.id ? setStoredUserCoverForUser(currentUser.id, nextCoverUri) : Promise.resolve(),
+        ]).catch(() => {
+          // Keep UX responsive when local persistence fails.
+        });
         show('Cover updated', 'success');
       }
     } catch {
@@ -116,7 +178,15 @@ export default function MyProfileScreen() {
       });
 
       if (!result.canceled && result.assets?.[0]?.uri) {
-        updateUserAvatar(result.assets[0].uri);
+        const nextAvatarUri = await persistProfileMediaUri(result.assets[0].uri, 'avatar');
+        updateUserAvatar(nextAvatarUri);
+        Promise.all([
+          setStoredUserAvatar(nextAvatarUri),
+          setStoredUserAvatarForUser(MY_USER.id, nextAvatarUri),
+          currentUser?.id ? setStoredUserAvatarForUser(currentUser.id, nextAvatarUri) : Promise.resolve(),
+        ]).catch(() => {
+          // Keep UX responsive when local persistence fails.
+        });
         show('Avatar updated', 'success');
       }
     } catch {
@@ -160,7 +230,7 @@ export default function MyProfileScreen() {
     [syndicateHoldings]
   );
 
-  // ── Parallax scroll for cover ──
+  // â”€â”€ Parallax scroll for cover â”€â”€
   const scrollY = useSharedValue(0);
   const scrollHandler = useAnimatedScrollHandler({
     onScroll: (e) => {
@@ -264,7 +334,7 @@ export default function MyProfileScreen() {
         onScroll={scrollHandler}
         scrollEventThrottle={16}
       >
-        {/* ── Profile Hero ── */}
+        {/* â”€â”€ Profile Hero â”€â”€ */}
         <View style={styles.heroSection}>
           <View style={styles.heroTop}>
             <AnimatedPressable style={styles.avatarWrap} onPress={pickAvatar} activeOpacity={0.85}>
@@ -286,7 +356,7 @@ export default function MyProfileScreen() {
           <Text style={styles.heroName} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.72}>{MY_USER.username.toUpperCase()}</Text>
           <Text style={styles.heroHandle}>@{MY_USER.username}</Text>
           <Text style={styles.heroMeta}>
-            {MY_USER.location} · {MY_USER.reviewCount} reviews · last seen {MY_USER.lastSeen.toLowerCase()}
+            {MY_USER.location} Â· {MY_USER.reviewCount} reviews Â· last seen {MY_USER.lastSeen.toLowerCase()}
           </Text>
 
           <View style={styles.profileActionRow}>
@@ -315,12 +385,6 @@ export default function MyProfileScreen() {
             </AnimatedPressable>
           </View>
 
-          {/* Snapshot stays in the top hero band (replacing removed highlights row). */}
-          <View style={styles.statsHeaderRow}>
-            <Text style={styles.statsTitle}>Snapshot</Text>
-            <Text style={styles.statsHint}>live profile stats</Text>
-          </View>
-
           <Reanimated.View entering={FadeInDown.delay(200).duration(400)} style={styles.statsRow}>
             <AnimatedPressable
               style={styles.statItem}
@@ -342,17 +406,12 @@ export default function MyProfileScreen() {
             </View>
             <View style={styles.statDivider} />
             <View style={styles.statItem}>
-              <Text style={styles.statNumber}>{MY_USER.rating}★</Text>
+              <Text style={styles.statNumber}>{MY_USER.rating}â˜…</Text>
               <Text style={styles.statLabel}>RATING</Text>
             </View>
           </Reanimated.View>
 
           <View style={styles.quickAccessCard}>
-            <View style={styles.quickAccessHeaderRow}>
-              <Text style={styles.quickAccessTitle}>Shortcuts</Text>
-              <Text style={styles.quickAccessHint}>everything in one place</Text>
-            </View>
-
             <View style={styles.quickGrid}>
               {quickAccess.map((item, index) => (
                 <AnimatedPressable
@@ -408,7 +467,7 @@ export default function MyProfileScreen() {
           </View>
         </View>
 
-        {/* ── Syndicate Portfolio Summary ── */}
+        {/* â”€â”€ Syndicate Portfolio Summary â”€â”€ */}
         <View style={styles.portfolioSummaryCard}>
           <View style={styles.portfolioSummaryTop}>
             <Text style={styles.portfolioSummaryLabel}>MY SYNDICATE HOLDINGS</Text>
@@ -418,7 +477,7 @@ export default function MyProfileScreen() {
               onPress={() => navigation.navigate('Portfolio')}
             >
               <Text style={styles.portfolioSummaryLinkText}>Open</Text>
-              <Ionicons name="arrow-forward" size={14} color={TEAL} />
+              <Ionicons name="arrow-forward" size={14} color={ACCENT} />
             </AnimatedPressable>
           </View>
 
@@ -451,7 +510,7 @@ export default function MyProfileScreen() {
           )}
         </View>
 
-        {/* ── My Wardrobe Preview (horizontal scroll — original Thryftverse layout) ── */}
+        {/* â”€â”€ My Wardrobe Preview (horizontal scroll â€” original Thryftverse layout) â”€â”€ */}
         <View style={styles.wardrobeSection}>
           <View style={styles.wardrobeHeader}>
             <View>
@@ -463,7 +522,7 @@ export default function MyProfileScreen() {
               onPress={() => navigation.navigate('UserProfile', { userId: MY_USER.id, isMe: true })}
             >
               <Text style={styles.viewAllText}>View All</Text>
-              <Ionicons name="arrow-forward" size={14} color={TEAL} />
+              <Ionicons name="arrow-forward" size={14} color={ACCENT} />
             </AnimatedPressable>
           </View>
 
@@ -493,9 +552,8 @@ export default function MyProfileScreen() {
           </ScrollView>
         </View>
 
-        {/* ── Badges Section ── */}
+        {/* â”€â”€ Badges Section â”€â”€ */}
         <View style={styles.badgesCard}>
-          <Text style={styles.badgesSectionLabel}>ACHIEVEMENTS</Text>
           <Text style={styles.badgesTitle}>Badges</Text>
           <View style={styles.badgeRow}>
             {[
@@ -505,7 +563,7 @@ export default function MyProfileScreen() {
             ].map((b) => (
               <View key={b.label} style={styles.badgeItem}>
                 <View style={[styles.badgeCircle, b.earned && styles.badgeCircleEarned]}>
-                  <Ionicons name={b.icon as any} size={22} color={b.earned ? TEAL : Colors.textMuted} />
+                  <Ionicons name={b.icon as any} size={22} color={b.earned ? ACCENT : Colors.textMuted} />
                 </View>
                 <Text style={[styles.badgeLabel, b.earned && styles.badgeLabelEarned]}>{b.label}</Text>
               </View>
@@ -522,7 +580,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   scrollContent: { paddingBottom: 120 },
 
-  // Cover (new — parallax banner)
+  // Cover (new â€” parallax banner)
   coverWrap: {
     position: 'absolute',
     top: 0,
@@ -584,7 +642,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
 
-  // Hero — enhanced from original
+  // Hero â€” enhanced from original
   heroSection: {
     alignItems: 'center',
     paddingHorizontal: 20,
@@ -800,7 +858,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
 
-  // Stats — now with animated counters
+  // Stats â€” now with animated counters
   statsRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1126,3 +1184,5 @@ const styles = StyleSheet.create({
     color: BRAND,
   },
 });
+
+

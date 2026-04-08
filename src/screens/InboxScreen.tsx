@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+﻿import React, { useState, useCallback, useMemo } from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -31,9 +31,9 @@ import { useBackendData } from '../context/BackendDataContext';
 import { fetchConversationsFromApi } from '../services/chatApi';
 
 type NavT = StackNavigationProp<RootStackParamList>;
-const TEAL = '#e8dcc8';
+const ACCENT = Colors.accent;
 const IS_LIGHT = ActiveTheme === 'light';
-const BRAND = IS_LIGHT ? '#2f251b' : TEAL;
+const BRAND = IS_LIGHT ? '#2f251b' : ACCENT;
 const PANEL_BG = Colors.card;
 const PANEL_ALT = Colors.cardAlt;
 
@@ -314,7 +314,6 @@ export default function InboxScreen() {
       <View style={styles.header}>
         <View style={styles.headerRow}>
           <View>
-            <Text style={styles.headerOverline}>Messaging Command</Text>
             <Text style={styles.hugeTitle}>Inbox</Text>
           </View>
           <View style={styles.headerActions}>
@@ -454,10 +453,10 @@ export default function InboxScreen() {
           ListEmptyComponent={
             <EmptyState
               icon="chatbubbles-outline"
-              title={searchQuery || segment !== 'all' ? 'No matching conversations' : 'All quiet here'}
+              title={searchQuery || segment !== 'all' ? 'No matching conversations' : 'No conversations yet'}
               subtitle={searchQuery || segment !== 'all'
-                ? 'Try another keyword or filter to locate your messages'
-                : 'Start a conversation by messaging a seller'}
+                ? 'Try another keyword or filter.'
+                : 'Message a seller to start a chat.'}
               ctaLabel="Browse listings"
               onCtaPress={() => navigation.navigate('MainTabs')}
             />
@@ -472,7 +471,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
 
   header: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 18,
     paddingTop: 10,
     paddingBottom: 18,
   },
@@ -513,12 +512,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    borderWidth: 1,
-    borderColor: Colors.border,
     borderRadius: 18,
     paddingHorizontal: 10,
     paddingVertical: 8,
-    backgroundColor: Colors.card,
+    backgroundColor: Colors.cardAlt,
   },
   addGroupBtnText: {
     color: Colors.textPrimary,
@@ -529,18 +526,16 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    borderWidth: 1,
-    borderColor: Colors.border,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: Colors.card,
+    backgroundColor: Colors.cardAlt,
   },
   searchWrap: {
     height: 46,
     borderRadius: 14,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    backgroundColor: Colors.card,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.borderLight,
+    backgroundColor: Colors.cardAlt,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
@@ -570,9 +565,7 @@ const styles = StyleSheet.create({
   kpiCard: {
     width: 132,
     borderRadius: 14,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    backgroundColor: Colors.card,
+    backgroundColor: Colors.cardAlt,
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
@@ -580,8 +573,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: Colors.textMuted,
     fontFamily: 'Inter_600SemiBold',
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
+    letterSpacing: 0.2,
     marginBottom: 6,
   },
   kpiValue: {
@@ -598,9 +590,7 @@ const styles = StyleSheet.create({
   segmentChip: {
     height: 34,
     borderRadius: 17,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    backgroundColor: Colors.card,
+    backgroundColor: Colors.cardAlt,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 14,
@@ -626,22 +616,19 @@ const styles = StyleSheet.create({
   sortChip: {
     height: 30,
     borderRadius: 15,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    backgroundColor: Colors.cardAlt,
+    backgroundColor: Colors.card,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 12,
   },
   sortChipActive: {
-    borderColor: Colors.textPrimary,
+    backgroundColor: Colors.cardAlt,
   },
   sortChipText: {
     color: Colors.textSecondary,
     fontSize: 11,
     fontFamily: 'Inter_600SemiBold',
     letterSpacing: 0.2,
-    textTransform: 'uppercase',
   },
   sortChipTextActive: {
     color: Colors.textPrimary,
@@ -654,9 +641,7 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 36,
     borderRadius: 18,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    backgroundColor: Colors.card,
+    backgroundColor: Colors.cardAlt,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
@@ -666,8 +651,7 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
     fontSize: 11,
     fontFamily: 'Inter_600SemiBold',
-    letterSpacing: 0.2,
-    textTransform: 'uppercase',
+    letterSpacing: 0.1,
   },
   listContent: {
     paddingHorizontal: 20,
@@ -694,8 +678,6 @@ const styles = StyleSheet.create({
     width: 52,
     height: 52,
     borderRadius: 26,
-    borderWidth: 1,
-    borderColor: Colors.border,
     backgroundColor: Colors.cardAlt,
     alignItems: 'center',
     justifyContent: 'center',
@@ -720,19 +702,16 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   channelTypeBadge: {
-    borderWidth: 1,
-    borderColor: Colors.border,
     borderRadius: 10,
     paddingHorizontal: 8,
     paddingVertical: 3,
-    backgroundColor: PANEL_ALT,
+    backgroundColor: Colors.surface,
   },
   channelTypeBadgeText: {
     color: Colors.textMuted,
     fontSize: 10,
     fontFamily: 'Inter_600SemiBold',
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
+    letterSpacing: 0.2,
   },
   priorityBadge: {
     borderRadius: 10,
@@ -758,15 +737,14 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     fontSize: 11,
     fontFamily: 'Inter_500Medium',
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
+    letterSpacing: 0.2,
   },
   snippet: { color: Colors.textSecondary, fontSize: 14, fontFamily: 'Inter_400Regular', lineHeight: 20, marginBottom: 10 },
 
   itemPreview: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: PANEL_ALT,
+    backgroundColor: Colors.surface,
     borderRadius: 12,
     padding: 8,
     gap: 10,
@@ -779,7 +757,7 @@ const styles = StyleSheet.create({
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: TEAL,
+    backgroundColor: ACCENT,
     marginTop: 6,
   },
 
@@ -794,7 +772,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   swipeArchive: {
-    backgroundColor: TEAL,
+    backgroundColor: ACCENT,
     justifyContent: 'center',
     alignItems: 'center',
     width: 90,
@@ -808,3 +786,4 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_600SemiBold',
   },
 });
+

@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -77,7 +77,7 @@ export default function SyndicateOnboardingScreen() {
           style={styles.heroSlide}
         >
           <View style={styles.iconRing}>
-            <Ionicons name={slide.icon} size={64} color="#e8dcc8" />
+            <Ionicons name={slide.icon} size={64} color="#d7b98f" />
           </View>
           <Text style={styles.title}>{slide.title}</Text>
           <Text style={styles.body}>{slide.body}</Text>
@@ -180,7 +180,7 @@ const styles = StyleSheet.create({
   },
   dotActive: {
     width: 24,
-    backgroundColor: '#e8dcc8',
+    backgroundColor: '#d7b98f',
   },
   primaryBtn: {
     borderRadius: 14,
@@ -197,3 +197,4 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_700Bold',
   },
 });
+

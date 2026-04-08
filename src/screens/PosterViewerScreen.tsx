@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -164,7 +164,7 @@ export default function PosterViewerScreen() {
               contentFit="cover"
             />
             <Text style={styles.authorName}>@{activePoster.uploader?.username ?? 'seller'}</Text>
-            <Text style={styles.postedTime}>• {postedTimeLabel}</Text>
+            <Text style={styles.postedTime}>â€¢ {postedTimeLabel}</Text>
           </View>
 
           <AnimatedPressable style={styles.closeBtn} onPress={() => navigation.goBack()} activeOpacity={0.8}>
@@ -368,7 +368,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   sharedFromText: {
-    color: '#e8dcc8',
+    color: '#d7b98f',
     fontSize: 11,
     fontFamily: 'Inter_600SemiBold',
   },
@@ -431,3 +431,4 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 });
+

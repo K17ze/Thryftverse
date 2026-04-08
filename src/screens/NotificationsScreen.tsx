@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import {
   View,
   Text,
@@ -25,7 +25,7 @@ const IS_LIGHT = ActiveTheme === 'light';
 const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111111';
 const PANEL_ALT = IS_LIGHT ? '#f7f4ef' : '#161616';
 const PANEL_BORDER = IS_LIGHT ? '#d8d1c6' : '#2a2a2a';
-const BRAND = IS_LIGHT ? '#2f251b' : '#e8dcc8';
+const BRAND = IS_LIGHT ? '#2f251b' : '#d7b98f';
 
 // Enrich notifications with read state and more types for demo
 const ENRICHED_NOTIFICATIONS = [
@@ -41,7 +41,7 @@ const ENRICHED_NOTIFICATIONS = [
   {
     id: 'n5',
     itemImage: 'https://picsum.photos/seed/noti5/80/80',
-    text: 'samrivera left you a 5★ review: "Great quality item, well packaged."',
+    text: 'samrivera left you a 5â˜… review: "Great quality item, well packaged."',
     time: 'Yesterday',
     type: 'review' as const,
     read: true,
@@ -57,7 +57,7 @@ const ENRICHED_NOTIFICATIONS = [
   {
     id: 'n7',
     itemImage: 'https://picsum.photos/seed/noti7/80/80',
-    text: 'Price drop alert: "Stüssy Logo Tee" is now 20% off.',
+    text: 'Price drop alert: "StÃ¼ssy Logo Tee" is now 20% off.',
     time: '3 days ago',
     type: 'price' as const,
     read: true,
@@ -287,3 +287,4 @@ const styles = StyleSheet.create({
   },
   notifTime: { fontSize: 12, color: Colors.textMuted, fontFamily: 'Inter_400Regular' },
 });
+

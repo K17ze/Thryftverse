@@ -20,12 +20,10 @@ import { AnimatedCounter } from '../components/AnimatedCounter';
 
 type TradeHubTab = 'AUCTIONS' | 'SYNDICATE';
 type NavT = StackNavigationProp<RootStackParamList>;
-const IS_LIGHT = ActiveTheme === 'light';
-const BRAND = IS_LIGHT ? '#2f251b' : '#e8dcc8';
-const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111111';
-const PANEL_TINT_BG = IS_LIGHT ? '#ece4d8' : '#1b1712';
-const PANEL_BORDER = IS_LIGHT ? '#d8d1c6' : '#272727';
-const PANEL_BORDER_STRONG = IS_LIGHT ? '#d0c3af' : '#3a342b';
+const BRAND = Colors.accent;
+const PANEL_TINT_BG = Colors.cardAlt;
+const PANEL_BORDER = Colors.border;
+const PANEL_BORDER_STRONG = Colors.borderLight;
 
 export default function TradeHubScreen() {
   const navigation = useNavigation<NavT>();
@@ -67,7 +65,7 @@ export default function TradeHubScreen() {
 
   const latestActivityText = React.useMemo(() => {
     if (!latestActivity) {
-      return 'No activity yet. Place a bid or buy units to start the tape.';
+      return 'No activity yet.';
     }
     if (latestActivity.channel === 'auction' && latestActivity.action === 'bid') {
       return `Bid ${formatFromFiat(latestActivity.amountGBP, 'GBP', { displayMode: 'fiat' })} on ${latestActivity.referenceId}`;
@@ -119,7 +117,6 @@ export default function TradeHubScreen() {
             <Text style={styles.headerTitle}>Trade Hub</Text>
             <Ionicons name="sparkles-outline" size={18} color={BRAND} />
           </View>
-          <Text style={styles.headerSubtitle}>Auctions + syndicated fractions in one tape</Text>
         </View>
 
         <AnimatedPressable
@@ -135,7 +132,7 @@ export default function TradeHubScreen() {
       <View style={styles.snapshotCard}>
         <View style={styles.snapshotMetric}>
           <AnimatedCounter value={marketSnapshot.liveAuctions} style={styles.snapshotValue} duration={700} />
-          <Text style={styles.snapshotLabel}>Live auctions</Text>
+          <Text style={styles.snapshotLabel}>Auctions</Text>
         </View>
 
         <View style={styles.snapshotDivider} />
@@ -173,19 +170,6 @@ export default function TradeHubScreen() {
         ))}
       </View>
 
-      <View style={styles.modeCard}>
-        <Ionicons
-          name={activeTab === 'AUCTIONS' ? 'hammer-outline' : 'pie-chart-outline'}
-          size={14}
-          color={BRAND}
-        />
-        <Text style={styles.modeCardText}>
-          {activeTab === 'AUCTIONS'
-            ? 'Auction mode: timed bids only, winner is highest valid bid at close.'
-            : 'Syndicate mode: fractional unit trading, settlements quoted in 1ze with local previews.'}
-        </Text>
-      </View>
-
       <AnimatedPressable
         style={styles.activityCard}
         activeOpacity={0.92}
@@ -194,7 +178,7 @@ export default function TradeHubScreen() {
         <View style={styles.activityTopRow}>
           <View style={styles.activityLabelRow}>
             <View style={styles.tapeDot} />
-            <Text style={styles.activityLabel}>MARKET TAPE</Text>
+            <Text style={styles.activityLabel}>Activity</Text>
           </View>
           <View style={styles.activityRightWrap}>
             <AnimatedCounter value={marketLedger.length} style={styles.activityCount} duration={600} suffix=" events" />
@@ -235,7 +219,7 @@ const styles = StyleSheet.create({
     width: 7,
     height: 7,
     borderRadius: 3.5,
-    backgroundColor: '#55cc88',
+    backgroundColor: Colors.success,
   },
   headerLabel: {
     color: BRAND,
@@ -265,9 +249,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 5,
     borderRadius: 16,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: PANEL_BORDER,
-    backgroundColor: PANEL_BG,
+    backgroundColor: PANEL_TINT_BG,
     paddingHorizontal: 10,
     paddingVertical: 8,
   },
@@ -281,9 +265,9 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginBottom: 12,
     borderRadius: 14,
-    borderWidth: 1,
-    borderColor: PANEL_BORDER_STRONG,
-    backgroundColor: PANEL_BG,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_TINT_BG,
     paddingHorizontal: 12,
     paddingVertical: 10,
     flexDirection: 'row',
@@ -319,17 +303,16 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
     fontSize: 10,
     fontFamily: Typography.family.medium,
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
+    letterSpacing: 0.2,
   },
 
   // Animated tab switcher
   tabSwitcher: {
     marginHorizontal: 16,
     marginBottom: 12,
-    backgroundColor: PANEL_BG,
+    backgroundColor: PANEL_TINT_BG,
     borderRadius: 26,
-    borderWidth: 1,
+    borderWidth: StyleSheet.hairlineWidth,
     borderColor: PANEL_BORDER,
     padding: 4,
     flexDirection: 'row',
@@ -339,7 +322,7 @@ const styles = StyleSheet.create({
   tabIndicator: {
     position: 'absolute',
     top: 4,
-    height: '100%',
+    bottom: 4,
     borderRadius: 22,
     backgroundColor: Colors.accentGold,
     zIndex: 0,
@@ -357,8 +340,8 @@ const styles = StyleSheet.create({
   tabText: {
     color: Colors.textSecondary,
     fontSize: 12,
-    fontFamily: Typography.family.bold,
-    letterSpacing: 0.5,
+    fontFamily: Typography.family.semibold,
+    letterSpacing: 0.2,
   },
   tabTextActive: {
     color: Colors.textInverse,
@@ -391,8 +374,8 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginBottom: 12,
     borderRadius: 12,
-    borderWidth: 1,
-    borderColor: PANEL_BORDER_STRONG,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: PANEL_BORDER,
     backgroundColor: PANEL_TINT_BG,
     paddingHorizontal: 12,
     paddingVertical: 10,
@@ -411,7 +394,7 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: '#e8dcc8',
+    backgroundColor: Colors.accent,
   },
   activityRightWrap: {
     flexDirection: 'row',
@@ -421,8 +404,8 @@ const styles = StyleSheet.create({
   activityLabel: {
     color: BRAND,
     fontSize: 11,
-    fontFamily: Typography.family.bold,
-    letterSpacing: 0.6,
+    fontFamily: Typography.family.semibold,
+    letterSpacing: 0.2,
   },
   activityCount: {
     color: Colors.textMuted,

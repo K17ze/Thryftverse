@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -31,7 +31,7 @@ const BORDER = Colors.border;
 const DIVIDER = Colors.border;
 const MUTED = Colors.textMuted;
 const TEXT = Colors.textPrimary;
-const BRAND = IS_LIGHT ? '#2f251b' : '#e8dcc8';
+const BRAND = IS_LIGHT ? '#2f251b' : '#d7b98f';
 
 export default function AddBankAccountScreen({ navigation }: Props) {
   const [accountName, setAccountName] = useState('');
@@ -154,7 +154,7 @@ export default function AddBankAccountScreen({ navigation }: Props) {
           <View style={styles.infoCard}>
             <Ionicons name="information-circle-outline" size={16} color={MUTED} />
             <Text style={styles.infoText}>
-              Withdrawals typically take 1–3 business days. You'll receive a confirmation email once initiated.
+              Withdrawals typically take 1â€“3 business days. You'll receive a confirmation email once initiated.
             </Text>
           </View>
         </ScrollView>
@@ -205,3 +205,4 @@ const styles = StyleSheet.create({
   saveBtn: { backgroundColor: Colors.accent, borderRadius: 30, paddingVertical: 16, alignItems: 'center' },
   saveBtnText: { fontSize: 16, fontWeight: '700', color: Colors.textInverse },
 });
+

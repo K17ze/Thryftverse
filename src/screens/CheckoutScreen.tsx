@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+﻿import React, { useEffect, useState } from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import { View,
@@ -33,7 +33,7 @@ import {
 
 type RouteT = RouteProp<RootStackParamList, 'Checkout'>;
 const IS_LIGHT = ActiveTheme === 'light';
-const BRAND = IS_LIGHT ? '#2f251b' : '#e8dcc8';
+const BRAND = IS_LIGHT ? '#2f251b' : '#d7b98f';
 const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111111';
 const PANEL_SOFT_BG = IS_LIGHT ? '#f7f4ef' : '#161616';
 const PANEL_BORDER = IS_LIGHT ? '#d8d1c6' : '#2a2a2a';
@@ -235,7 +235,7 @@ export default function CheckoutScreen() {
             <View style={styles.blockTextCol}>
               <Text style={styles.blockTitle}>{savedAddress ? savedAddress.street : 'Add delivery address'}</Text>
               <Text style={styles.blockSub}>
-                {savedAddress ? `${savedAddress.city} • ${savedAddress.postcode}` : 'Required for postage'}
+                {savedAddress ? `${savedAddress.city} â€¢ ${savedAddress.postcode}` : 'Required for postage'}
               </Text>
             </View>
           </View>
@@ -463,3 +463,4 @@ const styles = StyleSheet.create({
   payBtnDisabled: { opacity: 0.45 },
   payBtnText: { color: Colors.textInverse, fontSize: 16, fontFamily: 'Inter_700Bold' }
 });
+

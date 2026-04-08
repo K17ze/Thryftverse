@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import { 
@@ -30,11 +30,11 @@ import { buildCreateSyndicatePrefillFromSell } from '../utils/syndicatePrefill';
 
 const CONDITIONS = ['New with tags', 'Very good', 'Good', 'Satisfactory'];
 const SIZES = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', 'One size'];
-const BRANDS = ['Nike', 'Adidas', 'Zara', 'H&M', 'Ralph Lauren', 'Off-White', 'Stone Island', 'Stüssy', 'Other'];
+const BRANDS = ['Nike', 'Adidas', 'Zara', 'H&M', 'Ralph Lauren', 'Off-White', 'Stone Island', 'StÃ¼ssy', 'Other'];
 const CATEGORY_OPTIONS = ['Women', 'Men', 'Designer', 'Kids', 'Home', 'Electronics', 'Entertainment', 'Hobbies & collectables', 'Sports'];
 const OFFERING_WINDOWS_HOURS = [24, 48, 72];
 const IS_LIGHT = ActiveTheme === 'light';
-const BRAND = IS_LIGHT ? '#2f251b' : '#e8dcc8';
+const BRAND = IS_LIGHT ? '#2f251b' : '#d7b98f';
 const HEADER_BG = IS_LIGHT ? '#f3eee7' : '#0a0a0a';
 const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111111';
 const PANEL_SOFT_BG = IS_LIGHT ? '#f7f4ef' : '#171717';
@@ -303,7 +303,7 @@ export default function SellScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
-      {/* ── Scan Header / Upload Area ── */}
+      {/* â”€â”€ Scan Header / Upload Area â”€â”€ */}
       <View style={styles.scanHeader}>
         <View style={styles.headerTop}>
           <AnimatedPressable style={styles.iconBtn} onPress={() => navigation.goBack()} activeOpacity={0.8}>
@@ -352,7 +352,7 @@ export default function SellScreen() {
           
           <Text style={styles.sectionHeading}>Item Details</Text>
 
-          {/* ── Core Details (Floating Pills) ── */}
+          {/* â”€â”€ Core Details (Floating Pills) â”€â”€ */}
           <View style={styles.pillInputBox}>
             <Text style={styles.inputLabel}>Title</Text>
             <TextInput 
@@ -377,7 +377,7 @@ export default function SellScreen() {
             />
           </View>
 
-          {/* ── Pickers (Floating Cards) ── */}
+          {/* â”€â”€ Pickers (Floating Cards) â”€â”€ */}
           <View style={styles.cardGroup}>
             <AnimatedPressable 
               style={styles.pickerRow} 
@@ -442,7 +442,7 @@ export default function SellScreen() {
             </AnimatedPressable>
           </View>
 
-          {/* ── Price Input ── */}
+          {/* â”€â”€ Price Input â”€â”€ */}
           <Text style={[styles.sectionHeading, { marginTop: 24 }]}>Pricing</Text>
           
           <View style={styles.pricePillBox}>
@@ -532,7 +532,7 @@ export default function SellScreen() {
                 <View style={styles.authRow}>
                   <View>
                     <Text style={styles.authTitle}>Authentication photos</Text>
-                    <Text style={styles.authHint}>{authPhotos.length} attached · Required for issuance</Text>
+                    <Text style={styles.authHint}>{authPhotos.length} attached Â· Required for issuance</Text>
                   </View>
                   <View style={styles.authBtnRow}>
                     <AnimatedPressable
@@ -600,7 +600,7 @@ export default function SellScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* ── Huge Action Button ── */}
+      {/* â”€â”€ Huge Action Button â”€â”€ */}
       <View style={styles.stickyFooter}>
         {!!errorMsg && (
           <Reanimated.Text 
@@ -1013,3 +1013,4 @@ const styles = StyleSheet.create({
     color: Colors.textMuted,
   },
 });
+

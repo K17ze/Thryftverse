@@ -24,7 +24,7 @@ describe('getBackendSyncStatus', () => {
 
     expect(status).toEqual({
       tone: 'live',
-      label: 'Live feed',
+      label: 'Synced',
     });
   });
 

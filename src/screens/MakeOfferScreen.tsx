@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -33,7 +33,7 @@ const CARD_ALT = IS_LIGHT ? '#f3eee7' : '#1a1a1a';
 const BORDER = IS_LIGHT ? '#d8d1c6' : '#333333';
 const MUTED = Colors.textMuted;
 const TEXT = Colors.textPrimary;
-const BRAND = IS_LIGHT ? '#2f251b' : '#e8dcc8';
+const BRAND = IS_LIGHT ? '#2f251b' : '#d7b98f';
 const TIP_BG = IS_LIGHT ? '#ece4d8' : '#2f291f';
 const TIP_BORDER = IS_LIGHT ? '#d0c3af' : '#4f4638';
 const FOOTER_BG = IS_LIGHT ? 'rgba(236,234,230,0.94)' : 'rgba(10,10,10,0.9)';
@@ -162,7 +162,7 @@ export default function MakeOfferScreen({ navigation, route }: Props) {
           onPress={handleSendOffer}
           activeOpacity={0.9}
         >
-          <Text style={styles.sendBtnText}>Send offer · {formatFromFiat(total, 'GBP')}</Text>
+          <Text style={styles.sendBtnText}>Send offer Â· {formatFromFiat(total, 'GBP')}</Text>
         </AnimatedPressable>
       </View>
     </SafeAreaView>
@@ -311,3 +311,4 @@ const styles = StyleSheet.create({
     letterSpacing: -0.5,
   },
 });
+

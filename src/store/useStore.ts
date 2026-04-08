@@ -2,13 +2,18 @@ import { create } from 'zustand';
 import type { Poster } from '../data/posters';
 import type { AuctionMarketItem, AuctionViewModel, SyndicateAsset } from '../data/tradeHub';
 import type { ChatBot, Conversation, Message as ConversationMessage } from '../data/mockData';
-import { MOCK_CHAT_BOTS, MOCK_CONVERSATIONS } from '../data/mockData';
+import { MOCK_CHAT_BOTS, MOCK_CONVERSATIONS, MY_USER } from '../data/mockData';
 import { ENABLE_RUNTIME_MOCKS } from '../constants/runtimeFlags';
 
 interface User {
   id: string;
   username: string;
   avatar: string;
+}
+
+interface ProfileMediaOverride {
+  avatar: string | null;
+  cover: string | null;
 }
 
 interface DraftListing {
@@ -114,6 +119,30 @@ const makeLedgerEntry = (
   timestamp: new Date().toISOString(),
 });
 
+async function persistLocalAuthSnapshot(
+  currentUser: User | null,
+  twoFactorEnabled: boolean
+) {
+  try {
+    const {
+      clearStoredAuthSnapshot,
+      setStoredAuthSnapshot,
+    } = await import('../preferences/authSnapshot');
+
+    if (!currentUser) {
+      await clearStoredAuthSnapshot();
+      return;
+    }
+
+    await setStoredAuthSnapshot({
+      user: currentUser,
+      twoFactorEnabled,
+    });
+  } catch {
+    // Best-effort persistence should not block local state updates.
+  }
+}
+
 interface StoreState {
   // Auth
   currentUser: User | null;
@@ -189,6 +218,9 @@ interface StoreState {
   // Profile Uploads
   userAvatar: string | null;
   userCover: string | null;
+  profileMediaOverrides: Record<string, ProfileMediaOverride>;
+  hydrateProfileMediaOverrides: (overrides: Record<string, ProfileMediaOverride>) => void;
+  setProfileMediaOverride: (userId: string, updates: Partial<ProfileMediaOverride>) => void;
   updateUserAvatar: (uri: string) => void;
   updateUserCover: (uri: string) => void;
 }
@@ -196,8 +228,14 @@ interface StoreState {
 export const useStore = create<StoreState>((set, get) => ({
   currentUser: null, // Note: For a real app, load this from secure storage initially
   isAuthenticated: false,
-  login: (user) => set({ currentUser: user, isAuthenticated: true }),
-  logout: () => set({ currentUser: null, isAuthenticated: false }),
+  login: (user) => {
+    set({ currentUser: user, isAuthenticated: true });
+    persistLocalAuthSnapshot(user, get().twoFactorEnabled);
+  },
+  logout: () => {
+    set({ currentUser: null, isAuthenticated: false, twoFactorEnabled: false });
+    persistLocalAuthSnapshot(null, false);
+  },
 
   wishlist: [],
   toggleWishlist: (id) =>
@@ -633,7 +671,10 @@ export const useStore = create<StoreState>((set, get) => ({
   clearSavedPaymentMethod: () => set({ savedPaymentMethod: null }),
 
   twoFactorEnabled: false,
-  setTwoFactorEnabled: (enabled) => set({ twoFactorEnabled: enabled }),
+  setTwoFactorEnabled: (enabled) => {
+    set({ twoFactorEnabled: enabled });
+    persistLocalAuthSnapshot(get().currentUser, enabled);
+  },
 
   notificationCount: ENABLE_RUNTIME_MOCKS ? 3 : 0,
   setNotificationCount: (count) => set({ notificationCount: count }),
@@ -839,6 +880,73 @@ export const useStore = create<StoreState>((set, get) => ({
 
   userAvatar: null,
   userCover: null,
-  updateUserAvatar: (uri) => set({ userAvatar: uri }),
-  updateUserCover: (uri) => set({ userCover: uri }),
+  profileMediaOverrides: {},
+  hydrateProfileMediaOverrides: (overrides) =>
+    set({
+      profileMediaOverrides: overrides,
+    }),
+  setProfileMediaOverride: (userId, updates) =>
+    set((state) => {
+      const normalizedUserId = userId.trim();
+      if (!normalizedUserId) {
+        return state;
+      }
+
+      const existing = state.profileMediaOverrides[normalizedUserId] ?? {
+        avatar: null,
+        cover: null,
+      };
+
+      return {
+        profileMediaOverrides: {
+          ...state.profileMediaOverrides,
+          [normalizedUserId]: {
+            ...existing,
+            ...updates,
+          },
+        },
+      };
+    }),
+  updateUserAvatar: (uri) =>
+    set((state) => {
+      const targetIds = new Set<string>([MY_USER.id]);
+      if (state.currentUser?.id) {
+        targetIds.add(state.currentUser.id);
+      }
+
+      const nextOverrides = { ...state.profileMediaOverrides };
+      targetIds.forEach((targetId) => {
+        const existing = nextOverrides[targetId] ?? { avatar: null, cover: null };
+        nextOverrides[targetId] = {
+          ...existing,
+          avatar: uri,
+        };
+      });
+
+      return {
+        userAvatar: uri,
+        profileMediaOverrides: nextOverrides,
+      };
+    }),
+  updateUserCover: (uri) =>
+    set((state) => {
+      const targetIds = new Set<string>([MY_USER.id]);
+      if (state.currentUser?.id) {
+        targetIds.add(state.currentUser.id);
+      }
+
+      const nextOverrides = { ...state.profileMediaOverrides };
+      targetIds.forEach((targetId) => {
+        const existing = nextOverrides[targetId] ?? { avatar: null, cover: null };
+        nextOverrides[targetId] = {
+          ...existing,
+          cover: uri,
+        };
+      });
+
+      return {
+        userCover: uri,
+        profileMediaOverrides: nextOverrides,
+      };
+    }),
 }));

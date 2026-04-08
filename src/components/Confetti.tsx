@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+﻿import React, { useEffect } from 'react';
 import { View, Dimensions } from 'react-native';
 import Reanimated, {
   useSharedValue,
@@ -12,7 +12,7 @@ import Reanimated, {
 
 const { width, height } = Dimensions.get('window');
 
-const COLORS = ['#e8dcc8', '#FF6B6B', '#F7D794', '#ffffff'];
+const COLORS = ['#d7b98f', '#FF6B6B', '#F7D794', '#ffffff'];
 
 interface ParticleProps {
   x: number;
@@ -111,3 +111,4 @@ export function Confetti({ count = 40 }: { count?: number }) {
     </View>
   );
 }
+

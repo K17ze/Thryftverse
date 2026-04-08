@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+﻿import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -34,7 +34,7 @@ import { BottomSheetPicker } from '../components/BottomSheetPicker';
 type Props = StackScreenProps<RootStackParamList, 'Chat'>;
 
 const IS_LIGHT = ActiveTheme === 'light';
-const TEAL = IS_LIGHT ? '#2f251b' : '#e8dcc8';
+const ACCENT = IS_LIGHT ? '#2f251b' : '#d7b98f';
 const BG = Colors.background;
 const CARD = IS_LIGHT ? '#ffffff' : '#111111';
 const CARD_ALT = IS_LIGHT ? '#f3eee7' : '#1a1a1a';
@@ -399,7 +399,7 @@ export default function ChatScreen({ navigation, route }: Props) {
           <Text style={styles.statusTitle}>{lines[0]}</Text>
           <Text style={styles.statusBody}>{lines.slice(1).join('\n')}</Text>
           <AnimatedPressable onPress={() => navigation.navigate('OrderDetail', { orderId: CHAT_ORDER_ID })}>
-            <Text style={styles.tealLink}>Tracking information</Text>
+            <Text style={styles.accentLink}>Tracking information</Text>
           </AnimatedPressable>
         </Reanimated.View>
       );
@@ -877,7 +877,7 @@ const styles = StyleSheet.create({
   itemInfo: { flex: 1 },
   itemTitle: { fontSize: 16, fontFamily: 'Inter_600SemiBold', color: TEXT, marginBottom: 4 },
   itemPrice: { fontSize: 15, fontFamily: 'Inter_400Regular', color: MUTED, marginBottom: 2 },
-  itemProtection: { fontSize: 12, fontFamily: 'Inter_500Medium', color: TEAL },
+  itemProtection: { fontSize: 12, fontFamily: 'Inter_500Medium', color: ACCENT },
   
   sellerBubble: {
     flexDirection: 'row',
@@ -1116,7 +1116,7 @@ const styles = StyleSheet.create({
   },
   statusTitle: { fontSize: 16, fontFamily: 'Inter_700Bold', color: TEXT, marginBottom: 8 },
   statusBody: { fontSize: 14, fontFamily: 'Inter_400Regular', color: MUTED, lineHeight: 22 },
-  tealLink: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: TEAL, marginTop: 12 },
+  accentLink: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: ACCENT, marginTop: 12 },
   
   msgRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
   msgRowRight: { flexDirection: 'row-reverse' },
@@ -1163,7 +1163,7 @@ const styles = StyleSheet.create({
   strikethrough: { textDecorationLine: 'line-through' },
   
   offerDeclined: { fontSize: 14, fontFamily: 'Inter_700Bold', color: '#FF6B6B', marginTop: 4 },
-  offerAccepted: { fontSize: 14, fontFamily: 'Inter_700Bold', color: TEAL, marginTop: 4 },
+  offerAccepted: { fontSize: 14, fontFamily: 'Inter_700Bold', color: ACCENT, marginTop: 4 },
   offerPending: { fontSize: 13, fontFamily: 'Inter_500Medium', color: MUTED, marginTop: 4 },
 
   offerActionRow: {
@@ -1246,3 +1246,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 });
+
+

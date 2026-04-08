@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import { View,
@@ -14,7 +14,7 @@ import { useNavigation } from '@react-navigation/native';
 import { BottomSheetPicker } from '../components/BottomSheetPicker';
 import { useToast } from '../context/ToastContext';
 
-const TEAL = '#e8dcc8';
+const ACCENT = '#d7b98f';
 const PANEL_BG = Colors.card;
 const PANEL_BORDER = Colors.border;
 const INFO_BG = ActiveTheme === 'light' ? '#e6efe8' : '#0d2020';
@@ -165,7 +165,7 @@ export default function PersonalisationScreen() {
         </View>
 
         <View style={styles.infoCard}>
-          <Ionicons name="information-circle-outline" size={20} color={TEAL} />
+          <Ionicons name="information-circle-outline" size={20} color={ACCENT} />
           <Text style={styles.infoText}>
             Your preferences are applied as filters across your feed and search. They never hide items permanently.
           </Text>
@@ -215,9 +215,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: PANEL_BORDER,
   },
-  genderPillActive: { backgroundColor: TEAL + '22', borderColor: TEAL },
+  genderPillActive: { backgroundColor: ACCENT + '22', borderColor: ACCENT },
   genderPillText: { fontSize: 14, fontFamily: 'Inter_500Medium', color: Colors.textMuted },
-  genderPillTextActive: { color: TEAL, fontFamily: 'Inter_600SemiBold' },
+  genderPillTextActive: { color: ACCENT, fontFamily: 'Inter_600SemiBold' },
   sectionLabel: {
     fontSize: 11, color: Colors.textMuted, letterSpacing: 1.2,
     textTransform: 'uppercase', marginBottom: 10, marginLeft: 4,
@@ -238,5 +238,7 @@ const styles = StyleSheet.create({
   },
   infoText: { flex: 1, fontSize: 13, color: Colors.textSecondary, lineHeight: 19 },
 });
+
+
 
 

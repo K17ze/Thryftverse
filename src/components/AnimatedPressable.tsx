@@ -13,6 +13,7 @@ import Reanimated, {
 } from 'react-native-reanimated';
 import { useHaptic } from '../hooks/useHaptic';
 import { useReducedMotion } from '../hooks/useReducedMotion';
+import { Motion } from '../constants/motion';
 
 type HapticFeedbackStyle = 'none' | 'light' | 'medium' | 'heavy' | 'selection';
 
@@ -82,14 +83,14 @@ export function AnimatedPressable({
           if (reducedMotionEnabled) {
             scale.value = withTiming(1, { duration: 0 });
           } else {
-            scale.value = withTiming(scaleValue, { duration: 85 });
+            scale.value = withTiming(scaleValue, { duration: Motion.timing.pressIn });
           }
         }
         if (typeof activeOpacity === 'number') {
           if (reducedMotionEnabled) {
             opacity.value = withTiming(1, { duration: 0 });
           } else {
-            opacity.value = withTiming(activeOpacity, { duration: 85 });
+            opacity.value = withTiming(activeOpacity, { duration: Motion.timing.pressIn });
           }
         }
         if (!disabled) {
@@ -104,14 +105,14 @@ export function AnimatedPressable({
           if (reducedMotionEnabled) {
             scale.value = withTiming(1, { duration: 0 });
           } else {
-            scale.value = withSpring(1, { damping: 18, stiffness: 420 });
+            scale.value = withSpring(1, Motion.spring.pressRelease);
           }
         }
         if (typeof activeOpacity === 'number') {
           if (reducedMotionEnabled) {
             opacity.value = withTiming(1, { duration: 0 });
           } else {
-            opacity.value = withTiming(1, { duration: 110 });
+            opacity.value = withTiming(1, { duration: Motion.timing.pressOut });
           }
         }
         if (onPressOut) {

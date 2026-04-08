@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -18,7 +18,7 @@ import { useFormattedPrice } from '../hooks/useFormattedPrice';
 type Props = StackScreenProps<RootStackParamList, 'BalanceHistory'>;
 
 const IS_LIGHT = ActiveTheme === 'light';
-const TEAL = IS_LIGHT ? '#2f251b' : '#e8dcc8';
+const ACCENT = IS_LIGHT ? '#2f251b' : '#d7b98f';
 const BG = Colors.background;
 const CARD = IS_LIGHT ? '#ffffff' : '#111111';
 const BORDER = IS_LIGHT ? '#d8d1c6' : '#1c1c1c';
@@ -71,7 +71,7 @@ const iconForType = (type: TxType) => {
 
 const colorForType = (type: TxType) => {
   switch (type) {
-    case 'sale': return TEAL;
+    case 'sale': return ACCENT;
     case 'withdrawal': return Colors.danger;
     case 'refund': return '#FFE66D';
     case 'purchase': return Colors.textSecondary;
@@ -109,7 +109,7 @@ export default function BalanceHistoryScreen({ navigation }: Props) {
                     </View>
                     <Text style={[
                       styles.txAmount,
-                      { color: tx.amount > 0 ? TEAL : Colors.danger }
+                      { color: tx.amount > 0 ? ACCENT : Colors.danger }
                     ]}>
                       {tx.amount > 0 ? '+' : ''}{formatFromFiat(Math.abs(tx.amount), 'GBP', { displayMode: 'fiat' })}
                     </Text>
@@ -157,3 +157,5 @@ const styles = StyleSheet.create({
   divider: { height: 1, backgroundColor: BORDER, marginHorizontal: 18 },
   footerNote: { fontSize: 12, color: MUTED, textAlign: 'center', marginTop: 8 },
 });
+
+

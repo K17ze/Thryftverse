@@ -408,6 +408,40 @@ export async function verifyEmailOtp(input: { challengeId: string; code: string 
   }
 }
 
+export async function restoreAuthSession() {
+  const session = await getAuthSession();
+  if (!session?.refreshToken) {
+    return null;
+  }
+
+  try {
+    const payload = await fetchJson<AuthSuccessResponse | AuthFailureResponse>('/auth/refresh', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        refreshToken: session.refreshToken,
+      }),
+    });
+
+    if (!isAuthSuccess(payload)) {
+      await clearAuthSession();
+      return null;
+    }
+
+    await persistAuthSession(payload);
+
+    return {
+      user: payload.user,
+      storeUser: toStoreUser(payload.user),
+    };
+  } catch (error) {
+    if (error instanceof ApiRequestError && error.status === 401) {
+      await clearAuthSession();
+    }
+    return null;
+  }
+}
+
 export async function logoutFromSession() {
   try {
     const session = await getAuthSession();

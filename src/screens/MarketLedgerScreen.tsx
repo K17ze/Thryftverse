@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -226,7 +226,7 @@ export default function MarketLedgerScreen() {
     return (
       <View style={styles.rowCard}>
         <View style={styles.rowIconWrap}>
-          <Ionicons name={iconName} size={16} color={isAuction ? '#e8dcc8' : '#a9c9ff'} />
+          <Ionicons name={iconName} size={16} color={isAuction ? '#d7b98f' : '#a9c9ff'} />
         </View>
 
         <View style={styles.rowBody}>
@@ -239,7 +239,7 @@ export default function MarketLedgerScreen() {
                   ? 'Units Sold'
                   : 'Units Purchased'}
           </Text>
-          <Text style={styles.rowMeta} numberOfLines={1}>{item.referenceId} · {relativeTime(item.timestamp)}</Text>
+          <Text style={styles.rowMeta} numberOfLines={1}>{item.referenceId} Â· {relativeTime(item.timestamp)}</Text>
           {item.note ? <Text style={styles.rowNote} numberOfLines={1}>{item.note}</Text> : null}
         </View>
 
@@ -335,8 +335,8 @@ export default function MarketLedgerScreen() {
             onRefresh={() => {
               void refreshRemoteLedger();
             }}
-            tintColor="#e8dcc8"
-            colors={['#e8dcc8']}
+            tintColor="#d7b98f"
+            colors={['#d7b98f']}
             progressBackgroundColor="#161616"
           />
         }
@@ -353,7 +353,7 @@ export default function MarketLedgerScreen() {
               <Ionicons name="pulse-outline" size={42} color={Colors.textMuted} />
             </View>
             <Text style={styles.emptyTitle}>No ledger events yet</Text>
-            <Text style={styles.emptySubtitle}>Place bids or buy units to populate your market tape history.</Text>
+            <Text style={styles.emptySubtitle}>No activity yet.</Text>
           </View>
         }
       />
@@ -383,7 +383,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#111111',
   },
   headerLabel: {
-    color: '#e8dcc8',
+    color: '#d7b98f',
     fontSize: 10,
     fontFamily: 'Inter_700Bold',
     letterSpacing: 1,
@@ -420,7 +420,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   metricsTitle: {
-    color: '#e8dcc8',
+    color: '#d7b98f',
     fontSize: 11,
     fontFamily: 'Inter_700Bold',
     letterSpacing: 0.6,
@@ -471,7 +471,7 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
   },
   filterChipActive: {
-    borderColor: '#e8dcc8',
+    borderColor: '#d7b98f',
     backgroundColor: '#15201f',
   },
   filterChipText: {
@@ -480,7 +480,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_700Bold',
   },
   filterChipTextActive: {
-    color: '#e8dcc8',
+    color: '#d7b98f',
   },
   listContent: {
     paddingHorizontal: 16,
@@ -540,7 +540,7 @@ const styles = StyleSheet.create({
     color: '#ff9797',
   },
   rowAmountPositive: {
-    color: '#e8dcc8',
+    color: '#d7b98f',
   },
   rowUnits: {
     marginTop: 2,
@@ -585,3 +585,4 @@ const styles = StyleSheet.create({
     lineHeight: 19,
   },
 });
+

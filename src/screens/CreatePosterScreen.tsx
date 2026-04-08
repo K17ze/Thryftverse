@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -31,7 +31,7 @@ type ListingSource = 'mine' | 'marketplace';
 type StoryPosition = 'top' | 'center' | 'bottom';
 
 const EXPIRY_OPTIONS = [6, 12, 24, 48];
-const STORY_COLORS = ['#ffffff', '#e8dcc8', '#ff8fab', '#8dd3ff'];
+const STORY_COLORS = ['#ffffff', '#d7b98f', '#ff8fab', '#8dd3ff'];
 const STORY_POSITIONS: StoryPosition[] = ['top', 'center', 'bottom'];
 
 export default function CreatePosterScreen() {
@@ -339,7 +339,7 @@ export default function CreatePosterScreen() {
 
           {isPickingImage ? (
             <View style={styles.pickingRow}>
-              <ActivityIndicator size="small" color="#e8dcc8" />
+              <ActivityIndicator size="small" color="#d7b98f" />
               <Text style={styles.pickingText}>Opening picker...</Text>
             </View>
           ) : null}
@@ -470,7 +470,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#151515',
   },
   headerLabel: {
-    color: '#e8dcc8',
+    color: '#d7b98f',
     fontSize: 10,
     letterSpacing: 1,
     fontFamily: 'Inter_600SemiBold',
@@ -638,7 +638,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   sourceChipActive: {
-    borderColor: '#e8dcc8',
+    borderColor: '#d7b98f',
     backgroundColor: '#2f291f',
   },
   sourceChipText: {
@@ -647,7 +647,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_700Bold',
   },
   sourceChipTextActive: {
-    color: '#e8dcc8',
+    color: '#d7b98f',
   },
   storyInput: {
     borderRadius: 12,
@@ -701,7 +701,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   storyPositionChipActive: {
-    borderColor: '#e8dcc8',
+    borderColor: '#d7b98f',
     backgroundColor: '#2f291f',
   },
   storyPositionText: {
@@ -711,7 +711,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.4,
   },
   storyPositionTextActive: {
-    color: '#e8dcc8',
+    color: '#d7b98f',
   },
   expiryRow: {
     flexDirection: 'row',
@@ -726,7 +726,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#121212',
   },
   expiryChipActive: {
-    borderColor: '#e8dcc8',
+    borderColor: '#d7b98f',
     backgroundColor: '#2f291f',
   },
   expiryChipText: {
@@ -735,7 +735,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_600SemiBold',
   },
   expiryChipTextActive: {
-    color: '#e8dcc8',
+    color: '#d7b98f',
   },
   sectionHeaderRow: {
     flexDirection: 'row',
@@ -800,7 +800,7 @@ const styles = StyleSheet.create({
     borderColor: '#272727',
   },
   listingCardSelected: {
-    borderColor: '#e8dcc8',
+    borderColor: '#d7b98f',
   },
   listingImage: {
     width: '100%',
@@ -833,8 +833,9 @@ const styles = StyleSheet.create({
     width: 20,
     height: 20,
     borderRadius: 10,
-    backgroundColor: '#e8dcc8',
+    backgroundColor: '#d7b98f',
     alignItems: 'center',
     justifyContent: 'center',
   },
 });
+

@@ -50,8 +50,8 @@ export default function ListingSuccessScreen({ navigation, route }: Props) {
         source,
         hasError: Boolean(lastError),
         labels: {
-          syncing: 'Syncing feed',
-          live: 'Live in feed',
+          syncing: 'Syncing',
+          live: 'Published',
           error: 'Queued locally',
         },
       }),
@@ -70,9 +70,9 @@ export default function ListingSuccessScreen({ navigation, route }: Props) {
           <View style={styles.iconCircle}>
             <Ionicons name="checkmark" size={64} color={Colors.accent} />
           </View>
-          <Text style={styles.heroBigText}>you're live.</Text>
-          <Text style={styles.heroSubText}>your item is in the feed now.</Text>
-          {listingPrice ? <Text style={styles.heroMicroCopy}>priced at {listingPrice}. let it cook.</Text> : null}
+          <Text style={styles.heroBigText}>Published</Text>
+          <Text style={styles.heroSubText}>Your item is now visible.</Text>
+          {listingPrice ? <Text style={styles.heroMicroCopy}>Price: {listingPrice}</Text> : null}
         </View>
 
         <View style={styles.syncCard}>
@@ -81,12 +81,12 @@ export default function ListingSuccessScreen({ navigation, route }: Props) {
           </View>
           <Text style={styles.syncHint}>
             {lastError
-              ? 'feed is lagging. your listing is safe and will sync when connection returns.'
-              : 'we are pushing it live everywhere now.'}
+              ? 'Sync is delayed. Your listing will publish when connection returns.'
+              : 'Publishing across devices.'}
           </Text>
           {lastError ? (
             <SyncRetryBanner
-              message="retry sync now to get this live faster."
+              message="Retry sync now."
               onRetry={() => void refreshListings()}
               isRetrying={isSyncing}
               telemetryContext="listing_success_publish_sync"

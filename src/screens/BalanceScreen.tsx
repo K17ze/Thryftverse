@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+﻿import React, { useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -37,7 +37,7 @@ const LOAD_IZE_FEE_RATE = 0.01;
 const IS_LIGHT = ActiveTheme === 'light';
 const TINT_CARD_BG = IS_LIGHT ? '#f1ede6' : '#1b1712';
 const TINT_CARD_BORDER = IS_LIGHT ? '#d9d3c9' : '#3a342b';
-const TINT_TEXT = IS_LIGHT ? '#2f251b' : '#e8dcc8';
+const TINT_TEXT = IS_LIGHT ? '#2f251b' : '#d7b98f';
 
 export default function BalanceScreen({ navigation }: Props) {
   const [activeTxFilter, setActiveTxFilter] = useState<TxFilter>('all');
@@ -259,11 +259,11 @@ export default function BalanceScreen({ navigation }: Props) {
           </View>
           <View style={styles.loadSummaryRow}>
             <Text style={styles.loadSummaryLabel}>Platform fee ({loadFeeRateLabel})</Text>
-            <Text style={styles.loadSummaryValue}>{formatIzeAmount(loadFeeIze)} · {formatFromFiat(loadFeeFiat, currencyCode, { displayMode: 'fiat' })}</Text>
+            <Text style={styles.loadSummaryValue}>{formatIzeAmount(loadFeeIze)} Â· {formatFromFiat(loadFeeFiat, currencyCode, { displayMode: 'fiat' })}</Text>
           </View>
           <View style={[styles.loadSummaryRow, styles.loadSummaryRowTotal]}>
             <Text style={styles.loadSummaryTotalLabel}>Net 1ze credited</Text>
-            <Text style={styles.loadSummaryTotalValue}>{formatIzeAmount(loadNetIze)} · {formatFromIze(loadNetIze, { displayMode: 'fiat' })}</Text>
+            <Text style={styles.loadSummaryTotalValue}>{formatIzeAmount(loadNetIze)} Â· {formatFromIze(loadNetIze, { displayMode: 'fiat' })}</Text>
           </View>
 
           <AnimatedPressable
@@ -322,7 +322,7 @@ export default function BalanceScreen({ navigation }: Props) {
                 <View>
                   <Text style={styles.txTitle}>{tx.title}</Text>
                   <Text style={styles.txDate}>
-                      {tx.date} • <Text style={tx.status === 'pending' ? styles.txStatusPending : styles.txStatusCompleted}>{tx.status}</Text>
+                      {tx.date} â€¢ <Text style={tx.status === 'pending' ? styles.txStatusPending : styles.txStatusCompleted}>{tx.status}</Text>
                   </Text>
                 </View>
               </View>
@@ -456,3 +456,4 @@ const styles = StyleSheet.create({
   txStatusCompleted: { color: Colors.textSecondary },
   txAmount: { fontSize: 15, fontFamily: 'Inter_700Bold', color: Colors.textPrimary },
 });
+

@@ -19,7 +19,7 @@ interface BackendSyncStatusInput {
 
 const DEFAULT_LABELS = {
   syncing: 'Refreshing',
-  live: 'Live feed',
+  live: 'Synced',
   error: 'Offline cache',
   fallback: 'Cached mode',
 };

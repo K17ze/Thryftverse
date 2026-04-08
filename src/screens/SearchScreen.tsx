@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -35,13 +35,13 @@ import { ENABLE_RUNTIME_MOCKS } from '../constants/runtimeFlags';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const TEAL = '#e8dcc8';
+const ACCENT = '#d7b98f';
 const IS_LIGHT = ActiveTheme === 'light';
 const PANEL_BG = Colors.card;
 const PANEL_ALT = IS_LIGHT ? '#ece4d8' : '#1f1f1f';
-const BRAND = IS_LIGHT ? '#2f251b' : TEAL;
+const BRAND = IS_LIGHT ? '#2f251b' : ACCENT;
 
-// ── Saved Look data ──────────────────────────────────────────
+// â”€â”€ Saved Look data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 interface SavedLook {
   id: string;
   title: string;
@@ -86,7 +86,7 @@ const SAVED_LOOKS_SEED: SavedLook[] = [
     title: 'Streetwear Daily',
     coverImage: 'https://images.unsplash.com/photo-1552374196-1ab2a1c593e8?w=600&q=80',
     items: [
-      { id: 'l4', label: 'Stüssy Logo Tee', x: 0.4, y: 0.3 },
+      { id: 'l4', label: 'StÃ¼ssy Logo Tee', x: 0.4, y: 0.3 },
       { id: 'l9', label: 'Represent Hoodie', x: 0.25, y: 0.15 },
       { id: 'l10', label: 'Chuck Taylor', x: 0.6, y: 0.8 },
     ],
@@ -99,7 +99,7 @@ const SAVED_LOOKS_SEED: SavedLook[] = [
 
 const SAVED_LOOKS: SavedLook[] = ENABLE_RUNTIME_MOCKS ? SAVED_LOOKS_SEED : [];
 
-// ── Look Card Component ──────────────────────────────────────
+// â”€â”€ Look Card Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function LookCard({
   look,
   onPress,
@@ -186,7 +186,7 @@ function LookCard({
   );
 }
 
-// ── Main Screen ──────────────────────────────────────────────
+// â”€â”€ Main Screen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export default function SearchScreen() {
   const [activeTab, setActiveTab] = useState<'SAVED' | 'WISHLIST'>('SAVED');
   const [searchQuery, setSearchQuery] = useState('');
@@ -281,7 +281,7 @@ export default function SearchScreen() {
         source,
         hasError: Boolean(lastError),
         labels: {
-          live: 'Live closet',
+          live: 'Synced',
         },
       }),
     [isSyncing, lastError, source],
@@ -323,7 +323,7 @@ export default function SearchScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
-      {/* ── Header ── */}
+      {/* â”€â”€ Header â”€â”€ */}
       <View style={styles.headerRow}>
         <View>
           <Text style={styles.hugeTitle}>Saved</Text>
@@ -336,7 +336,7 @@ export default function SearchScreen() {
         </View>
       </View>
 
-      {/* ── Search Bar ── */}
+      {/* â”€â”€ Search Bar â”€â”€ */}
       <View style={styles.searchRow}>
         <View style={[styles.searchBar, isSearchFocused && styles.searchBarFocused]}>
           <Ionicons name="search" size={18} color={Colors.textMuted} />
@@ -348,7 +348,7 @@ export default function SearchScreen() {
             placeholderTextColor={Colors.textMuted}
             onFocus={() => setIsSearchFocused(true)}
             onBlur={() => setIsSearchFocused(false)}
-            selectionColor={TEAL}
+            selectionColor={ACCENT}
             returnKeyType="search"
           />
           {searchQuery.length > 0 && (
@@ -359,7 +359,7 @@ export default function SearchScreen() {
         </View>
       </View>
 
-      {/* ── Segmented Control ── */}
+      {/* â”€â”€ Segmented Control â”€â”€ */}
       <View style={styles.tabsContainer}>
         <View style={styles.tabsWrapper}>
           {closetTabs.map(tab => (
@@ -386,7 +386,7 @@ export default function SearchScreen() {
 
       {lastError ? (
         <SyncRetryBanner
-          message="Live closet sync is delayed. Showing cached saved items."
+          message="Closet sync is delayed. Showing cached saved items."
           onRetry={() => void refreshListings()}
           isRetrying={isSyncing}
           telemetryContext="search_saved_sync"
@@ -394,7 +394,7 @@ export default function SearchScreen() {
         />
       ) : null}
 
-      {/* ── Content ── */}
+      {/* â”€â”€ Content â”€â”€ */}
       <View style={{ flex: 1 }}>
         <RefreshIndicator scrollY={scrollY} isRefreshing={refreshing} topInset={20} />
         
@@ -435,19 +435,13 @@ export default function SearchScreen() {
                   />
                 </Reanimated.View>
               )}
-              ListFooterComponent={
-                <View style={styles.emptyFooter}>
-                  <Text style={styles.footerHint}>
-                    Save looks from the Feed to build your collection
-                  </Text>
-                </View>
-              }
+              ListFooterComponent={<View style={styles.emptyFooter} />}
             />
           ) : (
             <EmptyState
               icon="layers-outline"
               title="No saved looks yet"
-              subtitle={`Browse the Feed and save outfit looks\nto build your style collection`}
+              subtitle="Saved looks will appear here."
             />
           )
         ) : (
@@ -481,19 +475,13 @@ export default function SearchScreen() {
                   />
                 </Reanimated.View>
               )}
-              ListFooterComponent={
-                <View style={styles.emptyFooter}>
-                  <Text style={styles.footerHint}>
-                    ♡ items while browsing to add them here
-                  </Text>
-                </View>
-              }
+              ListFooterComponent={<View style={styles.emptyFooter} />}
             />
           ) : (
             <EmptyState
               icon="heart-outline"
               title="Your wishlist is empty"
-              subtitle={`Tap ♡ on items you love and\nthey'll appear here`}
+              subtitle="Saved items will appear here."
             />
           )
         )}
@@ -502,7 +490,7 @@ export default function SearchScreen() {
   );
 }
 
-// ── Look Card Styles ─────────────────────────────────────────
+// â”€â”€ Look Card Styles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const lookStyles = StyleSheet.create({
   card: {
     backgroundColor: PANEL_BG,
@@ -597,7 +585,7 @@ const lookStyles = StyleSheet.create({
   },
 });
 
-// ── Main Styles ──────────────────────────────────────────────
+// â”€â”€ Main Styles â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
 
@@ -762,3 +750,5 @@ const styles = StyleSheet.create({
     letterSpacing: 0.1,
   },
 });
+
+

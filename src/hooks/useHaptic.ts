@@ -1,7 +1,7 @@
 import * as Haptics from 'expo-haptics';
 import { Platform } from 'react-native';
 
-const isSupported = Platform.OS === 'ios';
+const isSupported = Platform.OS === 'ios' || Platform.OS === 'android';
 
 const haptic = {
   light: () => {

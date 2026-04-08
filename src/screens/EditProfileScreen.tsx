@@ -21,6 +21,11 @@ import { useToast } from '../context/ToastContext';
 import { AnimatedPressable } from '../components/AnimatedPressable';
 import { CachedImage } from '../components/CachedImage';
 import { BottomSheetPicker } from '../components/BottomSheetPicker';
+import {
+  setStoredUserAvatar,
+  setStoredUserAvatarForUser,
+} from '../preferences/profileMediaPreferences';
+import { persistProfileMediaUri } from '../utils/profileMediaAsset';
 
 const IS_LIGHT = ActiveTheme === 'light';
 const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111111';
@@ -32,6 +37,7 @@ const GENDER_OPTIONS = ['Male', 'Female', 'Non-binary', 'Prefer not to say'];
 export default function EditProfileScreen() {
   const navigation = useNavigation();
   const { show } = useToast();
+  const currentUser = useStore(state => state.currentUser);
   const userAvatar = useStore(state => state.userAvatar);
   const updateUserAvatar = useStore(state => state.updateUserAvatar);
 
@@ -51,7 +57,15 @@ export default function EditProfileScreen() {
     });
     if (!result.canceled) {
       await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      updateUserAvatar(result.assets[0].uri);
+      const nextAvatarUri = await persistProfileMediaUri(result.assets[0].uri, 'avatar');
+      updateUserAvatar(nextAvatarUri);
+      Promise.all([
+        setStoredUserAvatar(nextAvatarUri),
+        setStoredUserAvatarForUser(MY_USER.id, nextAvatarUri),
+        currentUser?.id ? setStoredUserAvatarForUser(currentUser.id, nextAvatarUri) : Promise.resolve(),
+      ]).catch(() => {
+        // Keep UX responsive when local persistence fails.
+      });
       show('Avatar updated', 'success');
     }
   };

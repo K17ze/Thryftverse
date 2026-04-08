@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+﻿import React, { useEffect } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import Reanimated, {
   cancelAnimation,
@@ -28,48 +28,7 @@ interface Props {
   onCtaPress?: () => void;
   iconColor?: string;
 }
-
-function resolveVoiceCopy(icon: keyof typeof Ionicons.glyphMap, title: string, subtitle?: string) {
-  const normalized = title.trim().toLowerCase();
-
-  if (
-    normalized === 'your wishlist is empty' ||
-    normalized === 'wishlist empty' ||
-    normalized === 'no favourites yet' ||
-    normalized === 'no favorites yet'
-  ) {
-    return {
-      title: "nothing caught your eye yet. you're picky. respect.",
-      subtitle: 'double-tap pieces you rate and this vault fills up quick.',
-    };
-  }
-
-  if (
-    normalized === 'your closet is empty' ||
-    normalized === 'closet empty' ||
-    normalized === 'no listings yet'
-  ) {
-    return {
-      title: 'time to cop something worth flexing.',
-      subtitle: 'your next grail is a few scrolls away.',
-    };
-  }
-
-  if (icon === 'heart-outline' && normalized.includes('empty')) {
-    return {
-      title: "nothing here yet. your taste is too rare.",
-      subtitle: subtitle ?? 'tap hearts to stash pieces that hit different.',
-    };
-  }
-
-  return {
-    title,
-    subtitle,
-  };
-}
-
-export function EmptyState({ icon, title, subtitle, ctaLabel, onCtaPress, iconColor = '#e8dcc8' }: Props) {
-  const copy = resolveVoiceCopy(icon, title, subtitle);
+export function EmptyState({ icon, title, subtitle, ctaLabel, onCtaPress, iconColor = Colors.accent }: Props) {
   const reducedMotionEnabled = useReducedMotion();
 
   // Floating animation on the icon ring
@@ -124,15 +83,15 @@ export function EmptyState({ icon, title, subtitle, ctaLabel, onCtaPress, iconCo
         entering={FadeInDown.delay(200).duration(400)}
         style={styles.title}
       >
-        {copy.title}
+        {title}
       </Reanimated.Text>
 
-      {copy.subtitle && (
+      {subtitle && (
         <Reanimated.Text
           entering={FadeInDown.delay(300).duration(400)}
           style={styles.subtitle}
         >
-          {copy.subtitle}
+          {subtitle}
         </Reanimated.Text>
       )}
 
@@ -165,7 +124,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 10,
-    shadowColor: '#e8dcc8',
+    shadowColor: '#d7b98f',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.08,
     shadowRadius: 16,
@@ -205,3 +164,4 @@ const styles = StyleSheet.create({
     color: Colors.textInverse,
   },
 });
+

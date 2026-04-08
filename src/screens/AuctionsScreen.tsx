@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -43,7 +43,7 @@ import { listAuctions, placeAuctionBid as placeAuctionBidRemote } from '../servi
 
 type NavT = StackNavigationProp<RootStackParamList>;
 const IS_LIGHT = ActiveTheme === 'light';
-const BRAND = IS_LIGHT ? '#2f251b' : '#e8dcc8';
+const BRAND = IS_LIGHT ? '#2f251b' : '#d7b98f';
 const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111111';
 const PANEL_SOFT_BG = IS_LIGHT ? '#f7f4ef' : '#161616';
 const PANEL_MUTED_BG = IS_LIGHT ? '#f1ede6' : '#151515';
@@ -199,7 +199,7 @@ export default function AuctionsScreen() {
     if (remoteAuctions.length > 0) {
       return {
         tone: 'live' as const,
-        label: 'Live backend',
+        label: 'Synced',
       };
     }
 
@@ -212,7 +212,7 @@ export default function AuctionsScreen() {
 
     return {
       tone: 'offline' as const,
-      label: 'No feed yet',
+      label: 'No auctions',
     };
   }, [auctions.length, isSyncingAuctions, remoteAuctions.length, syncError]);
 
@@ -358,7 +358,6 @@ export default function AuctionsScreen() {
       <View style={styles.sectionWrap}>
         <View style={styles.sectionTitleRow}>
           <Text style={styles.sectionTitle}>Upcoming Auction Posters</Text>
-          <Text style={styles.sectionHint}>Story-style ad placements</Text>
         </View>
 
         <FlatList
@@ -396,7 +395,6 @@ export default function AuctionsScreen() {
       <View style={styles.sectionWrap}>
         <View style={styles.sectionTitleRow}>
           <Text style={styles.sectionTitle}>Starting Soon</Text>
-          <Text style={styles.sectionHint}>6h windows</Text>
         </View>
 
         <FlatList
@@ -431,17 +429,14 @@ export default function AuctionsScreen() {
       <View style={styles.heroCard}>
         <View style={styles.heroTitleRow}>
           <Ionicons name="flash-outline" size={16} color={BRAND} />
-          <Text style={styles.heroTitle}>Auctions Arena</Text>
+          <Text style={styles.heroTitle}>Auctions</Text>
         </View>
-        <Text style={styles.heroSubtitle}>
-          Timed 6-hour drops with live bids, instant buyouts, and transparent market tape settlement.
-        </Text>
       </View>
 
       <View style={styles.metricsRow}>
         <View style={styles.metricCard}>
           <Text style={styles.metricValue}>{liveAuctions.length}</Text>
-          <Text style={styles.metricLabel}>Live</Text>
+          <Text style={styles.metricLabel}>Active</Text>
         </View>
         <View style={styles.metricCard}>
           <Text style={styles.metricValue}>{upcomingAuctions.length}</Text>
@@ -453,15 +448,9 @@ export default function AuctionsScreen() {
         </View>
       </View>
 
-      <View style={styles.rulesCard}>
-        <Ionicons name="timer-outline" size={16} color={BRAND} />
-        <Text style={styles.rulesText}>Auctions are timed fiat bidding windows (6h). Winning bids include a 3% platform charge. For fractional 1ze trading, switch to Syndicate.</Text>
-      </View>
-
       <View style={styles.launchRow}>
         <View>
-          <Text style={styles.launchTitle}>Seller Studio</Text>
-          <Text style={styles.launchHint}>Launch a 6-hour auction from your listing</Text>
+          <Text style={styles.launchTitle}>Create Auction</Text>
         </View>
 
         <AnimatedPressable
@@ -476,7 +465,7 @@ export default function AuctionsScreen() {
 
       {syncError ? (
         <SyncRetryBanner
-          message="Live auction sync is delayed. Showing cached auction activity."
+          message="Auction sync is delayed. Showing cached activity."
           onRetry={() => void syncAuctions()}
           isRetrying={isSyncingAuctions}
           telemetryContext="auctions_market_sync"
@@ -489,7 +478,7 @@ export default function AuctionsScreen() {
       {renderUpcomingStrip()}
 
       <View style={styles.sectionTitleRow}>
-        <Text style={styles.sectionTitle}>Live Auctions</Text>
+        <Text style={styles.sectionTitle}>Auctions</Text>
         <SyncStatusPill tone={marketStatus.tone} label={marketStatus.label} compact />
       </View>
     </View>
@@ -526,7 +515,7 @@ export default function AuctionsScreen() {
         <View style={styles.liveTopRow}>
           <View style={styles.lifecyclePill}>
             <View style={styles.liveDot} />
-            <Text style={styles.lifecycleText}>LIVE</Text>
+            <Text style={styles.lifecycleText}>OPEN</Text>
           </View>
           <Text style={styles.timerText}>{formatCountdown(item.msToEnd)}</Text>
         </View>
@@ -605,11 +594,7 @@ export default function AuctionsScreen() {
           <AnimatedPressable style={styles.bidModalDismissLayer} activeOpacity={1} onPress={closeBidComposer} />
 
           <View style={styles.bidModalCard}>
-            <Text style={styles.bidModalLabel}>BID COMPOSER</Text>
             <Text style={styles.bidModalTitle} numberOfLines={1}>{selectedBidAuction.title}</Text>
-            <Text style={styles.bidModalHint}>
-              Current bid {formatFromFiat(selectedBidAuction.currentBid, 'GBP', { displayMode: 'fiat' })}
-            </Text>
 
             <View style={styles.bidInputWrap}>
               <Text style={styles.bidCurrency}>{currencyCode}</Text>
@@ -669,8 +654,7 @@ export default function AuctionsScreen() {
           ) : (
             <EmptyState
               icon="hourglass-outline"
-              title="No live auctions right now"
-              subtitle="Upcoming auctions are listed above and open automatically when their 6-hour window begins."
+              title="No auctions right now"
             />
           )
         }
@@ -1197,3 +1181,4 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_700Bold',
   },
 });
+

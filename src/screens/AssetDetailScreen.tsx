@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -27,7 +27,7 @@ type NavT = StackNavigationProp<RootStackParamList>;
 
 const RANGE_OPTIONS: ChartRange[] = ['1H', '1D', '1W', '1M', 'ALL'];
 const IS_LIGHT = ActiveTheme === 'light';
-const BRAND = IS_LIGHT ? '#2f251b' : '#e8dcc8';
+const BRAND = IS_LIGHT ? '#2f251b' : '#d7b98f';
 const PANEL_BG = IS_LIGHT ? '#ffffff' : '#121212';
 const PANEL_SOFT_BG = IS_LIGHT ? '#f7f4ef' : '#161616';
 const PANEL_BORDER = IS_LIGHT ? '#d8d1c6' : '#2a2a2a';
@@ -182,7 +182,7 @@ export default function AssetDetailScreen() {
         <Image source={{ uri: asset.image }} style={styles.heroImage} />
 
         <Text style={styles.assetTitle}>{asset.title}</Text>
-        <Text style={styles.assetSub}>Asset ID {asset.id.toUpperCase()} · Issuer {asset.issuerId}</Text>
+        <Text style={styles.assetSub}>Asset ID {asset.id.toUpperCase()} Â· Issuer {asset.issuerId}</Text>
 
         <View style={styles.priceRow}>
           <Text style={styles.pricePrimary}>{formatFromFiat(asset.unitPriceGBP, 'GBP')}</Text>
@@ -612,3 +612,4 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_700Bold',
   },
 });
+

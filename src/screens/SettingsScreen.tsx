@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import { View,
@@ -32,9 +32,9 @@ import {
 } from '../theme/themePreference';
 
 type Props = StackScreenProps<RootStackParamList, 'Settings'>;
-const TEAL = '#e8dcc8';
+const ACCENT = '#d7b98f';
 const IS_LIGHT = ActiveTheme === 'light';
-const BRAND = IS_LIGHT ? '#2f251b' : TEAL;
+const BRAND = IS_LIGHT ? '#2f251b' : ACCENT;
 const PANEL_BG = Colors.card;
 const PANEL_BORDER = Colors.border;
 
@@ -71,14 +71,14 @@ export default function SettingsScreen({ navigation }: Props) {
   const currencyOptions = React.useMemo(
     () =>
       (Object.keys(CURRENCIES) as SupportedCurrencyCode[]).map(
-        (code) => `${code} · ${CURRENCIES[code].name} (${CURRENCIES[code].symbol})`
+        (code) => `${code} Â· ${CURRENCIES[code].name} (${CURRENCIES[code].symbol})`
       ),
     []
   );
 
   const selectedCurrencyOption = React.useMemo(
     () =>
-      currencyOptions.find((option) => option.startsWith(`${currencyCode} ·`)),
+      currencyOptions.find((option) => option.startsWith(`${currencyCode} Â·`)),
     [currencyCode, currencyOptions]
   );
 
@@ -98,7 +98,7 @@ export default function SettingsScreen({ navigation }: Props) {
   }, []);
 
   const handleCurrencySelect = (option: string) => {
-    const selectedCode = option.split(' · ')[0] as SupportedCurrencyCode;
+    const selectedCode = option.split(' Â· ')[0] as SupportedCurrencyCode;
     if (selectedCode !== currencyCode) {
       setCurrencyCode(selectedCode);
     }
@@ -171,7 +171,7 @@ export default function SettingsScreen({ navigation }: Props) {
   };
 
   const accountItems: SettingItem[] = [
-    { icon: 'person-outline', title: 'Profile Details', subtitle: 'Username, bio, location', color: TEAL, onPress: () => navigation.navigate('EditProfile') },
+    { icon: 'person-outline', title: 'Profile Details', subtitle: 'Username, bio, location', color: ACCENT, onPress: () => navigation.navigate('EditProfile') },
     { icon: 'key-outline', title: 'Account Settings', subtitle: 'Email, password, security', color: '#FFD700', onPress: () => navigation.navigate('AccountSettings') },
     { icon: 'card-outline', title: 'Payments', subtitle: 'Cards and bank accounts', color: '#BB86FC', onPress: () => navigation.navigate('Payments') },
     { icon: 'cube-outline', title: 'Postage', subtitle: 'Default carrier and options', color: '#FF6B6B', onPress: () => navigation.navigate('Postage') },
@@ -182,7 +182,7 @@ export default function SettingsScreen({ navigation }: Props) {
       icon: 'person-circle-outline',
       title: 'Account settings',
       subtitle: 'Security and account access',
-      color: TEAL,
+      color: ACCENT,
       onPress: () => navigation.navigate('AccountSettings'),
     },
     {
@@ -206,7 +206,7 @@ export default function SettingsScreen({ navigation }: Props) {
       icon: 'notifications-outline',
       title: 'Push Notifications',
       subtitle: pushNotificationsSubtitle,
-      color: TEAL,
+      color: ACCENT,
       onPress: () => navigation.navigate('PushNotifications'),
     },
     {
@@ -230,7 +230,7 @@ export default function SettingsScreen({ navigation }: Props) {
       icon: 'swap-horizontal-outline',
       title: 'Currency Display',
       subtitle: displayModeLabel,
-      color: TEAL,
+      color: ACCENT,
       onPress: cycleDisplayMode,
     },
     {
@@ -250,7 +250,7 @@ export default function SettingsScreen({ navigation }: Props) {
   ];
 
   const supportItems: SettingItem[] = [
-    { icon: 'help-circle-outline', title: 'Help Centre', subtitle: 'FAQs and support', color: TEAL, onPress: () => navigation.navigate('HelpSupport') },
+    { icon: 'help-circle-outline', title: 'Help Centre', subtitle: 'FAQs and support', color: ACCENT, onPress: () => navigation.navigate('HelpSupport') },
     {
       icon: 'document-text-outline',
       title: 'Terms & Conditions',
@@ -486,3 +486,5 @@ const styles = StyleSheet.create({
     marginTop: 24,
   },
 });
+
+

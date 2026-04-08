@@ -7,13 +7,11 @@ import Reanimated, {
   useSharedValue,
   useAnimatedStyle,
   withSpring,
-  withRepeat,
-  withSequence,
   withTiming,
-  Easing,
 } from 'react-native-reanimated';
 import { TabParamList } from './types';
 import { Colors } from '../constants/colors';
+import { Motion } from '../constants/motion';
 import { Typography } from '../constants/typography';
 import { AnimatedPressable } from '../components/AnimatedPressable';
 import { AnimatedBadge } from '../components/AnimatedBadge';
@@ -28,34 +26,6 @@ import MyProfileScreen from '../screens/MyProfileScreen';
 
 const Tab = createBottomTabNavigator<TabParamList>();
 
-// ── Animated Sell FAB with subtle breathing pulse ──
-const SellButton = ({ onPress }: { onPress: () => void }) => {
-  const scale = useSharedValue(1);
-
-  useEffect(() => {
-    scale.value = withRepeat(
-      withSequence(
-        withTiming(1.06, { duration: 1800, easing: Easing.inOut(Easing.ease) }),
-        withTiming(1, { duration: 1800, easing: Easing.inOut(Easing.ease) })
-      ),
-      -1,
-      true
-    );
-  }, [scale]);
-
-  const pulseStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
-  }));
-
-  return (
-    <AnimatedPressable style={styles.sellBtnWrap} onPress={onPress} activeOpacity={0.85}>
-      <Reanimated.View style={[styles.sellBtnInner, pulseStyle]}>
-        <Ionicons name="add" size={28} color={Colors.textInverse} />
-      </Reanimated.View>
-    </AnimatedPressable>
-  );
-};
-
 // ── Tab Icon with spring scale + active indicator dot ──
 interface TabIconProps {
   name: keyof typeof Ionicons.glyphMap;
@@ -68,7 +38,7 @@ const TabIcon = ({ name, color, focused, badgeCount }: TabIconProps) => {
   const iconScale = useSharedValue(focused ? 1.12 : 1);
 
   useEffect(() => {
-    iconScale.value = withSpring(focused ? 1.12 : 1, { damping: 14, stiffness: 200 });
+    iconScale.value = withSpring(focused ? 1.12 : 1, Motion.spring.flagship);
   }, [focused, iconScale]);
 
   const animatedIconStyle = useAnimatedStyle(() => ({
@@ -105,13 +75,15 @@ export default function TabNavigator() {
       <Tab.Navigator
         screenOptions={{
           headerShown: false,
-          tabBarShowLabel: true,
+          tabBarShowLabel: false,
           tabBarHideOnKeyboard: true,
           tabBarStyle: {
             ...styles.fixedTabBar,
-            height: 62 + Math.max(insets.bottom, 8),
+            height: 60 + Math.max(insets.bottom, 8),
+            paddingTop: 6,
             paddingBottom: Math.max(insets.bottom, 8),
           },
+          tabBarItemStyle: styles.tabBarItem,
           tabBarActiveTintColor: Colors.tabActive,
           tabBarInactiveTintColor: Colors.tabInactive,
           tabBarLabelStyle: {
@@ -132,7 +104,6 @@ export default function TabNavigator() {
           name="Home"
           component={HomeScreen}
           options={{
-            tabBarLabel: 'feed',
             tabBarIcon: ({ color, focused }) => (
               <TabIcon name={focused ? 'documents' : 'documents-outline'} color={color} focused={focused} />
             ),
@@ -142,7 +113,6 @@ export default function TabNavigator() {
           name="TradeHub"
           component={TradeHubScreen}
           options={{
-            tabBarLabel: 'trade',
             tabBarIcon: ({ color, focused }) => (
               <TabIcon name={focused ? 'stats-chart' : 'stats-chart-outline'} color={color} focused={focused} />
             ),
@@ -152,7 +122,6 @@ export default function TabNavigator() {
           name="Search"
           component={SearchScreen}
           options={{
-            tabBarLabel: 'closet',
             tabBarIcon: ({ color, focused }) => (
               <TabIcon name={focused ? 'bookmark' : 'bookmark-outline'} color={color} focused={focused} />
             ),
@@ -162,8 +131,8 @@ export default function TabNavigator() {
           name="Sell"
           component={SellScreen}
           options={{
-            tabBarButton: (props) => (
-              <SellButton onPress={props.onPress as any} />
+            tabBarIcon: ({ color, focused }) => (
+              <TabIcon name={focused ? 'add-circle' : 'add-circle-outline'} color={color} focused={focused} />
             ),
           }}
         />
@@ -171,7 +140,6 @@ export default function TabNavigator() {
           name="Inbox"
           component={InboxScreen}
           options={{
-            tabBarLabel: 'dms',
             tabBarIcon: ({ color, focused }) => (
               <TabIcon name={focused ? 'chatbubbles' : 'chatbubbles-outline'} color={color} focused={focused} badgeCount={3} />
             ),
@@ -181,7 +149,6 @@ export default function TabNavigator() {
           name="Profile"
           component={MyProfileScreen}
           options={{
-            tabBarLabel: 'you',
             tabBarIcon: ({ color, focused }) => (
               <TabIcon name={focused ? 'person' : 'person-outline'} color={color} focused={focused} />
             ),
@@ -194,41 +161,25 @@ export default function TabNavigator() {
 
 const styles = StyleSheet.create({
   fixedTabBar: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
     backgroundColor: Colors.surface,
-    borderTopWidth: 1,
+    borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: Colors.border,
-    elevation: 22,
+    elevation: 0,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.34,
-    shadowRadius: 10,
-    paddingHorizontal: 14,
-  },
-  sellBtnWrap: {
-    top: -4,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  sellBtnInner: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-    backgroundColor: Colors.accent,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#e8dcc8',
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 8,
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    paddingHorizontal: 8,
+  },
+  tabBarItem: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 2,
   },
   tabIconWrap: {
     alignItems: 'center',
     position: 'relative',
+    width: 28,
   },
   activeIndicator: {
     width: 5,

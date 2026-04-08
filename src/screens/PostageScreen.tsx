@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -25,7 +25,7 @@ const BORDER = IS_LIGHT ? '#d8d1c6' : '#2a2a2a';
 const DIVIDER = IS_LIGHT ? '#e4ded3' : '#1c1c1c';
 const MUTED = Colors.textMuted;
 const TEXT = Colors.textPrimary;
-const BRAND = IS_LIGHT ? '#2f251b' : '#e8dcc8';
+const BRAND = IS_LIGHT ? '#2f251b' : '#d7b98f';
 
 const CARRIERS = [
   { key: 'evri', label: 'Evri', priceFromGBP: 2.89, selected: true },
@@ -158,3 +158,4 @@ const styles = StyleSheet.create({
   radioDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: BRAND },
   footerNote: { fontSize: 12, color: MUTED, lineHeight: 18, paddingHorizontal: 4 },
 });
+

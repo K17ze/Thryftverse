@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -37,7 +37,7 @@ import { placeSyndicateOrder } from '../services/marketApi';
 type NavT = StackNavigationProp<RootStackParamList>;
 type RouteT = RouteProp<RootStackParamList, 'Trade'>;
 const IS_LIGHT = ActiveTheme === 'light';
-const BRAND = IS_LIGHT ? '#2f251b' : '#e8dcc8';
+const BRAND = IS_LIGHT ? '#2f251b' : '#d7b98f';
 const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111111';
 const PANEL_SOFT_BG = IS_LIGHT ? '#f7f4ef' : '#161616';
 const PANEL_BORDER = IS_LIGHT ? '#d8d1c6' : '#2f2f2f';
@@ -229,7 +229,7 @@ export default function TradeScreen() {
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <Text style={styles.assetTitle}>{asset.title}</Text>
         <Text style={styles.assetMeta}>
-          Market {formatIzeAmount(marketPrice)} · {formatFromIze(marketPrice, { displayMode: 'fiat' })} · {asset.availableUnits} available
+          Market {formatIzeAmount(marketPrice)} Â· {formatFromIze(marketPrice, { displayMode: 'fiat' })} Â· {asset.availableUnits} available
         </Text>
 
         <View style={styles.pegCard}>
@@ -291,15 +291,15 @@ export default function TradeScreen() {
           </View>
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Gross</Text>
-            <Text style={styles.summaryValue}>{formatIzeAmount(quote.grossValue)} · {formatFromIze(quote.grossValue, { displayMode: 'fiat' })}</Text>
+            <Text style={styles.summaryValue}>{formatIzeAmount(quote.grossValue)} Â· {formatFromIze(quote.grossValue, { displayMode: 'fiat' })}</Text>
           </View>
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Fee ({(SYNDICATE_FEE_RATE * 100).toFixed(0)}%)</Text>
-            <Text style={styles.summaryValue}>{formatIzeAmount(quote.fee)} · {formatFromIze(quote.fee, { displayMode: 'fiat' })}</Text>
+            <Text style={styles.summaryValue}>{formatIzeAmount(quote.fee)} Â· {formatFromIze(quote.fee, { displayMode: 'fiat' })}</Text>
           </View>
           <View style={[styles.summaryRow, styles.summaryRowTotal]}>
             <Text style={styles.summaryTotalLabel}>{side === 'buy' ? 'Total Cost' : 'Net Receive'}</Text>
-            <Text style={styles.summaryTotalValue}>{formatIzeAmount(quote.netValue)} · {formatFromIze(quote.netValue, { displayMode: 'fiat' })}</Text>
+            <Text style={styles.summaryTotalValue}>{formatIzeAmount(quote.netValue)} Â· {formatFromIze(quote.netValue, { displayMode: 'fiat' })}</Text>
           </View>
         </View>
 
@@ -523,3 +523,4 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_500Medium',
   },
 });
+
