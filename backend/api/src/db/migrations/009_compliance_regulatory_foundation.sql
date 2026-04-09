@@ -122,7 +122,7 @@ CREATE TABLE IF NOT EXISTS aml_alerts (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   related_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
-  market TEXT NOT NULL CHECK (market IN ('syndicate', 'auctions', 'wallet')),
+  market TEXT NOT NULL CHECK (market IN ('co-own', 'auctions', 'wallet')),
   event_type TEXT NOT NULL CHECK (event_type IN ('trade', 'bid', 'deposit', 'withdrawal', 'manual')),
   risk_score NUMERIC(5, 2) NOT NULL CHECK (risk_score >= 0 AND risk_score <= 100),
   risk_level TEXT NOT NULL CHECK (risk_level IN ('low', 'medium', 'high', 'critical')),
@@ -169,7 +169,7 @@ CREATE INDEX IF NOT EXISTS compliance_sar_reports_user_created_idx
 
 CREATE TABLE IF NOT EXISTS jurisdiction_rules (
   id TEXT PRIMARY KEY,
-  market TEXT NOT NULL CHECK (market IN ('syndicate', 'auctions', 'wallet')),
+  market TEXT NOT NULL CHECK (market IN ('co-own', 'auctions', 'wallet')),
   scope TEXT NOT NULL CHECK (scope IN ('country', 'region', 'global')),
   scope_code TEXT NOT NULL,
   is_enabled BOOLEAN NOT NULL DEFAULT TRUE,
@@ -204,8 +204,8 @@ INSERT INTO jurisdiction_rules (
 )
 VALUES
   (
-    'jr_syndicate_global',
-    'syndicate',
+    'jr_coOwn_global',
+    'co-own',
     'global',
     'GLOBAL',
     TRUE,
@@ -215,11 +215,11 @@ VALUES
     100000,
     120,
     NULL,
-    '{"note": "Default global syndicate limit"}'::jsonb
+    '{"note": "Default global co-own limit"}'::jsonb
   ),
   (
-    'jr_syndicate_in',
-    'syndicate',
+    'jr_coOwn_in',
+    'co-own',
     'region',
     'IN',
     TRUE,
@@ -232,8 +232,8 @@ VALUES
     '{"jurisdiction": "India", "comment": "Higher KYC threshold"}'::jsonb
   ),
   (
-    'jr_syndicate_eu',
-    'syndicate',
+    'jr_coOwn_eu',
+    'co-own',
     'region',
     'EU',
     TRUE,
@@ -246,8 +246,8 @@ VALUES
     '{"jurisdiction": "EU", "comment": "Consumer and investor suitability controls"}'::jsonb
   ),
   (
-    'jr_syndicate_gulf',
-    'syndicate',
+    'jr_coOwn_gulf',
+    'co-own',
     'region',
     'GULF',
     TRUE,
@@ -260,8 +260,8 @@ VALUES
     '{"jurisdiction": "Gulf", "comment": "Regional card and wallet controls"}'::jsonb
   ),
   (
-    'jr_syndicate_africa',
-    'syndicate',
+    'jr_coOwn_africa',
+    'co-own',
     'region',
     'AFRICA',
     TRUE,
@@ -274,8 +274,8 @@ VALUES
     '{"jurisdiction": "Africa", "comment": "Conservative notional caps"}'::jsonb
   ),
   (
-    'jr_syndicate_us',
-    'syndicate',
+    'jr_coOwn_us',
+    'co-own',
     'country',
     'US',
     TRUE,
@@ -404,8 +404,8 @@ VALUES
     'risk_disclosure',
     'v1.0',
     'en',
-    'Syndicate Risk Disclosure',
-    'https://legal.thryftverse.local/risk/syndicate-v1',
+    'Co-Own Risk Disclosure',
+    'https://legal.thryftverse.local/risk/co-own-v1',
     'sha256:risk-v1-placeholder',
     TRUE,
     NOW(),

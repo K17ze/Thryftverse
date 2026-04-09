@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect, useMemo } from 'react';
 import { View, Text, StyleSheet, TextInput, ScrollView, Platform } from 'react-native';
 import { BottomSheet } from '../BottomSheet';
 import { AnimatedPressable } from '../AnimatedPressable';
@@ -7,7 +7,10 @@ import { ActiveTheme, Colors } from '../../constants/colors';
 import { useStore } from '../../store/useStore';
 import { useToast } from '../../context/ToastContext';
 import { buildCardPaymentMethod } from '../../utils/checkoutFlow';
+import { formatCountryPolicyScope, isPaymentMethodAllowed } from '../../utils/capabilityPolicy';
 import { createUserPaymentMethod } from '../../services/commerceApi';
+import { getUserCountryCapabilities, UserCountryCapabilities } from '../../services/capabilitiesApi';
+import { parseApiError } from '../../lib/apiClient';
 import * as Haptics from 'expo-haptics';
 
 const IS_LIGHT = ActiveTheme === 'light';
@@ -33,6 +36,7 @@ export function AddCardSheet({ visible, onDismiss, onSuccess }: Props) {
   const [cvv, setCvv] = useState('');
   const [name, setName] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [countryCapabilities, setCountryCapabilities] = useState<UserCountryCapabilities | null>(null);
   const currentUser = useStore((state) => state.currentUser);
   const savePaymentMethod = useStore((state) => state.savePaymentMethod);
   const { show } = useToast();
@@ -46,6 +50,36 @@ export function AddCardSheet({ visible, onDismiss, onSuccess }: Props) {
       setName('');
     }
   }, [visible]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const hydrateCapabilities = async () => {
+      if (!visible || !currentUser?.id) {
+        if (!cancelled) {
+          setCountryCapabilities(null);
+        }
+        return;
+      }
+
+      try {
+        const capabilities = await getUserCountryCapabilities(currentUser.id);
+        if (!cancelled) {
+          setCountryCapabilities(capabilities);
+        }
+      } catch {
+        if (!cancelled) {
+          setCountryCapabilities(null);
+        }
+      }
+    };
+
+    void hydrateCapabilities();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser?.id, visible]);
 
   const formatCardNumber = (val: string) =>
     val.replace(/\D/g, '').slice(0, 16).replace(/(.{4})/g, '$1 ').trim();
@@ -67,7 +101,22 @@ export function AddCardSheet({ visible, onDismiss, onSuccess }: Props) {
     cvv.length >= 3 &&
     name.trim().length >= 2;
 
+  const cardAllowed = isPaymentMethodAllowed(countryCapabilities, 'card');
+
+  const policyLabel = useMemo(() => {
+    if (!countryCapabilities) {
+      return null;
+    }
+
+    return formatCountryPolicyScope(countryCapabilities);
+  }, [countryCapabilities]);
+
   const handleSaveCard = async () => {
+    if (!cardAllowed) {
+      show('Card payments are unavailable for your country policy.', 'error');
+      return;
+    }
+
     if (!isComplete || isSaving) return;
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -76,6 +125,7 @@ export function AddCardSheet({ visible, onDismiss, onSuccess }: Props) {
     const localPaymentMethod = buildCardPaymentMethod(last4, expiry, 'Visa');
 
     setIsSaving(true);
+    let shouldDismiss = true;
     try {
       const userId = currentUser?.id ?? 'u1';
       const saved = await createUserPaymentMethod(userId, {
@@ -94,22 +144,39 @@ export function AddCardSheet({ visible, onDismiss, onSuccess }: Props) {
       });
       show('Card saved to wallet', 'success');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } catch {
-      savePaymentMethod(localPaymentMethod);
-      show('Card saved locally. Backend sync unavailable.', 'info');
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    } catch (error) {
+      const parsed = parseApiError(error, 'Unable to save card right now.');
+      if (parsed.isNetworkError) {
+        savePaymentMethod(localPaymentMethod);
+        show('Card saved locally. Backend sync unavailable.', 'info');
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      } else {
+        shouldDismiss = false;
+        show(parsed.message, 'error');
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      }
     } finally {
       setIsSaving(false);
-      onDismiss();
-      if (onSuccess) onSuccess();
+      if (shouldDismiss) {
+        onDismiss();
+        if (onSuccess) onSuccess();
+      }
     }
   };
 
   return (
     <BottomSheet visible={visible} onDismiss={onDismiss} snapPoint={0.88}>
       <Text style={styles.sheetTitle}>Add card</Text>
+      {policyLabel ? <Text style={styles.policyLabel}>Policy scope: {policyLabel}</Text> : null}
       
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        {!cardAllowed ? (
+          <View style={styles.blockedCard}>
+            <Text style={styles.blockedTitle}>Cards unavailable in your region</Text>
+            <Text style={styles.blockedText}>Switch country policy to enable card rails.</Text>
+          </View>
+        ) : null}
+
         <View style={styles.cardPreview}>
           <Text style={styles.cardPreviewNumber}>
             {cardNumber || '**** **** **** ****'}
@@ -197,8 +264,8 @@ export function AddCardSheet({ visible, onDismiss, onSuccess }: Props) {
 
       <View style={styles.footer}>
         <AnimatedPressable
-          style={[styles.saveBtn, (!isComplete || isSaving) && { opacity: 0.4 }]}
-          disabled={!isComplete || isSaving}
+          style={[styles.saveBtn, (!isComplete || isSaving || !cardAllowed) && { opacity: 0.4 }]}
+          disabled={!isComplete || isSaving || !cardAllowed}
           onPress={handleSaveCard}
         >
           <Text style={styles.saveBtnText}>{isSaving ? 'Processing...' : 'Save securely'}</Text>
@@ -210,7 +277,19 @@ export function AddCardSheet({ visible, onDismiss, onSuccess }: Props) {
 
 const styles = StyleSheet.create({
   sheetTitle: { fontSize: 20, fontFamily: 'Inter_700Bold', color: TEXT, marginBottom: 20 },
+  policyLabel: { fontSize: 12, color: MUTED, textAlign: 'center', marginTop: -8, marginBottom: 12 },
   content: { paddingBottom: 40 },
+  blockedCard: {
+    backgroundColor: BG,
+    borderColor: BORDER,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 16,
+  },
+  blockedTitle: { fontSize: 13, fontWeight: '700', color: TEXT, marginBottom: 4 },
+  blockedText: { fontSize: 12, color: MUTED, lineHeight: 18 },
   cardPreview: {
     backgroundColor: CARD_PREVIEW_BG,
     borderRadius: 20,

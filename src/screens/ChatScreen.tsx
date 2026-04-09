@@ -11,6 +11,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Switch,
+  Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Reanimated, { 
@@ -27,9 +28,14 @@ import { ActiveTheme, Colors } from '../constants/colors';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { MOCK_USERS } from '../data/mockData';
 import { useStore } from '../store/useStore';
-import { fetchConversationMessagesFromApi, sendConversationMessageOnApi } from '../services/chatApi';
+import {
+  createGroupInviteLinkOnApi,
+  fetchConversationMessagesFromApi,
+  sendConversationMessageOnApi,
+} from '../services/chatApi';
 import { useToast } from '../context/ToastContext';
 import { BottomSheetPicker } from '../components/BottomSheetPicker';
+import { parseApiError } from '../lib/apiClient';
 
 type Props = StackScreenProps<RootStackParamList, 'Chat'>;
 
@@ -184,6 +190,9 @@ export default function ChatScreen({ navigation, route }: Props) {
   const [readReceiptsEnabled, setReadReceiptsEnabled] = useState(true);
   const [safetyGuardEnabled, setSafetyGuardEnabled] = useState(true);
   const [composerAssistEnabled, setComposerAssistEnabled] = useState(true);
+  const [isCreatingInvite, setIsCreatingInvite] = useState(false);
+  const [latestInviteLink, setLatestInviteLink] = useState<string | null>(null);
+  const [latestInviteMeta, setLatestInviteMeta] = useState<string | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
   const { formatFromFiat } = useFormattedPrice();
 
@@ -374,6 +383,39 @@ export default function ChatScreen({ navigation, route }: Props) {
     appendToConversationStore(photoMessage, currentUser?.id ?? 'me');
   };
 
+  const handleShareGroupInvite = async () => {
+    if (!isGroup) {
+      return;
+    }
+
+    setIsCreatingInvite(true);
+    try {
+      const invite = await createGroupInviteLinkOnApi(conversationId, {
+        expiresInHours: 72,
+        maxUses: 100,
+      });
+
+      setLatestInviteLink(invite.inviteLink);
+
+      const expiryLabel = new Date(invite.expiresAt).toLocaleString();
+      const usageLabel = invite.maxUses > 0
+        ? `${invite.useCount}/${invite.maxUses} uses`
+        : `${invite.useCount} uses`;
+      setLatestInviteMeta(`${usageLabel} · Expires ${expiryLabel}`);
+
+      await Share.share({
+        message: `Join ${conversation?.title ?? 'my group'} on Thryftverse: ${invite.inviteLink}`,
+      });
+
+      show('Invite link generated and ready to share.', 'success');
+    } catch (error) {
+      const parsedError = parseApiError(error, 'Unable to generate invite link right now.');
+      show(parsedError.message, 'error');
+    } finally {
+      setIsCreatingInvite(false);
+    }
+  };
+
   const handleAcceptOffer = (msgId: string) => {
     setMessages(prev => prev.map(m => m.id === msgId ? { ...m, offer: { ...m.offer!, status: 'accepted' } } : m));
     // Route directly to checkout for the accepted offer
@@ -533,6 +575,24 @@ export default function ChatScreen({ navigation, route }: Props) {
             ) : (
               <Text style={styles.groupBotEmpty}>No bots deployed yet.</Text>
             )}
+
+            <View style={styles.groupInviteRow}>
+              <Text style={styles.groupInviteLabel}>INVITES</Text>
+              <AnimatedPressable
+                style={[styles.groupInviteBtn, isCreatingInvite && styles.groupInviteBtnDisabled]}
+                onPress={() => {
+                  void handleShareGroupInvite();
+                }}
+                activeOpacity={0.85}
+                disabled={isCreatingInvite}
+              >
+                <Ionicons name="share-social-outline" size={14} color={TEXT} />
+                <Text style={styles.groupInviteBtnText}>{isCreatingInvite ? 'Creating...' : 'Share Invite Link'}</Text>
+              </AnimatedPressable>
+            </View>
+
+            {latestInviteLink ? <Text style={styles.groupInviteLink}>{latestInviteLink}</Text> : null}
+            {latestInviteMeta ? <Text style={styles.groupInviteMeta}>{latestInviteMeta}</Text> : null}
           </View>
         </View>
       ) : (
@@ -862,6 +922,52 @@ const styles = StyleSheet.create({
   groupBotEmpty: {
     color: MUTED,
     fontSize: 13,
+    fontFamily: 'Inter_500Medium',
+  },
+  groupInviteRow: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  groupInviteLabel: {
+    color: MUTED,
+    fontSize: 11,
+    fontFamily: 'Inter_600SemiBold',
+    letterSpacing: 0.8,
+  },
+  groupInviteBtn: {
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: BORDER,
+    backgroundColor: CARD_ALT,
+    paddingHorizontal: 10,
+    height: 30,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  groupInviteBtnDisabled: {
+    opacity: 0.5,
+  },
+  groupInviteBtnText: {
+    color: TEXT,
+    fontSize: 11,
+    fontFamily: 'Inter_700Bold',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  groupInviteLink: {
+    marginTop: 8,
+    color: Colors.textPrimary,
+    fontSize: 12,
+    fontFamily: 'Inter_500Medium',
+  },
+  groupInviteMeta: {
+    marginTop: 4,
+    color: MUTED,
+    fontSize: 11,
     fontFamily: 'Inter_500Medium',
   },
   itemThumb: {

@@ -30,11 +30,17 @@ import {
   listPayoutAccounts,
   PayoutAccountPayload,
 } from '../services/walletApi';
+import { getUserCountryCapabilities, UserCountryCapabilities } from '../services/capabilitiesApi';
 import {
   convertDisplayToGbpAmount,
   getDefaultWithdrawDisplayAmount,
   sanitizeDecimalInput,
 } from '../utils/currencyAuthoringFlows';
+import {
+  formatCountryPolicyScope,
+  formatPayoutPolicyHint,
+  isPaymentMethodAllowed,
+} from '../utils/capabilityPolicy';
 
 export default function WithdrawScreen() {
   const navigation = useNavigation<any>();
@@ -42,6 +48,7 @@ export default function WithdrawScreen() {
   const [availableBalance, setAvailableBalance] = useState(120.5);
   const [isWithdrawing, setIsWithdrawing] = useState(false);
   const [payoutAccount, setPayoutAccount] = useState<PayoutAccountPayload | null>(null);
+  const [countryCapabilities, setCountryCapabilities] = useState<UserCountryCapabilities | null>(null);
   const { formatFromFiat } = useFormattedPrice();
   const { currencyCode, goldRates } = useCurrencyContext();
   const { show } = useToast();
@@ -53,6 +60,34 @@ export default function WithdrawScreen() {
     const displayAmount = getDefaultWithdrawDisplayAmount(availableBalance, currencyCode, goldRates);
     setAmount(displayAmount.toFixed(2));
   }, [availableBalance, currencyCode, goldRates]);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    const hydrateCapabilities = async () => {
+      if (!currentUser?.id) {
+        setCountryCapabilities(null);
+        return;
+      }
+
+      try {
+        const capabilities = await getUserCountryCapabilities(currentUser.id);
+        if (!isCancelled) {
+          setCountryCapabilities(capabilities);
+        }
+      } catch {
+        if (!isCancelled) {
+          setCountryCapabilities(null);
+        }
+      }
+    };
+
+    void hydrateCapabilities();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [currentUser?.id]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -89,6 +124,17 @@ export default function WithdrawScreen() {
   const numericAmount = Number(convertDisplayToGbpAmount(numericAmountDisplay, currencyCode, goldRates).toFixed(2));
   const exceedsBalance = numericAmount > availableBalance;
   const canWithdraw = numericAmount > 0 && !exceedsBalance && !isWithdrawing;
+  const allowBankAccounts = isPaymentMethodAllowed(countryCapabilities, 'bank_account');
+
+  const policyScopeLabel = useMemo(
+    () => formatCountryPolicyScope(countryCapabilities),
+    [countryCapabilities]
+  );
+
+  const payoutPolicyHint = useMemo(
+    () => formatPayoutPolicyHint(countryCapabilities),
+    [countryCapabilities]
+  );
 
   const bankCopy = useMemo(() => {
     if (savedPaymentMethod?.type === 'bank_account') {
@@ -99,9 +145,17 @@ export default function WithdrawScreen() {
     }
 
     if (payoutAccount) {
+      const payoutLocation = payoutAccount.countryCode ? ` · ${payoutAccount.countryCode}` : '';
       return {
         name: 'Connected payout profile',
-        details: `${payoutAccount.gatewayId} · ${payoutAccount.currency}`,
+        details: `${payoutAccount.gatewayId} · ${payoutAccount.currency}${payoutLocation}`,
+      };
+    }
+
+    if (!allowBankAccounts) {
+      return {
+        name: 'Bank payouts unavailable in your region',
+        details: 'Country policy will route withdrawals through supported payout rails.',
       };
     }
 
@@ -109,15 +163,41 @@ export default function WithdrawScreen() {
       name: 'No bank account linked',
       details: 'Add a bank account to enable withdrawals',
     };
-  }, [savedPaymentMethod, payoutAccount]);
+  }, [allowBankAccounts, savedPaymentMethod, payoutAccount]);
 
-  const ensurePayoutAccount = async (): Promise<PayoutAccountPayload> => {
+  const ensureCapabilities = async (): Promise<UserCountryCapabilities | null> => {
+    if (!currentUser?.id) {
+      return null;
+    }
+
+    if (countryCapabilities) {
+      return countryCapabilities;
+    }
+
+    try {
+      const fetchedCapabilities = await getUserCountryCapabilities(currentUser.id);
+      setCountryCapabilities(fetchedCapabilities);
+      return fetchedCapabilities;
+    } catch {
+      return null;
+    }
+  };
+
+  const ensurePayoutAccount = async (): Promise<{
+    account: PayoutAccountPayload;
+    capabilities: UserCountryCapabilities | null;
+  }> => {
     if (!currentUser?.id) {
       throw new Error('Please sign in to withdraw your balance.');
     }
 
+    const resolvedCapabilities = await ensureCapabilities();
+
     if (payoutAccount && payoutAccount.status === 'active') {
-      return payoutAccount;
+      return {
+        account: payoutAccount,
+        capabilities: resolvedCapabilities,
+      };
     }
 
     const existingAccounts = await listPayoutAccounts(currentUser.id);
@@ -126,21 +206,44 @@ export default function WithdrawScreen() {
 
     if (activeAccount) {
       setPayoutAccount(activeAccount);
-      return activeAccount;
+      return {
+        account: activeAccount,
+        capabilities: resolvedCapabilities,
+      };
     }
 
+    if (resolvedCapabilities && resolvedCapabilities.payouts.gatewayPriority.length === 0) {
+      throw new Error('No payout gateway is available for your country policy right now.');
+    }
+
+    const preferredGateway = resolvedCapabilities?.payouts.gatewayPriority[0] ?? 'stripe_americas';
+    const defaultPayoutCurrency =
+      resolvedCapabilities?.payouts.defaultCurrency
+      ?? resolvedCapabilities?.currency.defaultCurrency
+      ?? 'GBP';
+    const defaultPayoutCountry =
+      resolvedCapabilities?.effectiveCountryCode
+      ?? resolvedCapabilities?.countryCode
+      ?? 'GB';
+
     const createdAccount = await createPayoutAccount(currentUser.id, {
-      currency: 'GBP',
-      countryCode: 'GB',
+      gatewayId: preferredGateway,
+      currency: defaultPayoutCurrency,
+      countryCode: defaultPayoutCountry,
       metadata: {
         source: 'withdraw_screen_auto_create',
         linkedPaymentMethodLabel: savedPaymentMethod?.label ?? null,
         linkedPaymentMethodDetails: savedPaymentMethod?.details ?? null,
+        countryCluster: resolvedCapabilities?.countryCluster ?? null,
+        capabilityPolicyVersion: resolvedCapabilities?.policyVersion ?? null,
       },
     });
 
     setPayoutAccount(createdAccount);
-    return createdAccount;
+    return {
+      account: createdAccount,
+      capabilities: resolvedCapabilities,
+    };
   };
 
   const handleWithdraw = async () => {
@@ -156,7 +259,7 @@ export default function WithdrawScreen() {
 
     setIsWithdrawing(true);
     try {
-      const payoutProfile = await ensurePayoutAccount();
+      const { account: payoutProfile, capabilities: activeCapabilities } = await ensurePayoutAccount();
       const amountGbp = Number(numericAmount.toFixed(2));
 
       if (!Number.isFinite(amountGbp) || amountGbp <= 0) {
@@ -164,6 +267,16 @@ export default function WithdrawScreen() {
       }
 
       const payoutCurrency = payoutProfile.currency.toUpperCase();
+
+      if (
+        activeCapabilities
+        && !activeCapabilities.payouts.supportedCurrencies.includes(payoutCurrency)
+      ) {
+        throw new Error(
+          `Payout currency ${payoutCurrency} is unavailable for your country policy. Update your payout account.`
+        );
+      }
+
       let payoutAmount = amountGbp;
 
       if (payoutCurrency !== 'GBP') {
@@ -269,13 +382,23 @@ export default function WithdrawScreen() {
             />
           </View>
           <Text style={styles.availableText}>Available: {formatFromFiat(availableBalance, 'GBP', { displayMode: 'fiat' })}</Text>
+          {policyScopeLabel ? <Text style={styles.policyLabel}>Policy scope: {policyScopeLabel}</Text> : null}
+          {payoutPolicyHint ? <Text style={styles.policyHint}>{payoutPolicyHint}</Text> : null}
           {exceedsBalance ? <Text style={styles.balanceError}>Entered amount exceeds available balance.</Text> : null}
 
           <Text style={styles.sectionTitle}>Transfer to</Text>
           <AnimatedPressable
             style={styles.bankCard}
             activeOpacity={0.8}
-            onPress={() => navigation.navigate('AddBankAccount')}
+            onPress={() => {
+              if (!allowBankAccounts) {
+                show('Bank account setup is unavailable in your country policy.', 'error');
+                navigation.navigate('Payments');
+                return;
+              }
+
+              navigation.navigate('AddBankAccount');
+            }}
           >
             <View style={styles.bankLeft}>
               <View style={styles.bankIcon}>
@@ -289,10 +412,14 @@ export default function WithdrawScreen() {
             <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
           </AnimatedPressable>
 
-          <AnimatedPressable style={styles.addBankBtn} onPress={() => navigation.navigate('AddBankAccount')}>
-            <Ionicons name="add" size={18} color={Colors.accent} />
-            <Text style={styles.addBankText}>Add a new bank account</Text>
-          </AnimatedPressable>
+          {allowBankAccounts ? (
+            <AnimatedPressable style={styles.addBankBtn} onPress={() => navigation.navigate('AddBankAccount')}>
+              <Ionicons name="add" size={18} color={Colors.accent} />
+              <Text style={styles.addBankText}>Add a new bank account</Text>
+            </AnimatedPressable>
+          ) : (
+            <Text style={styles.railHintText}>Bank account setup is currently disabled for this region policy.</Text>
+          )}
 
         </ScrollView>
 
@@ -327,8 +454,10 @@ const styles = StyleSheet.create({
   amountWrap: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 40, marginBottom: 12 },
   currencySymbol: { fontSize: 44, fontFamily: 'Inter_700Bold', color: Colors.textPrimary, marginRight: 8 },
   amountInput: { fontSize: 56, fontFamily: 'Inter_700Bold', color: Colors.textPrimary, minWidth: 150 },
-  availableText: { textAlign: 'center', fontSize: 14, fontFamily: 'Inter_500Medium', color: Colors.textSecondary, marginBottom: 40 },
-  balanceError: { textAlign: 'center', marginTop: -28, marginBottom: 24, fontSize: 12, fontFamily: 'Inter_600SemiBold', color: Colors.danger },
+  availableText: { textAlign: 'center', fontSize: 14, fontFamily: 'Inter_500Medium', color: Colors.textSecondary, marginBottom: 8 },
+  policyLabel: { textAlign: 'center', fontSize: 12, fontFamily: 'Inter_600SemiBold', color: Colors.textMuted, marginBottom: 4 },
+  policyHint: { textAlign: 'center', fontSize: 12, fontFamily: 'Inter_500Medium', color: Colors.textMuted, marginBottom: 28 },
+  balanceError: { textAlign: 'center', marginTop: 4, marginBottom: 20, fontSize: 12, fontFamily: 'Inter_600SemiBold', color: Colors.danger },
 
   sectionTitle: { fontSize: 13, fontFamily: 'Inter_600SemiBold', color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 12 },
 
@@ -340,6 +469,7 @@ const styles = StyleSheet.create({
 
   addBankBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 12 },
   addBankText: { fontSize: 15, fontFamily: 'Inter_600SemiBold', color: Colors.accent },
+  railHintText: { fontSize: 12, fontFamily: 'Inter_500Medium', color: Colors.textMuted, paddingVertical: 12 },
 
   footer: { paddingVertical: 20, borderTopWidth: 1, borderTopColor: Colors.border, backgroundColor: Colors.background },
   feeText: { fontSize: 12, fontFamily: 'Inter_400Regular', color: Colors.textMuted, textAlign: 'center', marginBottom: 16 },

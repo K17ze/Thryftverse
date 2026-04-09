@@ -15,8 +15,8 @@ interface RequestDataExportResponse {
     interactions?: unknown[];
     orders?: unknown[];
     auctionBids?: unknown[];
-    syndicateOrders?: unknown[];
-    syndicateHoldings?: unknown[];
+    coOwnOrders?: unknown[];
+    coOwnHoldings?: unknown[];
     consents?: unknown[];
     kycCases?: unknown[];
     amlAlerts?: unknown[];
@@ -53,8 +53,8 @@ function countEstimatedRecords(payload: RequestDataExportResponse['export'] | un
     'interactions',
     'orders',
     'auctionBids',
-    'syndicateOrders',
-    'syndicateHoldings',
+    'coOwnOrders',
+    'coOwnHoldings',
     'consents',
     'kycCases',
     'amlAlerts',

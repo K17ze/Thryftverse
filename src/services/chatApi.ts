@@ -36,6 +36,28 @@ interface ApiBotPayload {
   category: 'moderation' | 'commerce' | 'automation';
 }
 
+interface ApiGroupInvitePayload {
+  id: string;
+  inviteLink: string;
+  tokenPreview: string;
+  createdBy: string;
+  ownerId: string;
+  expiresAt: string;
+  maxUses: number;
+  useCount: number;
+}
+
+export interface GroupInviteLink {
+  id: string;
+  inviteLink: string;
+  tokenPreview: string;
+  createdBy: string;
+  ownerId: string;
+  expiresAt: string;
+  maxUses: number;
+  useCount: number;
+}
+
 function mapApiMessageToConversationMessage(payload: ApiMessagePayload): Message {
   const senderId = payload.senderType === 'bot'
     ? payload.senderBotId ?? 'system'
@@ -202,4 +224,64 @@ export async function fetchChatBotsFromApi(): Promise<ChatBot[]> {
     commandHint: item.commandHint,
     category: item.category,
   }));
+}
+
+export async function createGroupInviteLinkOnApi(
+  conversationId: string,
+  input?: {
+    expiresInHours?: number;
+    maxUses?: number;
+    metadata?: Record<string, unknown>;
+  }
+): Promise<GroupInviteLink> {
+  const payload = await fetchJson<{
+    ok: true;
+    conversationId: string;
+    invite: ApiGroupInvitePayload;
+  }>(`/chat/conversations/${encodeURIComponent(conversationId)}/invite-links`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      expiresInHours: input?.expiresInHours,
+      maxUses: input?.maxUses,
+      metadata: input?.metadata,
+    }),
+  });
+
+  return {
+    id: payload.invite.id,
+    inviteLink: payload.invite.inviteLink,
+    tokenPreview: payload.invite.tokenPreview,
+    createdBy: payload.invite.createdBy,
+    ownerId: payload.invite.ownerId,
+    expiresAt: payload.invite.expiresAt,
+    maxUses: payload.invite.maxUses,
+    useCount: payload.invite.useCount,
+  };
+}
+
+export async function joinGroupByInviteOnApi(inviteToken: string): Promise<{
+  joined: boolean;
+  conversation: Conversation;
+}> {
+  const payload = await fetchJson<{
+    ok: true;
+    joined: boolean;
+    conversation: ApiConversationPayload;
+  }>('/chat/groups/join', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      inviteToken: inviteToken.trim(),
+    }),
+  });
+
+  return {
+    joined: payload.joined,
+    conversation: mapApiConversationToApp(payload.conversation, []),
+  };
 }

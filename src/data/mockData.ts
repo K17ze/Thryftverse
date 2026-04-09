@@ -401,7 +401,7 @@ export const MOCK_CHAT_BOTS: ChatBot[] = [
     id: 'bot_trade',
     slug: 'tradeops',
     name: 'TradeOps Bot',
-    description: 'Posts auction and syndicate market alerts into your group.',
+    description: 'Posts auction and co-own market alerts into your group.',
     commandHint: '/tradeops alerts on',
     category: 'commerce',
   },

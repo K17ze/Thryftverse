@@ -19,7 +19,7 @@ const DARK_COLORS = {
   accent: '#d7b98f',
   accentPress: '#c49f72',
 
-  // Financial accent (SYNDICATE + 1ze only)
+  // Financial accent (CO-OWN + 1ze only)
   accentGold: '#d4a94a',
   accentGoldPress: '#b68c32',
   accentGoldMuted: '#3a2f15',
@@ -65,7 +65,7 @@ const LIGHT_COLORS = {
   accent: '#221f1b',
   accentPress: '#35302a',
 
-  // Financial accent (SYNDICATE + 1ze only)
+  // Financial accent (CO-OWN + 1ze only)
   accentGold: '#9c7a28',
   accentGoldPress: '#7c5f1e',
   accentGoldMuted: '#f0e4c8',
@@ -98,7 +98,7 @@ const LIGHT_COLORS = {
 
 // Accent usage rules (enforce in PR review):
 // - accent: social surfaces (likes, follows, comments, verified badges, saved looks)
-// - accentGold: financial surfaces only (1ze, SYNDICATE, trade CTAs, peg cards, buyout)
+// - accentGold: financial surfaces only (1ze, CO-OWN, trade CTAs, peg cards, buyout)
 // - success: transient confirmations only (not price-up states)
 // - danger: errors, destructive actions, and price-down states
 

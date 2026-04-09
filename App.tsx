@@ -1,5 +1,5 @@
 import React from 'react';
-import { NavigationContainer, DarkTheme, DefaultTheme, Theme } from '@react-navigation/native';
+import { NavigationContainer, DarkTheme, DefaultTheme, Theme, createNavigationContainerRef } from '@react-navigation/native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -13,7 +13,8 @@ import {
   Inter_800ExtraBold,
 } from '@expo-google-fonts/inter';
 import * as SplashScreen from 'expo-splash-screen';
-import { View, ActivityIndicator, Text, TextInput } from 'react-native';
+import * as Linking from 'expo-linking';
+import { View, ActivityIndicator, Text, TextInput, Alert } from 'react-native';
 import { ActiveTheme, Colors } from './src/constants/colors';
 import { ToastProvider } from './src/context/ToastContext';
 import { TabScrollProvider } from './src/context/TabScrollContext';
@@ -31,12 +32,18 @@ import {
 } from './src/theme/themePreference';
 import { restoreAuthSession } from './src/services/authApi';
 import { useStore } from './src/store/useStore';
+import { joinGroupByInviteOnApi } from './src/services/chatApi';
+import { parseApiError } from './src/lib/apiClient';
 import { getStoredProfileMedia } from './src/preferences/profileMediaPreferences';
 import { getStoredAuthSnapshot } from './src/preferences/authSnapshot';
+import type { RootStackParamList } from './src/navigation/types';
+import { extractGroupInviteToken } from './src/utils/groupInviteLink';
 
 SplashScreen.preventAutoHideAsync().catch(() => {
   // Keep app startup resilient even if splash API rejects.
 });
+
+const navigationRef = createNavigationContainerRef<RootStackParamList>();
 
 let globalTypographyApplied = false;
 
@@ -73,7 +80,12 @@ export default function App() {
   const [bootTimedOut, setBootTimedOut] = React.useState(false);
   const [themeInitialized, setThemeInitialized] = React.useState(false);
   const [ThemeReadyNavigator, setThemeReadyNavigator] = React.useState<React.ComponentType | null>(null);
+  const [pendingInviteToken, setPendingInviteToken] = React.useState<string | null>(null);
+  const [isJoiningInvite, setIsJoiningInvite] = React.useState(false);
+  const [queuedConversationId, setQueuedConversationId] = React.useState<string | null>(null);
   const [, setThemeTick] = React.useState(0);
+  const isAuthenticated = useStore((state) => state.isAuthenticated);
+  const upsertConversation = useStore((state) => state.upsertConversation);
 
   const [fontsLoaded, fontLoadError] = useFonts({
     Inter_300Light,
@@ -172,6 +184,87 @@ export default function App() {
   const fontsReady = fontsLoaded || !!fontLoadError || bootTimedOut;
   const appReady = fontsReady && themeInitialized && !!ThemeReadyNavigator;
 
+  const captureInviteFromUrl = React.useCallback((url: string | null) => {
+    if (!url) {
+      return false;
+    }
+
+    if (!/group-invite/i.test(url)) {
+      return false;
+    }
+
+    const inviteToken = extractGroupInviteToken(url);
+    if (!inviteToken) {
+      return false;
+    }
+
+    setPendingInviteToken(inviteToken);
+    return true;
+  }, []);
+
+  React.useEffect(() => {
+    void (async () => {
+      const initialUrl = await Linking.getInitialURL();
+      captureInviteFromUrl(initialUrl);
+    })();
+
+    const subscription = Linking.addEventListener('url', ({ url }) => {
+      captureInviteFromUrl(url);
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [captureInviteFromUrl]);
+
+  React.useEffect(() => {
+    if (!appReady || !pendingInviteToken || !isAuthenticated || isJoiningInvite) {
+      return;
+    }
+
+    let cancelled = false;
+    setIsJoiningInvite(true);
+
+    void (async () => {
+      try {
+        const result = await joinGroupByInviteOnApi(pendingInviteToken);
+
+        if (cancelled) {
+          return;
+        }
+
+        upsertConversation(result.conversation);
+        setPendingInviteToken(null);
+
+        if (navigationRef.isReady()) {
+          navigationRef.navigate('Chat', {
+            conversationId: result.conversation.id,
+          });
+        } else {
+          setQueuedConversationId(result.conversation.id);
+        }
+
+        Alert.alert('Group Invite', result.joined ? 'Joined group successfully.' : 'You are already in this group.');
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        const parsedError = parseApiError(error, 'Unable to join this group invite.');
+        Alert.alert('Group Invite', parsedError.message);
+        setPendingInviteToken(null);
+      } finally {
+        if (!cancelled) {
+          setIsJoiningInvite(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [appReady, isAuthenticated, isJoiningInvite, pendingInviteToken, upsertConversation]);
+
   React.useEffect(() => {
     if (!appReady) {
       return;
@@ -237,7 +330,20 @@ export default function App() {
               <CurrencyProvider>
                 <SettingsPreferencesProvider>
                   <TabScrollProvider>
-                    <NavigationContainer theme={premiumNavigationTheme}>
+                    <NavigationContainer
+                      ref={navigationRef}
+                      theme={premiumNavigationTheme}
+                      onReady={() => {
+                        if (!queuedConversationId) {
+                          return;
+                        }
+
+                        navigationRef.navigate('Chat', {
+                          conversationId: queuedConversationId,
+                        });
+                        setQueuedConversationId(null);
+                      }}
+                    >
                       <StatusBar style={ActiveTheme === 'light' ? 'dark' : 'light'} backgroundColor={Colors.background} />
                       {ThemeReadyNavigator ? <ThemeReadyNavigator /> : null}
                     </NavigationContainer>

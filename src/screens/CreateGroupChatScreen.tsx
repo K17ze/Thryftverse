@@ -17,7 +17,9 @@ import { MOCK_USERS } from '../data/mockData';
 import { useStore } from '../store/useStore';
 import { useToast } from '../context/ToastContext';
 import { CachedImage } from '../components/CachedImage';
-import { createGroupConversationOnApi } from '../services/chatApi';
+import { createGroupConversationOnApi, joinGroupByInviteOnApi } from '../services/chatApi';
+import { parseApiError } from '../lib/apiClient';
+import { extractGroupInviteToken } from '../utils/groupInviteLink';
 
 type Props = StackScreenProps<RootStackParamList, 'CreateGroupChat'>;
 
@@ -34,6 +36,8 @@ export default function CreateGroupChatScreen({ navigation }: Props) {
   const [title, setTitle] = useState('');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [isCreating, setIsCreating] = useState(false);
+  const [inviteInput, setInviteInput] = useState('');
+  const [isJoining, setIsJoining] = useState(false);
 
   const members = useMemo(
     () => MOCK_USERS.filter((user) => user.id !== (currentUser?.id ?? 'me')),
@@ -52,11 +56,6 @@ export default function CreateGroupChatScreen({ navigation }: Props) {
     const groupTitle = title.trim();
     if (!groupTitle) {
       show('Add a group title to continue.', 'error');
-      return;
-    }
-
-    if (!selectedIds.length) {
-      show('Select at least one member.', 'error');
       return;
     }
 
@@ -83,6 +82,28 @@ export default function CreateGroupChatScreen({ navigation }: Props) {
       navigation.replace('Chat', { conversationId });
     } finally {
       setIsCreating(false);
+    }
+  };
+
+  const handleJoinViaInvite = async () => {
+    const inviteToken = extractGroupInviteToken(inviteInput);
+    if (!inviteToken) {
+      show('Paste a valid invite link or invite token.', 'error');
+      return;
+    }
+
+    setIsJoining(true);
+
+    try {
+      const result = await joinGroupByInviteOnApi(inviteToken);
+      upsertConversation(result.conversation);
+      show(result.joined ? 'Joined group successfully.' : 'You are already in this group.', 'success');
+      navigation.replace('Chat', { conversationId: result.conversation.id });
+    } catch (error) {
+      const parsedError = parseApiError(error, 'Unable to join group with invite link.');
+      show(parsedError.message, 'error');
+    } finally {
+      setIsJoining(false);
     }
   };
 
@@ -114,8 +135,31 @@ export default function CreateGroupChatScreen({ navigation }: Props) {
           />
         </View>
 
+        <View style={styles.joinCard}>
+          <Text style={styles.label}>Join with invite link</Text>
+          <TextInput
+            value={inviteInput}
+            onChangeText={setInviteInput}
+            placeholder="Paste invite link or token"
+            placeholderTextColor={Colors.textMuted}
+            style={styles.input}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <AnimatedPressable
+            style={[styles.joinBtn, (!inviteInput.trim() || isJoining) && styles.joinBtnDisabled]}
+            activeOpacity={0.9}
+            onPress={() => {
+              void handleJoinViaInvite();
+            }}
+            disabled={!inviteInput.trim() || isJoining}
+          >
+            <Text style={styles.joinBtnText}>{isJoining ? 'Joining...' : 'Join Group'}</Text>
+          </AnimatedPressable>
+        </View>
+
         <View style={styles.sectionRow}>
-          <Text style={styles.sectionTitle}>Members</Text>
+          <Text style={styles.sectionTitle}>Members (optional)</Text>
           <Text style={styles.sectionMeta}>{selectedIds.length} selected</Text>
         </View>
 
@@ -156,12 +200,12 @@ export default function CreateGroupChatScreen({ navigation }: Props) {
         />
 
         <AnimatedPressable
-          style={[styles.createBtn, (!title.trim() || !selectedIds.length || isCreating) && styles.createBtnDisabled]}
+          style={[styles.createBtn, (!title.trim() || isCreating) && styles.createBtnDisabled]}
           activeOpacity={0.9}
           onPress={() => {
             void handleCreateGroup();
           }}
-          disabled={!title.trim() || !selectedIds.length || isCreating}
+          disabled={!title.trim() || isCreating}
         >
           <Text style={styles.createBtnText}>{isCreating ? 'Creating...' : 'Create Group'}</Text>
         </AnimatedPressable>
@@ -205,6 +249,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingTop: 12,
     paddingBottom: 8,
+    marginBottom: 14,
+  },
+  joinCard: {
+    backgroundColor: PANEL,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: BORDER,
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 12,
     marginBottom: 14,
   },
   label: {
@@ -269,6 +323,25 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     fontFamily: 'Inter_400Regular',
     fontSize: 12,
+  },
+  joinBtn: {
+    marginTop: 8,
+    backgroundColor: Colors.cardAlt,
+    borderRadius: 20,
+    height: 40,
+    borderWidth: 1,
+    borderColor: BORDER,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  joinBtnDisabled: {
+    opacity: 0.45,
+  },
+  joinBtnText: {
+    color: Colors.textPrimary,
+    fontFamily: 'Inter_700Bold',
+    fontSize: 13,
+    letterSpacing: 0.2,
   },
   createBtn: {
     marginTop: 'auto',

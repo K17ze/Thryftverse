@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -24,12 +24,12 @@ import {
 } from '../services/marketApi';
 
 type NavT = StackNavigationProp<RootStackParamList>;
-type LedgerFilter = 'ALL' | 'AUCTION' | 'SYNDICATE';
+type LedgerFilter = 'ALL' | 'AUCTION' | 'CO-OWN';
 
 type LedgerEntry = {
   id: string;
   timestamp: string;
-  channel: 'auction' | 'syndicate';
+  channel: 'auction' | 'co-own';
   action: 'bid' | 'win' | 'buy-units' | 'sell-units';
   referenceId: string;
   amountGBP: number;
@@ -120,7 +120,7 @@ export default function MarketLedgerScreen() {
   const navigation = useNavigation<NavT>();
   const localEntries = useStore((state) => state.marketLedger);
   const currentUser = useStore((state) => state.currentUser);
-  const syndicateRuntime = useStore((state) => state.syndicateRuntime);
+  const coOwnRuntime = useStore((state) => state.coOwnRuntime);
   const viewerId = currentUser?.id ?? 'u1';
 
   const [filter, setFilter] = React.useState<LedgerFilter>('ALL');
@@ -204,7 +204,7 @@ export default function MarketLedgerScreen() {
       return entries;
     }
 
-    const channel = filter === 'AUCTION' ? 'auction' : 'syndicate';
+    const channel = filter === 'AUCTION' ? 'auction' : 'co-own';
     return entries.filter((entry) => entry.channel === channel);
   }, [entries, filter]);
 
@@ -213,9 +213,9 @@ export default function MarketLedgerScreen() {
     [filteredEntries]
   );
 
-  const realizedSyndicatePL = React.useMemo(
-    () => Object.values(syndicateRuntime).reduce((sum, runtime) => sum + runtime.realizedProfitGBP, 0),
-    [syndicateRuntime]
+  const realizedCoOwnPL = React.useMemo(
+    () => Object.values(coOwnRuntime).reduce((sum, runtime) => sum + runtime.realizedProfitGBP, 0),
+    [coOwnRuntime]
   );
 
   const netCashflow = React.useMemo(
@@ -306,8 +306,8 @@ export default function MarketLedgerScreen() {
             <Text style={styles.metricsSubLabel}>Realized P/L</Text>
             <Text style={[
               styles.metricsSubValue,
-              realizedSyndicatePL >= 0 ? styles.rowAmountPositive : styles.rowAmountNegative,
-            ]}>{formatSignedMoney(realizedSyndicatePL)}</Text>
+              realizedCoOwnPL >= 0 ? styles.rowAmountPositive : styles.rowAmountNegative,
+            ]}>{formatSignedMoney(realizedCoOwnPL)}</Text>
           </View>
 
           <View style={styles.metricsSubCol}>
@@ -321,7 +321,7 @@ export default function MarketLedgerScreen() {
       </View>
 
       <View style={styles.filtersRow}>
-        {(['ALL', 'AUCTION', 'SYNDICATE'] as const).map((nextFilter) => {
+        {(['ALL', 'AUCTION', 'CO-OWN'] as const).map((nextFilter) => {
           const active = filter === nextFilter;
           return (
             <AnimatedPressable

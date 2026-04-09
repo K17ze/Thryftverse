@@ -146,7 +146,7 @@ async function main() {
     assert(compliance.profile?.tradingEnabled === true, `Trading was not enabled for user ${userId}`);
   }
 
-  console.log('[check] Compliance consent acceptance for syndicate trading');
+  console.log('[check] Compliance consent acceptance for co-own trading');
   const riskDisclosureDocuments = await requestJson(
     `${API_BASE}/compliance/consents/documents?docType=risk_disclosure&activeOnly=true&limit=10`,
     {
@@ -160,7 +160,7 @@ async function main() {
   );
   assert(
     typeof activeRiskDisclosure?.id === 'string' && activeRiskDisclosure.id.length > 3,
-    'Missing active risk disclosure document required for syndicate trading'
+    'Missing active risk disclosure document required for co-own trading'
   );
 
   for (const actor of [
@@ -258,7 +258,7 @@ async function main() {
   const smokeAuctionId = createSmokeId('a_smoke');
   const smokeAssetId = createSmokeId('s_smoke');
   const smokeAuctionListingId = createSmokeId('l_smoke_auction');
-  const smokeSyndicateListingId = createSmokeId('l_smoke_syndicate');
+  const smokeCoOwnListingId = createSmokeId('l_smoke_coOwn');
 
   const smokeAuctionListing = await requestJson(`${API_BASE}/listings`, {
     method: 'POST',
@@ -274,19 +274,19 @@ async function main() {
   });
   assert(smokeAuctionListing.ok === true, 'Smoke auction listing creation failed');
 
-  const smokeSyndicateListing = await requestJson(`${API_BASE}/listings`, {
+  const smokeCoOwnListing = await requestJson(`${API_BASE}/listings`, {
     method: 'POST',
     headers: { ...sellerAuthHeaders, 'content-type': 'application/json' },
     body: JSON.stringify({
-      id: smokeSyndicateListingId,
+      id: smokeCoOwnListingId,
       sellerId: sellerUserId,
-      title: 'Smoke Syndicate Listing',
-      description: 'Smoke listing used for docker syndicate asset validation.',
+      title: 'Smoke Co-Own Listing',
+      description: 'Smoke listing used for docker co-own asset validation.',
       priceGbp: 189,
-      imageUrl: 'https://picsum.photos/seed/docker-smoke-syndicate/800/1000',
+      imageUrl: 'https://picsum.photos/seed/docker-smoke-co-own/800/1000',
     }),
   });
-  assert(smokeSyndicateListing.ok === true, 'Smoke syndicate listing creation failed');
+  assert(smokeCoOwnListing.ok === true, 'Smoke co-own listing creation failed');
 
   const auctionCreate = await requestJson(`${API_BASE}/auctions`, {
     method: 'POST',
@@ -332,12 +332,12 @@ async function main() {
     'Expected at least two smoke bids for smoke user'
   );
 
-  const assetCreate = await requestJson(`${API_BASE}/syndicate/assets`, {
+  const assetCreate = await requestJson(`${API_BASE}/co-own/assets`, {
     method: 'POST',
     headers: { ...sellerAuthHeaders, 'content-type': 'application/json' },
     body: JSON.stringify({
       id: smokeAssetId,
-      listingId: smokeSyndicateListingId,
+      listingId: smokeCoOwnListingId,
       issuerId: sellerUserId,
       totalUnits: 20,
       unitPriceGbp: 1.5,
@@ -346,9 +346,9 @@ async function main() {
       issuerJurisdiction: 'GB',
     }),
   });
-  assert(assetCreate.ok === true, 'Syndicate asset creation failed');
+  assert(assetCreate.ok === true, 'Co-Own asset creation failed');
 
-  const syndicateOrderOne = await requestJson(`${API_BASE}/syndicate/assets/${smokeAssetId}/orders`, {
+  const coOwnOrderOne = await requestJson(`${API_BASE}/co-own/assets/${smokeAssetId}/orders`, {
     method: 'POST',
     headers: { ...authHeaders, 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -357,9 +357,9 @@ async function main() {
       units: 8,
     }),
   });
-  assert(syndicateOrderOne.ok === true, 'First syndicate order failed');
+  assert(coOwnOrderOne.ok === true, 'First co-own order failed');
 
-  const syndicateOrderTwo = await requestJson(`${API_BASE}/syndicate/assets/${smokeAssetId}/orders`, {
+  const coOwnOrderTwo = await requestJson(`${API_BASE}/co-own/assets/${smokeAssetId}/orders`, {
     method: 'POST',
     headers: { ...authHeaders, 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -368,15 +368,15 @@ async function main() {
       units: 5,
     }),
   });
-  assert(syndicateOrderTwo.ok === true, 'Second syndicate order failed');
+  assert(coOwnOrderTwo.ok === true, 'Second co-own order failed');
 
-  const assetOrders = await requestJson(`${API_BASE}/syndicate/assets/${smokeAssetId}/orders?limit=10`, {
+  const assetOrders = await requestJson(`${API_BASE}/co-own/assets/${smokeAssetId}/orders?limit=10`, {
     headers: authHeaders,
   });
-  assert(Array.isArray(assetOrders.items), 'Syndicate orders endpoint did not return items array');
+  assert(Array.isArray(assetOrders.items), 'Co-Own orders endpoint did not return items array');
   assert(
     assetOrders.items.filter((item) => item.userId === smokeUserId).length >= 2,
-    'Expected at least two smoke syndicate orders for smoke user'
+    'Expected at least two smoke co-own orders for smoke user'
   );
 
   const marketHistoryPageOne = await requestJson(`${API_BASE}/users/${encodeURIComponent(smokeUserId)}/market-history?channel=all&limit=2`, {
@@ -414,7 +414,7 @@ async function main() {
   );
   assert(
     marketHistoryCombined.some((item) => item.referenceId === smokeAssetId),
-    'Market-history did not include smoke syndicate entries'
+    'Market-history did not include smoke co-own entries'
   );
 
   const auctionHistory = await requestJson(`${API_BASE}/users/${encodeURIComponent(smokeUserId)}/market-history?channel=auction&limit=10`, {
@@ -426,13 +426,13 @@ async function main() {
     'Auction-only market-history contained non-auction entries'
   );
 
-  const syndicateHistory = await requestJson(`${API_BASE}/users/${encodeURIComponent(smokeUserId)}/market-history?channel=syndicate&limit=10`, {
+  const coOwnHistory = await requestJson(`${API_BASE}/users/${encodeURIComponent(smokeUserId)}/market-history?channel=co-own&limit=10`, {
     headers: authHeaders,
   });
-  assert(Array.isArray(syndicateHistory.items), 'Syndicate-only market-history missing items array');
+  assert(Array.isArray(coOwnHistory.items), 'Co-Own-only market-history missing items array');
   assert(
-    syndicateHistory.items.every((item) => item.channel === 'syndicate'),
-    'Syndicate-only market-history contained non-syndicate entries'
+    coOwnHistory.items.every((item) => item.channel === 'co-own'),
+    'Co-Own-only market-history contained non-co-own entries'
   );
 
   console.log('[check] Secure profile encrypt/decrypt roundtrip');

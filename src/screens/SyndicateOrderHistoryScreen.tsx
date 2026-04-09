@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -26,7 +26,7 @@ import {
   MarketHistoryItem,
   listUserMarketHistory,
 } from '../services/marketApi';
-import { SYNDICATE_FEE_RATE } from '../utils/tradeFlow';
+import { CO_OWN_FEE_RATE } from '../utils/tradeFlow';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 
@@ -142,7 +142,7 @@ function mapRemoteHistoryToEntries(history: MarketHistoryItem[]): HistoryEntry[]
   return history
     .filter(
       (item) =>
-        item.channel === 'syndicate' &&
+        item.channel === 'co-own' &&
         (item.action === 'buy-units' || item.action === 'sell-units')
     )
     .map<HistoryEntry>((item) => {
@@ -165,7 +165,7 @@ function mapRemoteHistoryToEntries(history: MarketHistoryItem[]): HistoryEntry[]
         quantity,
         pricePerShare,
         totalAmount: item.amountGbp,
-        fee: item.feeGbp ?? Number((item.amountGbp * SYNDICATE_FEE_RATE).toFixed(2)),
+        fee: item.feeGbp ?? Number((item.amountGbp * CO_OWN_FEE_RATE).toFixed(2)),
         status,
         filledQuantity: status === 'filled' ? quantity : 0,
         createdAt: item.timestamp,
@@ -175,7 +175,7 @@ function mapRemoteHistoryToEntries(history: MarketHistoryItem[]): HistoryEntry[]
     .sort(sortHistoryEntriesDesc);
 }
 
-export default function SyndicateOrderHistoryScreen() {
+export default function CoOwnOrderHistoryScreen() {
   const navigation = useNavigation<NavT>();
   const marketLedger = useStore((state) => state.marketLedger);
   const currentUser = useStore((state) => state.currentUser);
@@ -197,7 +197,7 @@ export default function SyndicateOrderHistoryScreen() {
 
     try {
       const page = await listUserMarketHistory(viewerId, {
-        channel: 'syndicate',
+        channel: 'co-own',
         limit: PAGE_SIZE,
       });
 
@@ -223,7 +223,7 @@ export default function SyndicateOrderHistoryScreen() {
     setIsLoadingMore(true);
     try {
       const page = await listUserMarketHistory(viewerId, {
-        channel: 'syndicate',
+        channel: 'co-own',
         limit: PAGE_SIZE,
         cursorTs: nextCursor.cursorTs,
         cursorId: nextCursor.cursorId,
@@ -259,7 +259,7 @@ export default function SyndicateOrderHistoryScreen() {
 
   const ledgerOrders = React.useMemo<HistoryEntry[]>(() => {
     return marketLedger
-      .filter((entry) => entry.channel === 'syndicate')
+      .filter((entry) => entry.channel === 'co-own')
       .map((entry) => {
         const quantity = Math.max(0, entry.units ?? 0);
         const totalAmount = Number(entry.amountGBP.toFixed(2));
@@ -273,7 +273,7 @@ export default function SyndicateOrderHistoryScreen() {
           quantity,
           pricePerShare,
           totalAmount,
-          fee: Number((totalAmount * SYNDICATE_FEE_RATE).toFixed(2)),
+          fee: Number((totalAmount * CO_OWN_FEE_RATE).toFixed(2)),
           status: 'filled',
           filledQuantity: quantity,
           createdAt: entry.timestamp,
@@ -383,7 +383,7 @@ export default function SyndicateOrderHistoryScreen() {
         <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={22} color={Colors.textPrimary} />
         </AnimatedPressable>
-        <Text style={styles.headerTitle}>Syndicate Orders</Text>
+        <Text style={styles.headerTitle}>Co-Own Orders</Text>
         <View style={{ width: 40 }} />
       </View>
 
@@ -469,10 +469,10 @@ export default function SyndicateOrderHistoryScreen() {
         ListEmptyComponent={
           <EmptyState
             icon="receipt-outline"
-            title="No syndicate orders"
+            title="No co-own orders"
             subtitle="Your buy and sell activity will appear here once you start trading."
             ctaLabel="Open Hub"
-            onCtaPress={() => navigation.navigate('SyndicateHub')}
+            onCtaPress={() => navigation.navigate('CoOwnHub')}
           />
         }
       />

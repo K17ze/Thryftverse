@@ -19,9 +19,9 @@ import { Typography } from '../constants/typography';
 import { RootStackParamList } from '../navigation/types';
 import {
   formatMoney,
-  getSyndicateMarket,
+  getCoOwnMarket,
   getUserLabel,
-  SyndicateAsset,
+  CoOwnAsset,
 } from '../data/tradeHub';
 import { useToast } from '../context/ToastContext';
 import { EmptyState } from '../components/EmptyState';
@@ -33,10 +33,10 @@ import { SyncStatusPill } from '../components/SyncStatusPill';
 import { SyncRetryBanner } from '../components/SyncRetryBanner';
 import { formatIzeAmount, toIze } from '../utils/currency';
 import { parseApiError } from '../lib/apiClient';
-import { listSyndicateAssets, placeSyndicateOrder } from '../services/marketApi';
+import { listCoOwnAssets, placeCoOwnOrder } from '../services/marketApi';
 
 type NavT = StackNavigationProp<RootStackParamList>;
-type SyndicateView = 'ISSUED' | 'HOLDINGS';
+type CoOwnView = 'ISSUED' | 'HOLDINGS';
 
 const STABLE_COIN = '1ze';
 const IS_LIGHT = ActiveTheme === 'light';
@@ -50,7 +50,7 @@ const PANEL_TINT_BG = IS_LIGHT ? '#ece4d8' : '#2f291f';
 const PANEL_TINT_BORDER = IS_LIGHT ? '#d0c3af' : '#4f4638';
 const POSITIVE_BG = IS_LIGHT ? '#ece4d8' : '#14302a';
 const NEGATIVE_BG = IS_LIGHT ? '#f3dddd' : '#301919';
-const SYNDICATE_MAX_UNITS = 20;
+const CO_OWN_MAX_UNITS = 20;
 
 const COUNTRY_OPTIONS = [
   { code: 'GB', label: 'United Kingdom' },
@@ -107,37 +107,37 @@ function formatSigned(value: number) {
   return `${sign}${formatMoney(Math.abs(value))}`;
 }
 
-export default function SyndicateScreen() {
+export default function CoOwnScreen() {
   const navigation = useNavigation<NavT>();
   const { show } = useToast();
   const { goldRates } = useCurrencyContext();
   const { formatFromFiat, formatFromIze } = useFormattedPrice();
   const currentUser = useStore((state) => state.currentUser);
-  const customSyndicates = useStore((state) => state.customSyndicates);
-  const syndicateRuntime = useStore((state) => state.syndicateRuntime);
-  const syndicateCompliance = useStore((state) => state.syndicateCompliance);
-  const updateSyndicateCompliance = useStore((state) => state.updateSyndicateCompliance);
-  const checkSyndicateEligibility = useStore((state) => state.checkSyndicateEligibility);
+  const customCoOwns = useStore((state) => state.customCoOwns);
+  const coOwnRuntime = useStore((state) => state.coOwnRuntime);
+  const coOwnCompliance = useStore((state) => state.coOwnCompliance);
+  const updateCoOwnCompliance = useStore((state) => state.updateCoOwnCompliance);
+  const checkCoOwnEligibility = useStore((state) => state.checkCoOwnEligibility);
 
   const actingUserId = currentUser?.id ?? 'u1';
 
   const [refreshing, setRefreshing] = React.useState(false);
-  const [activeView, setActiveView] = React.useState<SyndicateView>('ISSUED');
+  const [activeView, setActiveView] = React.useState<CoOwnView>('ISSUED');
   const [unitsComposerVisible, setUnitsComposerVisible] = React.useState(false);
   const [complianceModalVisible, setComplianceModalVisible] = React.useState(false);
   const [composerMode, setComposerMode] = React.useState<ComposerMode>('buy');
-  const [selectedAsset, setSelectedAsset] = React.useState<SyndicateAsset | null>(null);
+  const [selectedAsset, setSelectedAsset] = React.useState<CoOwnAsset | null>(null);
   const [unitsInput, setUnitsInput] = React.useState('1');
-  const [remoteAssets, setRemoteAssets] = React.useState<SyndicateAsset[]>([]);
+  const [remoteAssets, setRemoteAssets] = React.useState<CoOwnAsset[]>([]);
   const [isSyncingAssets, setIsSyncingAssets] = React.useState(false);
   const [syncError, setSyncError] = React.useState<string | null>(null);
   const [isSubmittingOrder, setIsSubmittingOrder] = React.useState(false);
 
-  const syncSyndicateAssets = React.useCallback(async () => {
+  const syncCoOwnAssets = React.useCallback(async () => {
     setIsSyncingAssets(true);
     try {
-      const items = await listSyndicateAssets({ limit: 120, issuerId: actingUserId });
-      const mapped: SyndicateAsset[] = items.map((item) => ({
+      const items = await listCoOwnAssets({ limit: 120, issuerId: actingUserId });
+      const mapped: CoOwnAsset[] = items.map((item) => ({
         id: item.id,
         listingId: item.listingId,
         issuerId: item.issuerId,
@@ -159,7 +159,7 @@ export default function SyndicateScreen() {
       setRemoteAssets(mapped);
       setSyncError(null);
     } catch (error) {
-      setSyncError((error as Error).message || 'Unable to sync syndicate pools');
+      setSyncError((error as Error).message || 'Unable to sync co-own pools');
       // Keep existing local market state when backend sync is unavailable.
     } finally {
       setIsSyncingAssets(false);
@@ -167,23 +167,23 @@ export default function SyndicateScreen() {
   }, [actingUserId]);
 
   React.useEffect(() => {
-    void syncSyndicateAssets();
-  }, [syncSyndicateAssets]);
+    void syncCoOwnAssets();
+  }, [syncCoOwnAssets]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
-    await syncSyndicateAssets();
+    await syncCoOwnAssets();
     setRefreshing(false);
   };
 
   const mergedAssets = React.useMemo(() => {
-    const merged = new Map<string, SyndicateAsset>();
+    const merged = new Map<string, CoOwnAsset>();
 
     for (const item of remoteAssets) {
       merged.set(item.id, item);
     }
 
-    for (const item of customSyndicates) {
+    for (const item of customCoOwns) {
       if (item.issuerId !== actingUserId) {
         continue;
       }
@@ -191,14 +191,14 @@ export default function SyndicateScreen() {
     }
 
     return [...merged.values()];
-  }, [actingUserId, customSyndicates, remoteAssets]);
+  }, [actingUserId, customCoOwns, remoteAssets]);
 
-  const baseAssets = React.useMemo(() => getSyndicateMarket(mergedAssets), [mergedAssets]);
+  const baseAssets = React.useMemo(() => getCoOwnMarket(mergedAssets), [mergedAssets]);
 
   const marketAssets = React.useMemo(
     () =>
       baseAssets.map((asset) => {
-        const runtime = syndicateRuntime[asset.id];
+        const runtime = coOwnRuntime[asset.id];
         if (!runtime) {
           return asset;
         }
@@ -216,7 +216,7 @@ export default function SyndicateScreen() {
           realizedProfitGBP: runtime.realizedProfitGBP,
         };
       }),
-    [baseAssets, syndicateRuntime]
+    [baseAssets, coOwnRuntime]
   );
 
   const visibleAssets = React.useMemo(() => {
@@ -255,7 +255,7 @@ export default function SyndicateScreen() {
     [marketAssets]
   );
 
-  const marketEligibility = checkSyndicateEligibility('HYBRID');
+  const marketEligibility = checkCoOwnEligibility('HYBRID');
 
   const poolStatus = React.useMemo(() => {
     if (isSyncingAssets) {
@@ -292,8 +292,8 @@ export default function SyndicateScreen() {
     };
   }, [isSyncingAssets, marketAssets.length, remoteAssets.length, syncError]);
 
-  const openUnitsComposer = (asset: SyndicateAsset, mode: ComposerMode) => {
-    const eligibility = checkSyndicateEligibility(asset.settlementMode);
+  const openUnitsComposer = (asset: CoOwnAsset, mode: ComposerMode) => {
+    const eligibility = checkCoOwnEligibility(asset.settlementMode);
     if (!eligibility.ok) {
       show(eligibility.message ?? 'Compliance requirements are incomplete', 'error');
       setComplianceModalVisible(true);
@@ -332,24 +332,24 @@ export default function SyndicateScreen() {
       return;
     }
 
-    if (units > SYNDICATE_MAX_UNITS) {
-      show(`Units must be between 1 and ${SYNDICATE_MAX_UNITS}`, 'error');
+    if (units > CO_OWN_MAX_UNITS) {
+      show(`Units must be between 1 and ${CO_OWN_MAX_UNITS}`, 'error');
       return;
     }
 
     setIsSubmittingOrder(true);
 
     try {
-      let remoteOrder: Awaited<ReturnType<typeof placeSyndicateOrder>> | null = null;
+      let remoteOrder: Awaited<ReturnType<typeof placeCoOwnOrder>> | null = null;
 
       try {
-        remoteOrder = await placeSyndicateOrder(selectedAsset.id, {
+        remoteOrder = await placeCoOwnOrder(selectedAsset.id, {
           userId: actingUserId,
           side: composerMode,
           units,
         });
 
-        await syncSyndicateAssets();
+        await syncCoOwnAssets();
       } catch (error) {
         const parsedError = parseApiError(error, 'Unable to submit order');
         if (!parsedError.isNetworkError) {
@@ -394,7 +394,7 @@ export default function SyndicateScreen() {
   const renderHeader = () => (
     <View>
       <View style={styles.heroHeader}>
-        <Text style={styles.heroTitle}>My Syndicate</Text>
+        <Text style={styles.heroTitle}>My Co-Own</Text>
       </View>
 
       <View style={styles.heroQuickRow}>
@@ -410,7 +410,7 @@ export default function SyndicateScreen() {
         <AnimatedPressable
           style={styles.heroQuickChip}
           activeOpacity={0.9}
-          onPress={() => navigation.navigate('SyndicateOrderHistory')}
+          onPress={() => navigation.navigate('CoOwnOrderHistory')}
         >
           <Ionicons name="time-outline" size={13} color={Colors.textSecondary} />
           <Text style={styles.heroQuickText}>Recent orders</Text>
@@ -454,13 +454,13 @@ export default function SyndicateScreen() {
           <Ionicons name="chevron-forward" size={14} color={Colors.textMuted} />
         </View>
         <Text style={styles.complianceText}>
-          Country {syndicateCompliance.countryCode} · KYC {syndicateCompliance.kycVerified ? 'on' : 'off'} ·
-          Disclosure {syndicateCompliance.riskDisclosureAccepted ? 'accepted' : 'pending'}.
+          Country {coOwnCompliance.countryCode} · KYC {coOwnCompliance.kycVerified ? 'on' : 'off'} ·
+          Disclosure {coOwnCompliance.riskDisclosureAccepted ? 'accepted' : 'pending'}.
         </Text>
         {!marketEligibility.ok ? (
           <Text style={styles.complianceErrorText}>{marketEligibility.message}</Text>
         ) : (
-          <Text style={styles.complianceOkText}>Eligible to trade syndicated assets.</Text>
+          <Text style={styles.complianceOkText}>Eligible to trade co-owned assets.</Text>
         )}
       </AnimatedPressable>
 
@@ -472,7 +472,7 @@ export default function SyndicateScreen() {
         <AnimatedPressable
           style={styles.issueBtn}
           activeOpacity={0.9}
-          onPress={() => navigation.navigate('CreateSyndicate')}
+          onPress={() => navigation.navigate('CreateCoOwn')}
         >
           <Ionicons name="add" size={15} color={Colors.background} />
           <Text style={styles.issueBtnText}>Issue</Text>
@@ -481,10 +481,10 @@ export default function SyndicateScreen() {
 
       {syncError ? (
         <SyncRetryBanner
-          message="Syndicate pools are delayed. Showing local portfolio state."
-          onRetry={() => void syncSyndicateAssets()}
+          message="Co-Own pools are delayed. Showing local portfolio state."
+          onRetry={() => void syncCoOwnAssets()}
           isRetrying={isSyncingAssets}
-          telemetryContext="syndicate_market_sync"
+          telemetryContext="coOwn_market_sync"
           containerStyle={styles.syncBanner}
           actionStyle={styles.syncBannerBtn}
         />
@@ -503,7 +503,7 @@ export default function SyndicateScreen() {
         <AnimatedPressable
           style={styles.quickActionChip}
           activeOpacity={0.9}
-          onPress={() => navigation.navigate('SyndicateOrderHistory')}
+          onPress={() => navigation.navigate('CoOwnOrderHistory')}
         >
           <Ionicons name="time-outline" size={13} color={Colors.textSecondary} />
           <Text style={styles.quickActionText}>Orders</Text>
@@ -537,14 +537,14 @@ export default function SyndicateScreen() {
     </View>
   );
 
-  const renderAssetCard = ({ item }: { item: SyndicateAsset }) => {
+  const renderAssetCard = ({ item }: { item: CoOwnAsset }) => {
     const soldPct = ((item.totalUnits - item.availableUnits) / item.totalUnits) * 100;
     const moveIsPositive = item.marketMovePct24h >= 0;
     const isHoldingsMode = activeView === 'HOLDINGS';
     const avgEntry = item.avgEntryPriceGBP ?? item.unitPriceGBP;
     const unrealized = item.yourUnits > 0 ? (item.unitPriceGBP - avgEntry) * item.yourUnits : 0;
     const unitPriceIze = toIze(item.unitPriceGBP, 'GBP', goldRates);
-    const eligibility = checkSyndicateEligibility(item.settlementMode);
+    const eligibility = checkCoOwnEligibility(item.settlementMode);
     const primaryDisabled = isHoldingsMode
       ? item.yourUnits === 0
       : !item.isOpen || item.availableUnits === 0 || !eligibility.ok;
@@ -707,7 +707,7 @@ export default function SyndicateScreen() {
                     return;
                   }
 
-                  setUnitsInput(String(Math.min(SYNDICATE_MAX_UNITS, parsed)));
+                  setUnitsInput(String(Math.min(CO_OWN_MAX_UNITS, parsed)));
                 }}
                 keyboardType="number-pad"
                 placeholder="1"
@@ -785,12 +785,12 @@ export default function SyndicateScreen() {
           <Text style={styles.complianceFieldLabel}>Country</Text>
           <View style={styles.countryChipsWrap}>
             {COUNTRY_OPTIONS.map((country) => {
-              const active = syndicateCompliance.countryCode === country.code;
+              const active = coOwnCompliance.countryCode === country.code;
               return (
                 <AnimatedPressable
                   key={country.code}
                   style={[styles.countryChip, active && styles.countryChipActive]}
-                  onPress={() => updateSyndicateCompliance({ countryCode: country.code })}
+                  onPress={() => updateCoOwnCompliance({ countryCode: country.code })}
                   activeOpacity={0.9}
                 >
                   <Text style={[styles.countryChipText, active && styles.countryChipTextActive]}>{country.code}</Text>
@@ -802,12 +802,12 @@ export default function SyndicateScreen() {
           <View style={styles.complianceToggleRow}>
             <Text style={styles.complianceToggleText}>KYC verified</Text>
             <AnimatedPressable
-              style={[styles.complianceToggleBtn, syndicateCompliance.kycVerified && styles.complianceToggleBtnActive]}
-              onPress={() => updateSyndicateCompliance({ kycVerified: !syndicateCompliance.kycVerified })}
+              style={[styles.complianceToggleBtn, coOwnCompliance.kycVerified && styles.complianceToggleBtnActive]}
+              onPress={() => updateCoOwnCompliance({ kycVerified: !coOwnCompliance.kycVerified })}
               activeOpacity={0.9}
             >
-              <Text style={[styles.complianceToggleBtnText, syndicateCompliance.kycVerified && styles.complianceToggleBtnTextActive]}>
-                {syndicateCompliance.kycVerified ? 'ON' : 'OFF'}
+              <Text style={[styles.complianceToggleBtnText, coOwnCompliance.kycVerified && styles.complianceToggleBtnTextActive]}>
+                {coOwnCompliance.kycVerified ? 'ON' : 'OFF'}
               </Text>
             </AnimatedPressable>
           </View>
@@ -815,19 +815,19 @@ export default function SyndicateScreen() {
           <View style={styles.complianceToggleRow}>
             <Text style={styles.complianceToggleText}>Risk disclosure accepted</Text>
             <AnimatedPressable
-              style={[styles.complianceToggleBtn, syndicateCompliance.riskDisclosureAccepted && styles.complianceToggleBtnActive]}
+              style={[styles.complianceToggleBtn, coOwnCompliance.riskDisclosureAccepted && styles.complianceToggleBtnActive]}
               onPress={() =>
-                updateSyndicateCompliance({ riskDisclosureAccepted: !syndicateCompliance.riskDisclosureAccepted })
+                updateCoOwnCompliance({ riskDisclosureAccepted: !coOwnCompliance.riskDisclosureAccepted })
               }
               activeOpacity={0.9}
             >
               <Text
                 style={[
                   styles.complianceToggleBtnText,
-                  syndicateCompliance.riskDisclosureAccepted && styles.complianceToggleBtnTextActive,
+                  coOwnCompliance.riskDisclosureAccepted && styles.complianceToggleBtnTextActive,
                 ]}
               >
-                {syndicateCompliance.riskDisclosureAccepted ? 'ON' : 'OFF'}
+                {coOwnCompliance.riskDisclosureAccepted ? 'ON' : 'OFF'}
               </Text>
             </AnimatedPressable>
           </View>
@@ -835,26 +835,26 @@ export default function SyndicateScreen() {
           <View style={styles.complianceToggleRow}>
             <Text style={styles.complianceToggleText}>{STABLE_COIN} wallet connected</Text>
             <AnimatedPressable
-              style={[styles.complianceToggleBtn, syndicateCompliance.stableCoinWalletConnected && styles.complianceToggleBtnActive]}
+              style={[styles.complianceToggleBtn, coOwnCompliance.stableCoinWalletConnected && styles.complianceToggleBtnActive]}
               onPress={() =>
-                updateSyndicateCompliance({ stableCoinWalletConnected: !syndicateCompliance.stableCoinWalletConnected })
+                updateCoOwnCompliance({ stableCoinWalletConnected: !coOwnCompliance.stableCoinWalletConnected })
               }
               activeOpacity={0.9}
             >
               <Text
                 style={[
                   styles.complianceToggleBtnText,
-                  syndicateCompliance.stableCoinWalletConnected && styles.complianceToggleBtnTextActive,
+                  coOwnCompliance.stableCoinWalletConnected && styles.complianceToggleBtnTextActive,
                 ]}
               >
-                {syndicateCompliance.stableCoinWalletConnected ? 'ON' : 'OFF'}
+                {coOwnCompliance.stableCoinWalletConnected ? 'ON' : 'OFF'}
               </Text>
             </AnimatedPressable>
           </View>
 
           <View style={[styles.complianceStatusBanner, marketEligibility.ok ? styles.complianceStatusOk : styles.complianceStatusError]}>
             <Text style={[styles.complianceStatusText, marketEligibility.ok ? styles.complianceStatusTextOk : styles.complianceStatusTextError]}>
-              {marketEligibility.ok ? 'Eligible for syndicate trading' : marketEligibility.message}
+              {marketEligibility.ok ? 'Eligible for co-own trading' : marketEligibility.message}
             </Text>
           </View>
 
@@ -873,7 +873,7 @@ export default function SyndicateScreen() {
   const renderLoadingState = () => (
     <View style={styles.loadingStateWrap}>
       {Array.from({ length: 3 }).map((_, index) => (
-        <View key={`syndicate_loading_${index}`} style={styles.loadingCard}>
+        <View key={`coOwn_loading_${index}`} style={styles.loadingCard}>
           <View style={styles.loadingCardHeader}>
             <SkeletonLoader width={54} height={54} borderRadius={14} />
             <View style={styles.loadingCardTitleCol}>
@@ -911,11 +911,11 @@ export default function SyndicateScreen() {
             <EmptyState
               icon="pie-chart-outline"
               title={activeView === 'HOLDINGS' ? 'No holdings yet' : 'No issued pools yet'}
-              ctaLabel={activeView === 'HOLDINGS' ? 'View Issued Pools' : 'Issue Syndicate'}
+              ctaLabel={activeView === 'HOLDINGS' ? 'View Issued Pools' : 'Issue Co-Own'}
               onCtaPress={() =>
                 activeView === 'HOLDINGS'
                   ? setActiveView('ISSUED')
-                  : navigation.navigate('CreateSyndicate')
+                  : navigation.navigate('CreateCoOwn')
               }
             />
           )

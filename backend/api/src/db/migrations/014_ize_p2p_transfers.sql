@@ -10,7 +10,7 @@ ALTER TABLE ledger_entries
       'adjustment',
       'mint',
       'burn',
-      'syndicate_trade',
+      'coOwn_trade',
       'buyout',
       'reserve_reconcile',
       'transfer'
@@ -22,7 +22,7 @@ ALTER TABLE jurisdiction_rules
 
 ALTER TABLE jurisdiction_rules
   ADD CONSTRAINT jurisdiction_rules_market_check CHECK (
-    market IN ('syndicate', 'auctions', 'wallet', 'p2p')
+    market IN ('co-own', 'auctions', 'wallet', 'p2p')
   );
 
 ALTER TABLE aml_alerts
@@ -30,7 +30,7 @@ ALTER TABLE aml_alerts
 
 ALTER TABLE aml_alerts
   ADD CONSTRAINT aml_alerts_market_check CHECK (
-    market IN ('syndicate', 'auctions', 'wallet', 'p2p')
+    market IN ('co-own', 'auctions', 'wallet', 'p2p')
   );
 
 ALTER TABLE aml_alerts

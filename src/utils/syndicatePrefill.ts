@@ -1,9 +1,9 @@
 import type { RootStackParamList } from '../navigation/types';
 import { sanitizeDecimalInput, sanitizeIntegerInput } from './currencyAuthoringFlows';
 
-type CreateSyndicatePrefill = NonNullable<RootStackParamList['CreateSyndicate']>;
+type CreateCoOwnPrefill = NonNullable<RootStackParamList['CreateCoOwn']>;
 
-interface BuildSyndicatePrefillInput {
+interface BuildCoOwnPrefillInput {
   listingId?: string;
   shareCountInput: string;
   sharePriceInput: string;
@@ -11,20 +11,20 @@ interface BuildSyndicatePrefillInput {
   authPhotos: string[];
 }
 
-interface BuildSyndicatePrefillResult {
+interface BuildCoOwnPrefillResult {
   ok: boolean;
-  params?: CreateSyndicatePrefill;
+  params?: CreateCoOwnPrefill;
   error?: string;
 }
 
-export function buildCreateSyndicatePrefillFromSell(
-  input: BuildSyndicatePrefillInput
-): BuildSyndicatePrefillResult {
+export function buildCreateCoOwnPrefillFromSell(
+  input: BuildCoOwnPrefillInput
+): BuildCoOwnPrefillResult {
   const totalUnits = Number(sanitizeIntegerInput(input.shareCountInput));
   if (!Number.isFinite(totalUnits) || totalUnits < 1 || totalUnits > 20) {
     return {
       ok: false,
-      error: 'Syndicate share count must be between 1 and 20.',
+      error: 'Co-Own share count must be between 1 and 20.',
     };
   }
 
@@ -32,14 +32,14 @@ export function buildCreateSyndicatePrefillFromSell(
   if (!Number.isFinite(unitPriceDisplay) || unitPriceDisplay <= 0) {
     return {
       ok: false,
-      error: 'Enter a valid share price for your syndicate.',
+      error: 'Enter a valid share price for your co-own.',
     };
   }
 
   if (input.authPhotos.length === 0) {
     return {
       ok: false,
-      error: 'Attach at least one authentication photo for the syndicate flow.',
+      error: 'Attach at least one authentication photo for the co-own flow.',
     };
   }
 
@@ -55,8 +55,8 @@ export function buildCreateSyndicatePrefillFromSell(
   };
 }
 
-export function getCreateSyndicateInitialState(
-  prefill: RootStackParamList['CreateSyndicate'],
+export function getCreateCoOwnInitialState(
+  prefill: RootStackParamList['CreateCoOwn'],
   defaultListingId: string
 ) {
   const selectedListingId = prefill?.listingId ?? defaultListingId;

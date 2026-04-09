@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import { View,
@@ -14,8 +14,10 @@ import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
 import { useStore } from '../store/useStore';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
+import { formatCountryPolicyScope, isPaymentMethodAllowed } from '../utils/capabilityPolicy';
 import { AddCardSheet } from '../components/checkout/AddCardSheet';
 import { CommercePaymentMethod, listUserPaymentMethods } from '../services/commerceApi';
+import { getUserCountryCapabilities, UserCountryCapabilities } from '../services/capabilitiesApi';
 
 type Props = StackScreenProps<RootStackParamList, 'Payments'>;
 const PANEL_BG = Colors.card;
@@ -27,38 +29,49 @@ export default function PaymentsScreen({ navigation }: Props) {
   const [backendPaymentMethods, setBackendPaymentMethods] = useState<CommercePaymentMethod[]>([]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [addCardSheetVisible, setAddCardSheetVisible] = useState(false);
+  const [countryCapabilities, setCountryCapabilities] = useState<UserCountryCapabilities | null>(null);
   const currentUser = useStore((state) => state.currentUser);
   const savedPaymentMethod = useStore((state) => state.savedPaymentMethod);
   const { formatFromFiat } = useFormattedPrice();
 
+  const syncPaymentMethods = useCallback(async (isCancelled?: () => boolean) => {
+    setIsSyncing(true);
+    try {
+      const userId = currentUser?.id ?? 'u1';
+      const [methodsResult, capabilitiesResult] = await Promise.allSettled([
+        listUserPaymentMethods(userId),
+        getUserCountryCapabilities(userId),
+      ]);
+
+      if (isCancelled?.()) {
+        return;
+      }
+
+      setBackendPaymentMethods(methodsResult.status === 'fulfilled' ? methodsResult.value : []);
+      setCountryCapabilities(capabilitiesResult.status === 'fulfilled' ? capabilitiesResult.value : null);
+    } catch {
+      if (isCancelled?.()) {
+        return;
+      }
+
+      setBackendPaymentMethods([]);
+      setCountryCapabilities(null);
+    } finally {
+      if (!isCancelled?.()) {
+        setIsSyncing(false);
+      }
+    }
+  }, [currentUser?.id]);
+
   useEffect(() => {
     let cancelled = false;
 
-    const syncPaymentMethods = async () => {
-      setIsSyncing(true);
-      try {
-        const userId = currentUser?.id ?? 'u1';
-        const methods = await listUserPaymentMethods(userId);
-        if (!cancelled) {
-          setBackendPaymentMethods(methods);
-        }
-      } catch {
-        if (!cancelled) {
-          setBackendPaymentMethods([]);
-        }
-      } finally {
-        if (!cancelled) {
-          setIsSyncing(false);
-        }
-      }
-    };
-
-    void syncPaymentMethods();
+    void syncPaymentMethods(() => cancelled);
 
     return () => {
       cancelled = true;
     };
-  }, [currentUser?.id]);
+  }, [syncPaymentMethods]);
 
   const cardMethods = useMemo(
     () => backendPaymentMethods.filter((method) => method.type === 'card'),
@@ -71,6 +84,9 @@ export default function PaymentsScreen({ navigation }: Props) {
 
   const fallbackCard = savedPaymentMethod?.type === 'card' ? savedPaymentMethod : null;
   const fallbackBank = savedPaymentMethod?.type === 'bank_account' ? savedPaymentMethod : null;
+  const allowCards = isPaymentMethodAllowed(countryCapabilities, 'card');
+  const allowBankAccounts = isPaymentMethodAllowed(countryCapabilities, 'bank_account');
+  const policyLabel = formatCountryPolicyScope(countryCapabilities);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -84,6 +100,7 @@ export default function PaymentsScreen({ navigation }: Props) {
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
+        {policyLabel ? <Text style={styles.policyLabel}>Payment policy: {policyLabel}</Text> : null}
         
         {/* Restored Balance usage toggle */}
         <Text style={styles.sectionTitle}>Preferences</Text>
@@ -106,7 +123,17 @@ export default function PaymentsScreen({ navigation }: Props) {
         {/* Restored Complete Payment Methods View */}
         <Text style={styles.sectionTitle}>{isSyncing ? 'Cards · syncing...' : 'Cards'}</Text>
         <View style={styles.cardGroup}>
-          {cardMethods.length > 0 ? (
+          {!allowCards ? (
+            <View style={styles.paymentRow}>
+              <View style={styles.iconCircle}>
+                <Ionicons name="card-outline" size={20} color={Colors.textPrimary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.paymentTitle}>Cards unavailable in your region</Text>
+                <Text style={styles.paymentSub}>Switching compliance country will refresh payment rails.</Text>
+              </View>
+            </View>
+          ) : cardMethods.length > 0 ? (
             cardMethods.map((method) => (
               <View key={`card-${method.id}`} style={styles.paymentRow}>
                 <View style={styles.iconCircle}>
@@ -144,15 +171,27 @@ export default function PaymentsScreen({ navigation }: Props) {
               </View>
             </View>
           )}
-          <AnimatedPressable style={styles.addBtn} onPress={() => setAddCardSheetVisible(true)}>
-            <Ionicons name="add" size={20} color={Colors.textPrimary} />
-            <Text style={styles.addText}>Add new card</Text>
-          </AnimatedPressable>
+          {allowCards ? (
+            <AnimatedPressable style={styles.addBtn} onPress={() => setAddCardSheetVisible(true)}>
+              <Ionicons name="add" size={20} color={Colors.textPrimary} />
+              <Text style={styles.addText}>Add new card</Text>
+            </AnimatedPressable>
+          ) : null}
         </View>
 
         <Text style={styles.sectionTitle}>Bank Accounts</Text>
         <View style={styles.cardGroup}>
-          {bankMethods.length > 0 ? (
+          {!allowBankAccounts ? (
+            <View style={styles.paymentRow}>
+              <View style={styles.iconCircle}>
+                <Ionicons name="business-outline" size={20} color={Colors.textPrimary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.paymentTitle}>Bank payouts unavailable in your region</Text>
+                <Text style={styles.paymentSub}>Supported rails will appear when available for your country.</Text>
+              </View>
+            </View>
+          ) : bankMethods.length > 0 ? (
             bankMethods.map((method) => (
               <View key={`bank-${method.id}`} style={styles.paymentRow}>
                 <View style={styles.iconCircle}>
@@ -190,14 +229,22 @@ export default function PaymentsScreen({ navigation }: Props) {
               </View>
             </View>
           )}
-          <AnimatedPressable style={styles.addBtn} onPress={() => navigation.navigate('AddBankAccount')}>
-            <Ionicons name="add" size={20} color={Colors.textPrimary} />
-            <Text style={styles.addText}>Add new bank account</Text>
-          </AnimatedPressable>
+          {allowBankAccounts ? (
+            <AnimatedPressable style={styles.addBtn} onPress={() => navigation.navigate('AddBankAccount')}>
+              <Ionicons name="add" size={20} color={Colors.textPrimary} />
+              <Text style={styles.addText}>Add new bank account</Text>
+            </AnimatedPressable>
+          ) : null}
         </View>
       </ScrollView>
 
-      <AddCardSheet visible={addCardSheetVisible} onDismiss={() => setAddCardSheetVisible(false)} />
+      <AddCardSheet
+        visible={addCardSheetVisible}
+        onDismiss={() => setAddCardSheetVisible(false)}
+        onSuccess={() => {
+          void syncPaymentMethods();
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -217,6 +264,7 @@ const styles = StyleSheet.create({
   },
   hugeTitle: { fontSize: 34, fontFamily: 'Inter_700Bold', color: Colors.textPrimary, letterSpacing: -0.5 },
   content: { paddingHorizontal: 20, paddingBottom: 40 },
+  policyLabel: { fontSize: 12, fontFamily: 'Inter_500Medium', color: Colors.textMuted, marginTop: 4, marginBottom: 8, marginLeft: 8 },
 
   sectionTitle: { fontSize: 13, fontFamily: 'Inter_600SemiBold', color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 1.2, marginLeft: 8, marginBottom: 12, marginTop: 24 },
   cardGroup: {

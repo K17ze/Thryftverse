@@ -14,13 +14,13 @@ import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { RootStackParamList } from '../navigation/types';
-import { getSyndicateMarket } from '../data/tradeHub';
+import { getCoOwnMarket } from '../data/tradeHub';
 import { useStore } from '../store/useStore';
 import { resolveAssetMarketState } from '../data/mockSyndicateData';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useToast } from '../context/ToastContext';
 import { parseApiError } from '../lib/apiClient';
-import { createSyndicateBuyoutOffer } from '../services/marketApi';
+import { createCoOwnBuyoutOffer } from '../services/marketApi';
 
 type RouteT = RouteProp<RootStackParamList, 'Buyout'>;
 type NavT = StackNavigationProp<RootStackParamList>;
@@ -35,16 +35,16 @@ export default function BuyoutScreen() {
   const { show } = useToast();
   const [isSubmitting, setIsSubmitting] = React.useState(false);
 
-  const customSyndicates = useStore((state) => state.customSyndicates);
-  const syndicateRuntime = useStore((state) => state.syndicateRuntime);
+  const customCoOwns = useStore((state) => state.customCoOwns);
+  const coOwnRuntime = useStore((state) => state.coOwnRuntime);
   const currentUser = useStore((state) => state.currentUser);
   const { formatFromFiat } = useFormattedPrice();
 
-  const baseAssets = React.useMemo(() => getSyndicateMarket(customSyndicates), [customSyndicates]);
+  const baseAssets = React.useMemo(() => getCoOwnMarket(customCoOwns), [customCoOwns]);
 
   const marketAssets = React.useMemo(
-    () => baseAssets.map((asset) => resolveAssetMarketState(asset, syndicateRuntime[asset.id])),
-    [baseAssets, syndicateRuntime]
+    () => baseAssets.map((asset) => resolveAssetMarketState(asset, coOwnRuntime[asset.id])),
+    [baseAssets, coOwnRuntime]
   );
 
   const asset = marketAssets.find((item) => item.id === route.params.assetId);
@@ -88,7 +88,7 @@ export default function BuyoutScreen() {
 
     try {
       const bidderUserId = currentUser?.id ?? 'u1';
-      const response = await createSyndicateBuyoutOffer(asset.id, {
+      const response = await createCoOwnBuyoutOffer(asset.id, {
         bidderUserId,
         offerPriceGbp: offerPricePerShare,
         targetUnits: sharesNeeded,
@@ -104,7 +104,7 @@ export default function BuyoutScreen() {
         show('Buyout offer is flagged for AML review.', 'info');
       }
 
-      navigation.navigate('SyndicateOrderHistory');
+      navigation.navigate('CoOwnOrderHistory');
     } catch (error) {
       const parsedError = parseApiError(error, 'Unable to submit buyout offer');
       if (parsedError.isNetworkError) {

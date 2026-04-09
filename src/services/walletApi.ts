@@ -2,7 +2,7 @@ import { fetchJson } from '../lib/apiClient';
 
 export type PaymentIntentChannel =
   | 'commerce'
-  | 'syndicate'
+  | 'co-own'
   | 'wallet_topup'
   | 'wallet_withdrawal';
 
@@ -20,7 +20,7 @@ export interface PaymentIntentPayload {
   gatewayId: string;
   channel: PaymentIntentChannel;
   orderId: string | null;
-  syndicateOrderId: number | null;
+  coOwnOrderId: number | null;
   instrumentId: number | null;
   amountGbp: number;
   amountCurrency: string;

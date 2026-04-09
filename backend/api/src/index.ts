@@ -79,6 +79,16 @@ import {
   resolveClientIp,
   resolveJurisdictionRule,
 } from './lib/compliance.js';
+import { resolveCountryCapabilities } from './lib/countryCapabilities.js';
+import {
+  getAllowedGatewayIds,
+  isGatewayAllowedForChannel,
+  isPaymentMethodTypeAllowed,
+  isPayoutCurrencyAllowed,
+  isPayoutGatewayAllowed,
+  resolveChannelGateway,
+  resolvePayoutPolicyDefaults,
+} from './lib/countryCapabilityPolicy.js';
 import {
   verifyAppleIdentityToken,
   verifyGoogleIdentityToken,
@@ -185,7 +195,7 @@ function roundTo(value: number, decimals: number): number {
 const COMMERCE_PLATFORM_CHARGE_RATE = 0.05;
 const COMMERCE_PLATFORM_CHARGE_FIXED_GBP = 0.7;
 const COMMERCE_PLATFORM_CHARGE_MIN_RATE = 0.02;
-const SYNDICATE_TRADE_FEE_RATE = 0.01;
+const CO_OWN_TRADE_FEE_RATE = 0.01;
 const AUCTION_PLATFORM_FEE_RATE = 0.03;
 const WALLET_TOPUP_PLATFORM_FEE_RATE = 0.01;
 const ONEZE_MG_PER_IZE = 1_000;
@@ -383,11 +393,13 @@ async function appendComplianceAuditSafe(
 interface ApiError extends Error {
   code: string;
   details?: Record<string, unknown>;
+  statusCode?: number;
 }
 
 function createApiError(code: string, message: string, details?: Record<string, unknown>): ApiError {
   const error = new Error(message) as ApiError;
   error.code = code;
+  error.statusCode = statusCodeForApiError(code);
   if (details) {
     error.details = details;
   }
@@ -495,7 +507,7 @@ function isPublicRoute(method: string, path: string) {
     return true;
   }
 
-  if (method === 'GET' && (path === '/syndicate/assets' || path.startsWith('/syndicate/assets/'))) {
+  if (method === 'GET' && (path === '/co-own/assets' || path.startsWith('/co-own/assets/'))) {
     return true;
   }
 
@@ -743,7 +755,7 @@ type PaymentIntentStatus =
   | 'failed'
   | 'cancelled';
 type PaymentIntentTerminalStatus = 'succeeded' | 'failed' | 'cancelled';
-type PaymentIntentChannel = 'commerce' | 'syndicate' | 'wallet_topup' | 'wallet_withdrawal';
+type PaymentIntentChannel = 'commerce' | 'co-own' | 'wallet_topup' | 'wallet_withdrawal';
 type MintOperationState =
   | 'INITIATED'
   | 'PAYMENT_PENDING'
@@ -764,7 +776,7 @@ interface PaymentIntentRow {
   gateway_id: string;
   channel: PaymentIntentChannel;
   order_id: string | null;
-  syndicate_order_id: number | null;
+  coOwn_order_id: number | null;
   instrument_id: number | null;
   amount_gbp: number | string;
   amount_currency: string;
@@ -931,6 +943,7 @@ function createRuntimeId(prefix: string): string {
 
 type ChatConversationType = 'dm' | 'group';
 type ChatSenderType = 'user' | 'bot' | 'system';
+type ChatGroupMemberRole = 'owner' | 'admin' | 'member';
 
 interface ChatConversationAccessRow {
   id: string;
@@ -938,6 +951,14 @@ interface ChatConversationAccessRow {
   title: string | null;
   owner_id: string;
   item_id: string | null;
+}
+
+interface ChatGroupMembershipRoleRow {
+  role: ChatGroupMemberRole;
+}
+
+function buildGroupInviteLink(inviteToken: string): string {
+  return `thryftverse://group-invite?token=${encodeURIComponent(inviteToken)}`;
 }
 
 async function ensureChatConversationAccess(
@@ -983,6 +1004,50 @@ async function ensureGroupConversationAccess(
   }
 
   return conversation;
+}
+
+async function resolveGroupConversationMembershipRole(
+  client: DbQueryable,
+  conversationId: string,
+  userId: string
+): Promise<ChatGroupMemberRole | null> {
+  const result = await client.query<ChatGroupMembershipRoleRow>(
+    `
+      SELECT role
+      FROM chat_members
+      WHERE conversation_id = $1
+        AND user_id = $2
+      LIMIT 1
+    `,
+    [conversationId, userId]
+  );
+
+  return result.rows[0]?.role ?? null;
+}
+
+async function ensureGroupManagementAccess(
+  client: DbQueryable,
+  conversationId: string,
+  userId: string,
+  platformRole?: AuthRole
+): Promise<ChatConversationAccessRow> {
+  const conversation = await ensureGroupConversationAccess(client, conversationId, userId);
+
+  if (platformRole === 'admin' || conversation.owner_id === userId) {
+    return conversation;
+  }
+
+  const membershipRole = await resolveGroupConversationMembershipRole(client, conversationId, userId);
+  if (membershipRole === 'owner' || membershipRole === 'admin') {
+    return conversation;
+  }
+
+  throw createApiError('FORBIDDEN_USER_CONTEXT', 'Only group owners/admins can perform this action', {
+    actorUserId: userId,
+    conversationId,
+    ownerId: conversation.owner_id,
+    membershipRole,
+  });
 }
 
 async function listChatParticipantIds(client: DbQueryable, conversationId: string): Promise<string[]> {
@@ -1057,7 +1122,7 @@ function toPaymentIntentPayload(row: PaymentIntentRow) {
     gatewayId: row.gateway_id,
     channel: row.channel,
     orderId: row.order_id,
-    syndicateOrderId: row.syndicate_order_id,
+    coOwnOrderId: row.coOwn_order_id,
     instrumentId: row.instrument_id,
     amountGbp: Number(row.amount_gbp),
     amountCurrency: row.amount_currency,
@@ -2060,7 +2125,7 @@ async function evaluateP2pPolicyEligibility(
   if (requiresContext && (!input.contextType || !input.contextId)) {
     throw createApiError(
       'P2P_TRANSFER_CONTEXT_REQUIRED',
-      'This transfer requires marketplace or syndicate context in one of the jurisdictions'
+      'This transfer requires marketplace or co-own context in one of the jurisdictions'
     );
   }
 
@@ -2648,7 +2713,7 @@ async function appendLedgerEntry(
       | 'adjustment'
       | 'mint'
       | 'burn'
-      | 'syndicate_trade'
+      | 'coOwn_trade'
       | 'buyout'
       | 'reserve_reconcile'
       | 'transfer';
@@ -3440,7 +3505,7 @@ function mapMolliePaymentStatus(status?: string): PaymentIntentStatus {
 }
 
 function resolveDefaultGatewayForChannel(channel: PaymentIntentChannel): string {
-  if (channel === 'syndicate') {
+  if (channel === 'co-own') {
     return 'stripe_americas';
   }
 
@@ -3669,7 +3734,7 @@ async function settlePaymentIntent(
         gateway_id,
         channel,
         order_id,
-        syndicate_order_id,
+        coOwn_order_id,
         instrument_id,
         amount_gbp,
         amount_currency,
@@ -3752,7 +3817,7 @@ async function settlePaymentIntent(
         gateway_id,
         channel,
         order_id,
-        syndicate_order_id,
+        coOwn_order_id,
         instrument_id,
         amount_gbp,
         amount_currency,
@@ -3878,7 +3943,7 @@ async function transitionPaymentIntentStatus(
         gateway_id,
         channel,
         order_id,
-        syndicate_order_id,
+        coOwn_order_id,
         instrument_id,
         amount_gbp,
         amount_currency,
@@ -3963,7 +4028,7 @@ async function transitionPaymentIntentStatus(
         gateway_id,
         channel,
         order_id,
-        syndicate_order_id,
+        coOwn_order_id,
         instrument_id,
         amount_gbp,
         amount_currency,
@@ -4018,7 +4083,7 @@ async function findPaymentIntentByProviderRef(
         gateway_id,
         channel,
         order_id,
-        syndicate_order_id,
+        coOwn_order_id,
         instrument_id,
         amount_gbp,
         amount_currency,
@@ -7660,7 +7725,7 @@ app.post('/auth/password-reset/confirm', async (request, reply) => {
   };
 });
 
-const complianceMarketSchema = z.enum(['syndicate', 'auctions', 'wallet', 'p2p']);
+const complianceMarketSchema = z.enum(['co-own', 'auctions', 'wallet', 'p2p']);
 const kycStatusSchema = z.enum(['not_started', 'pending', 'verified', 'rejected', 'expired']);
 const kycLevelSchema = z.enum(['none', 'basic', 'enhanced']);
 const sanctionsStatusSchema = z.enum(['unknown', 'clear', 'watchlist', 'blocked']);
@@ -7809,6 +7874,31 @@ app.patch('/compliance/profile/:userId', async (request, reply) => {
   return {
     ok: true,
     profile: toComplianceProfilePayload(profile),
+  };
+});
+
+app.get('/users/:userId/capabilities', async (request, reply) => {
+  const paramsSchema = z.object({ userId: z.string().min(2) });
+  const { userId } = paramsSchema.parse(request.params);
+
+  const actorUserId = resolveAuthenticatedUserId(request, userId);
+  await ensureUserExists(actorUserId);
+
+  const profile = await getOrCreateComplianceProfile(db, actorUserId);
+  const capabilities = resolveCountryCapabilities({
+    countryCode: profile.countryCode,
+    residencyCountryCode: profile.residencyCountryCode,
+  });
+
+  return {
+    ok: true,
+    userId: actorUserId,
+    profile: {
+      countryCode: profile.countryCode,
+      residencyCountryCode: profile.residencyCountryCode,
+      kycStatus: profile.kycStatus,
+    },
+    capabilities,
   };
 });
 
@@ -9207,8 +9297,8 @@ app.get('/users/me/export', async (request, reply) => {
       interactions,
       orders,
       auctionBids,
-      syndicateOrders,
-      syndicateHoldings,
+      coOwnOrders,
+      coOwnHoldings,
       consents,
       profile,
       kycCases,
@@ -9221,8 +9311,8 @@ app.get('/users/me/export', async (request, reply) => {
       client.query('SELECT * FROM interactions WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1000', [userId]),
       client.query('SELECT * FROM orders WHERE buyer_id = $1 OR seller_id = $1 ORDER BY created_at DESC LIMIT 1000', [userId]),
       client.query('SELECT * FROM auction_bids WHERE bidder_id = $1 ORDER BY created_at DESC LIMIT 1000', [userId]),
-      client.query('SELECT * FROM syndicate_orders WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1000', [userId]),
-      client.query('SELECT * FROM syndicate_holdings WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1000', [userId]),
+      client.query('SELECT * FROM coOwn_orders WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1000', [userId]),
+      client.query('SELECT * FROM coOwn_holdings WHERE user_id = $1 ORDER BY updated_at DESC LIMIT 1000', [userId]),
       client.query('SELECT * FROM user_consents WHERE user_id = $1 ORDER BY accepted_at DESC LIMIT 1000', [userId]),
       client.query('SELECT * FROM user_compliance_profiles WHERE user_id = $1 LIMIT 1', [userId]),
       client.query('SELECT * FROM kyc_cases WHERE user_id = $1 ORDER BY created_at DESC LIMIT 500', [userId]),
@@ -9238,8 +9328,8 @@ app.get('/users/me/export', async (request, reply) => {
       interactions: interactions.rows,
       orders: orders.rows,
       auctionBids: auctionBids.rows,
-      syndicateOrders: syndicateOrders.rows,
-      syndicateHoldings: syndicateHoldings.rows,
+      coOwnOrders: coOwnOrders.rows,
+      coOwnHoldings: coOwnHoldings.rows,
       consents: consents.rows,
       complianceProfile: profile.rows[0] ?? null,
       kycCases: kycCases.rows,
@@ -9268,8 +9358,8 @@ app.get('/users/me/export', async (request, reply) => {
             interactions: interactions.rowCount ?? 0,
             orders: orders.rowCount ?? 0,
             auctionBids: auctionBids.rowCount ?? 0,
-            syndicateOrders: syndicateOrders.rowCount ?? 0,
-            syndicateHoldings: syndicateHoldings.rowCount ?? 0,
+            coOwnOrders: coOwnOrders.rowCount ?? 0,
+            coOwnHoldings: coOwnHoldings.rowCount ?? 0,
             consents: consents.rowCount ?? 0,
             kycCases: kycCases.rowCount ?? 0,
             amlAlerts: amlAlerts.rowCount ?? 0,
@@ -10194,7 +10284,7 @@ app.get('/secure-messages/:conversationId', async (request) => {
 app.post('/chat/groups', async (request, reply) => {
   const bodySchema = z.object({
     title: z.string().trim().min(2).max(80),
-    memberIds: z.array(z.string().trim().min(2)).min(1).max(48),
+    memberIds: z.array(z.string().trim().min(2)).max(48).default([]),
     itemId: z.string().trim().min(2).max(120).optional(),
   });
 
@@ -10656,14 +10746,7 @@ app.post('/chat/conversations/:conversationId/members', async (request) => {
   const { conversationId } = paramsSchema.parse(request.params);
   const payload = bodySchema.parse(request.body ?? {});
 
-  const conversation = await ensureGroupConversationAccess(db, conversationId, actorUserId);
-  if (conversation.owner_id !== actorUserId && request.authUser?.role !== 'admin') {
-    throw createApiError('FORBIDDEN_USER_CONTEXT', 'Only group owners can add members', {
-      actorUserId,
-      ownerId: conversation.owner_id,
-      conversationId,
-    });
-  }
+  const conversation = await ensureGroupManagementAccess(db, conversationId, actorUserId, request.authUser?.role);
 
   const normalizedMemberIds = [...new Set(payload.memberIds.map((value) => value.trim()))]
     .filter((value) => value.length > 0);
@@ -10771,6 +10854,501 @@ app.post('/chat/conversations/:conversationId/members', async (request) => {
     conversationId,
     addedMemberIds,
     participantIds,
+  };
+});
+
+app.post('/chat/conversations/:conversationId/invite-links', async (request, reply) => {
+  const paramsSchema = z.object({
+    conversationId: z.string().min(2).max(120),
+  });
+  const bodySchema = z.object({
+    expiresInHours: z.coerce.number().int().min(1).max(24 * 30).default(72),
+    maxUses: z.coerce.number().int().min(0).max(10_000).default(0),
+    metadata: z.record(z.unknown()).optional(),
+  });
+
+  const actorUserId = resolveAuthenticatedUserId(request);
+  const { conversationId } = paramsSchema.parse(request.params);
+  const payload = bodySchema.parse(request.body ?? {});
+
+  const conversation = await ensureGroupManagementAccess(db, conversationId, actorUserId, request.authUser?.role);
+
+  const inviteId = createRuntimeId('chatinv');
+  const inviteToken = createPublicToken('ginv');
+  const tokenHash = hashOpaqueValue(inviteToken);
+  const tokenPrefix = inviteToken.slice(0, 14);
+  const expiresAt = new Date(Date.now() + payload.expiresInHours * 60 * 60 * 1000).toISOString();
+
+  await db.query(
+    `
+      INSERT INTO chat_group_invites (
+        id,
+        conversation_id,
+        token_hash,
+        token_prefix,
+        created_by,
+        max_uses,
+        expires_at,
+        metadata
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+    `,
+    [
+      inviteId,
+      conversationId,
+      tokenHash,
+      tokenPrefix,
+      actorUserId,
+      payload.maxUses,
+      expiresAt,
+      toJsonString(payload.metadata ?? {}),
+    ]
+  );
+
+  publishRealtimeEvent({
+    topic: `chat.conversation:${conversationId}`,
+    type: 'chat.invite.created',
+    payload: {
+      conversationId,
+      inviteId,
+      actorUserId,
+    },
+  });
+
+  reply.code(201);
+  return {
+    ok: true,
+    conversationId,
+    invite: {
+      id: inviteId,
+      inviteLink: buildGroupInviteLink(inviteToken),
+      tokenPreview: `${tokenPrefix}...`,
+      createdBy: actorUserId,
+      ownerId: conversation.owner_id,
+      expiresAt,
+      maxUses: payload.maxUses,
+      useCount: 0,
+    },
+  };
+});
+
+app.get('/chat/conversations/:conversationId/invite-links', async (request) => {
+  const paramsSchema = z.object({
+    conversationId: z.string().min(2).max(120),
+  });
+  const querySchema = z.object({
+    includeRevoked: z.coerce.boolean().default(false),
+    limit: z.coerce.number().int().min(1).max(100).default(20),
+  });
+
+  const actorUserId = resolveAuthenticatedUserId(request);
+  const { conversationId } = paramsSchema.parse(request.params);
+  const { includeRevoked, limit } = querySchema.parse(request.query ?? {});
+
+  await ensureGroupManagementAccess(db, conversationId, actorUserId, request.authUser?.role);
+
+  const result = includeRevoked
+    ? await db.query<{
+      id: string;
+      token_prefix: string;
+      created_by: string;
+      max_uses: number | string;
+      use_count: number | string;
+      expires_at: string;
+      revoked_at: string | null;
+      created_at: string;
+      updated_at: string;
+      last_used_at: string | null;
+      last_used_by: string | null;
+    }>(
+      `
+        SELECT
+          id,
+          token_prefix,
+          created_by,
+          max_uses,
+          use_count,
+          expires_at::text,
+          revoked_at::text,
+          created_at::text,
+          updated_at::text,
+          last_used_at::text,
+          last_used_by
+        FROM chat_group_invites
+        WHERE conversation_id = $1
+        ORDER BY created_at DESC
+        LIMIT $2
+      `,
+      [conversationId, limit]
+    )
+    : await db.query<{
+      id: string;
+      token_prefix: string;
+      created_by: string;
+      max_uses: number | string;
+      use_count: number | string;
+      expires_at: string;
+      revoked_at: string | null;
+      created_at: string;
+      updated_at: string;
+      last_used_at: string | null;
+      last_used_by: string | null;
+    }>(
+      `
+        SELECT
+          id,
+          token_prefix,
+          created_by,
+          max_uses,
+          use_count,
+          expires_at::text,
+          revoked_at::text,
+          created_at::text,
+          updated_at::text,
+          last_used_at::text,
+          last_used_by
+        FROM chat_group_invites
+        WHERE conversation_id = $1
+          AND revoked_at IS NULL
+        ORDER BY created_at DESC
+        LIMIT $2
+      `,
+      [conversationId, limit]
+    );
+
+  const now = Date.now();
+
+  return {
+    ok: true,
+    conversationId,
+    items: result.rows.map((row) => {
+      const maxUses = Number(row.max_uses);
+      const useCount = Number(row.use_count);
+      const isExpired = new Date(row.expires_at).getTime() <= now;
+      const remainingUses = maxUses > 0 ? Math.max(0, maxUses - useCount) : null;
+
+      return {
+        id: row.id,
+        tokenPreview: `${row.token_prefix}...`,
+        createdBy: row.created_by,
+        maxUses,
+        useCount,
+        remainingUses,
+        expiresAt: row.expires_at,
+        revokedAt: row.revoked_at,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+        lastUsedAt: row.last_used_at,
+        lastUsedBy: row.last_used_by,
+        isExpired,
+        isRevoked: Boolean(row.revoked_at),
+      };
+    }),
+  };
+});
+
+app.delete('/chat/conversations/:conversationId/invite-links/:inviteId', async (request) => {
+  const paramsSchema = z.object({
+    conversationId: z.string().min(2).max(120),
+    inviteId: z.string().min(2).max(120),
+  });
+
+  const actorUserId = resolveAuthenticatedUserId(request);
+  const { conversationId, inviteId } = paramsSchema.parse(request.params);
+  await ensureGroupManagementAccess(db, conversationId, actorUserId, request.authUser?.role);
+
+  const client = await db.connect();
+  let revoked = false;
+  let updateMessage: { id: string; createdAt: string } | null = null;
+
+  try {
+    await client.query('BEGIN');
+
+    const revokeResult = await client.query<{ id: string }>(
+      `
+        UPDATE chat_group_invites
+        SET revoked_at = NOW(), updated_at = NOW()
+        WHERE conversation_id = $1
+          AND id = $2
+          AND revoked_at IS NULL
+        RETURNING id
+      `,
+      [conversationId, inviteId]
+    );
+
+    revoked = Boolean(revokeResult.rowCount);
+    if (revoked) {
+      updateMessage = await appendSystemChatMessage(client, {
+        conversationId,
+        text: 'An invite link was revoked.',
+        metadata: {
+          event: 'group_invite_revoked',
+          actorUserId,
+          inviteId,
+        },
+      });
+
+      await client.query(
+        `
+          UPDATE chat_conversations
+          SET updated_at = NOW()
+          WHERE id = $1
+        `,
+        [conversationId]
+      );
+    }
+
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  if (updateMessage) {
+    publishRealtimeEvent({
+      topic: `chat.conversation:${conversationId}`,
+      type: 'chat.invite.revoked',
+      payload: {
+        conversationId,
+        inviteId,
+        actorUserId,
+        messageId: updateMessage.id,
+      },
+    });
+  }
+
+  return {
+    ok: true,
+    conversationId,
+    inviteId,
+    revoked,
+  };
+});
+
+app.post('/chat/groups/join', async (request, reply) => {
+  const bodySchema = z.object({
+    inviteToken: z.string().trim().min(6).max(260),
+  });
+
+  const actorUserId = resolveAuthenticatedUserId(request);
+  const payload = bodySchema.parse(request.body ?? {});
+  const inviteTokenHash = hashOpaqueValue(payload.inviteToken);
+
+  await ensureUserExists(actorUserId);
+
+  const client = await db.connect();
+  let joined = false;
+  let conversationId = '';
+  let conversationTitle: string | null = null;
+  let ownerId = '';
+  let itemId: string | null = null;
+  let participantIds: string[] = [];
+  let botIds: string[] = [];
+  let inviteId = '';
+  let maxUses = 0;
+  let useCount = 0;
+  let expiresAt = '';
+  let joinMessage: { id: string; createdAt: string } | null = null;
+  let lastMessage = '';
+  let lastMessageTime = '';
+
+  try {
+    await client.query('BEGIN');
+
+    const inviteResult = await client.query<{
+      id: string;
+      conversation_id: string;
+      conversation_type: ChatConversationType;
+      title: string | null;
+      owner_id: string;
+      item_id: string | null;
+      max_uses: number | string;
+      use_count: number | string;
+      expires_at: string;
+      revoked_at: string | null;
+    }>(
+      `
+        SELECT
+          cgi.id,
+          cgi.conversation_id,
+          c.type AS conversation_type,
+          c.title,
+          c.owner_id,
+          c.item_id,
+          cgi.max_uses,
+          cgi.use_count,
+          cgi.expires_at::text,
+          cgi.revoked_at::text
+        FROM chat_group_invites cgi
+        INNER JOIN chat_conversations c
+          ON c.id = cgi.conversation_id
+        WHERE cgi.token_hash = $1
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [inviteTokenHash]
+    );
+
+    if (!inviteResult.rowCount) {
+      throw createApiError('CHAT_GROUP_INVITE_INVALID', 'Invite link is invalid or unavailable');
+    }
+
+    const invite = inviteResult.rows[0];
+    if (invite.conversation_type !== 'group') {
+      throw createApiError('CHAT_GROUP_INVITE_INVALID', 'Invite link is invalid for this conversation type', {
+        conversationId: invite.conversation_id,
+        conversationType: invite.conversation_type,
+      });
+    }
+
+    if (invite.revoked_at) {
+      throw createApiError('CHAT_GROUP_INVITE_INVALID', 'Invite link has been revoked', {
+        inviteId: invite.id,
+      });
+    }
+
+    const inviteExpiryMs = new Date(invite.expires_at).getTime();
+    if (inviteExpiryMs <= Date.now()) {
+      throw createApiError('CHAT_GROUP_INVITE_INVALID', 'Invite link has expired', {
+        inviteId: invite.id,
+        expiresAt: invite.expires_at,
+      });
+    }
+
+    maxUses = Number(invite.max_uses);
+    useCount = Number(invite.use_count);
+    if (maxUses > 0 && useCount >= maxUses) {
+      throw createApiError('CHAT_GROUP_INVITE_INVALID', 'Invite link has reached its usage limit', {
+        inviteId: invite.id,
+        maxUses,
+        useCount,
+      });
+    }
+
+    conversationId = invite.conversation_id;
+    conversationTitle = invite.title;
+    ownerId = invite.owner_id;
+    itemId = invite.item_id;
+    inviteId = invite.id;
+    expiresAt = invite.expires_at;
+
+    const memberInsertResult = await client.query<{ user_id: string }>(
+      `
+        INSERT INTO chat_members (conversation_id, user_id, role)
+        VALUES ($1, $2, 'member')
+        ON CONFLICT (conversation_id, user_id) DO NOTHING
+        RETURNING user_id
+      `,
+      [conversationId, actorUserId]
+    );
+
+    joined = Boolean(memberInsertResult.rowCount);
+
+    if (joined) {
+      const usageResult = await client.query<{ use_count: number | string }>(
+        `
+          UPDATE chat_group_invites
+          SET
+            use_count = use_count + 1,
+            last_used_at = NOW(),
+            last_used_by = $2,
+            updated_at = NOW()
+          WHERE id = $1
+          RETURNING use_count
+        `,
+        [inviteId, actorUserId]
+      );
+
+      useCount = Number(usageResult.rows[0]?.use_count ?? useCount + 1);
+
+      joinMessage = await appendSystemChatMessage(client, {
+        conversationId,
+        text: 'A new member joined via invite link.',
+        metadata: {
+          event: 'group_invite_joined',
+          actorUserId,
+          inviteId,
+        },
+      });
+
+      await client.query(
+        `
+          UPDATE chat_conversations
+          SET updated_at = NOW()
+          WHERE id = $1
+        `,
+        [conversationId]
+      );
+    }
+
+    participantIds = await listChatParticipantIds(client, conversationId);
+    botIds = await listChatBotIds(client, conversationId);
+
+    const latestMessageResult = await client.query<{ body: string; created_at: string }>(
+      `
+        SELECT body, created_at::text
+        FROM chat_messages
+        WHERE conversation_id = $1
+        ORDER BY created_at DESC
+        LIMIT 1
+      `,
+      [conversationId]
+    );
+
+    if (latestMessageResult.rowCount) {
+      lastMessage = latestMessageResult.rows[0].body;
+      lastMessageTime = latestMessageResult.rows[0].created_at;
+    } else {
+      lastMessage = `${conversationTitle ?? 'Group'} created.`;
+      lastMessageTime = new Date().toISOString();
+    }
+
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  if (joinMessage) {
+    publishRealtimeEvent({
+      topic: `chat.conversation:${conversationId}`,
+      type: 'chat.member.joined_via_invite',
+      payload: {
+        conversationId,
+        actorUserId,
+        inviteId,
+        messageId: joinMessage.id,
+      },
+    });
+  }
+
+  reply.code(joined ? 201 : 200);
+  return {
+    ok: true,
+    joined,
+    conversation: {
+      id: conversationId,
+      type: 'group' as const,
+      title: conversationTitle,
+      ownerId,
+      itemId,
+      participantIds,
+      botIds,
+      lastMessage,
+      lastMessageTime,
+      unread: false,
+    },
+    invite: {
+      id: inviteId,
+      maxUses,
+      useCount,
+      expiresAt,
+      remainingUses: maxUses > 0 ? Math.max(0, maxUses - useCount) : null,
+    },
   };
 });
 
@@ -11624,7 +12202,7 @@ app.post('/wallet/1ze/mint/quote', async (request, reply) => {
           gateway_id,
           channel,
           order_id,
-          syndicate_order_id,
+          coOwn_order_id,
           instrument_id,
           amount_gbp,
           amount_currency,
@@ -11644,7 +12222,7 @@ app.post('/wallet/1ze/mint/quote', async (request, reply) => {
           gateway_id,
           channel,
           order_id,
-          syndicate_order_id,
+          coOwn_order_id,
           instrument_id,
           amount_gbp,
           amount_currency,
@@ -11849,7 +12427,7 @@ app.get('/wallet/1ze/mint/:operationId', async (request, reply) => {
           gateway_id,
           channel,
           order_id,
-          syndicate_order_id,
+          coOwn_order_id,
           instrument_id,
           amount_gbp,
           amount_currency,
@@ -12446,7 +13024,7 @@ app.post('/wallet/1ze/transfer', async (request, reply) => {
     recipientUserId: z.string().min(2),
     izeAmount: z.number().positive(),
     fiatCurrency: z.string().length(3).default('GBP'),
-    contextType: z.enum(['order', 'syndicate_trade', 'gift', 'manual']).optional(),
+    contextType: z.enum(['order', 'coOwn_trade', 'gift', 'manual']).optional(),
     contextId: z.string().min(2).max(140).optional(),
     note: z.string().max(280).optional(),
     idempotencyKey: z.string().min(8).max(140).optional(),
@@ -14392,6 +14970,20 @@ app.post('/users/:userId/payment-methods', async (request, reply) => {
 
   await ensureUserExists(userId);
 
+  const complianceProfile = await getOrCreateComplianceProfile(db, userId);
+  const capabilities = resolveCountryCapabilities({
+    countryCode: complianceProfile.countryCode,
+    residencyCountryCode: complianceProfile.residencyCountryCode,
+  });
+
+  if (!isPaymentMethodTypeAllowed(capabilities, payload.type)) {
+    reply.code(400);
+    return {
+      ok: false,
+      error: `Payment method type '${payload.type}' is unavailable for this country policy`,
+    };
+  }
+
   const existingCountResult = await db.query<{ count: string }>(
     'SELECT COUNT(*)::text AS count FROM user_payment_methods WHERE user_id = $1',
     [userId]
@@ -14489,46 +15081,72 @@ app.delete('/users/:userId/payment-methods/:paymentMethodId', async (request, re
   return { ok: true };
 });
 
-app.get('/payments/gateways', async () => {
+app.get('/payments/gateways', async (request) => {
+  const querySchema = z.object({
+    userId: z.string().min(2).optional(),
+    channel: z.enum(['commerce', 'co-own', 'wallet_topup', 'wallet_withdrawal']).optional(),
+  });
+  const { userId, channel } = querySchema.parse(request.query ?? {});
+
+  let allowedGatewayIds: string[] | null = null;
+  if (userId) {
+    const actorUserId = resolveAuthenticatedUserId(request, userId);
+    await ensureUserExists(actorUserId);
+
+    const complianceProfile = await getOrCreateComplianceProfile(db, actorUserId);
+    const capabilities = resolveCountryCapabilities({
+      countryCode: complianceProfile.countryCode,
+      residencyCountryCode: complianceProfile.residencyCountryCode,
+    });
+
+    allowedGatewayIds = getAllowedGatewayIds(capabilities, channel);
+  }
+
   const tableCheck = await db.query<{ exists: boolean }>(
     `SELECT to_regclass('public.payment_gateways') IS NOT NULL AS exists`
   );
 
   if (!tableCheck.rows[0]?.exists) {
+    const fallbackItems = [
+      {
+        id: 'stripe_americas',
+        displayName: 'Stripe Americas',
+        type: 'fiat',
+        isActive: true,
+      },
+      {
+        id: 'mollie_eu',
+        displayName: 'Mollie Europe',
+        type: 'fiat',
+        isActive: true,
+      },
+      {
+        id: 'razorpay_in',
+        displayName: 'Razorpay India',
+        type: 'fiat',
+        isActive: true,
+      },
+      {
+        id: 'flutterwave_africa',
+        displayName: 'Flutterwave Africa',
+        type: 'fiat',
+        isActive: true,
+      },
+      {
+        id: 'tap_gulf',
+        displayName: 'Tap Payments Gulf',
+        type: 'fiat',
+        isActive: true,
+      },
+    ];
+
+    const filteredFallbackItems = allowedGatewayIds === null
+      ? fallbackItems
+      : fallbackItems.filter((item) => allowedGatewayIds?.includes(item.id));
+
     return {
       ok: true,
-      items: [
-        {
-          id: 'stripe_americas',
-          displayName: 'Stripe Americas',
-          type: 'fiat',
-          isActive: true,
-        },
-        {
-          id: 'mollie_eu',
-          displayName: 'Mollie Europe',
-          type: 'fiat',
-          isActive: true,
-        },
-        {
-          id: 'razorpay_in',
-          displayName: 'Razorpay India',
-          type: 'fiat',
-          isActive: true,
-        },
-        {
-          id: 'flutterwave_africa',
-          displayName: 'Flutterwave Africa',
-          type: 'fiat',
-          isActive: true,
-        },
-        {
-          id: 'tap_gulf',
-          displayName: 'Tap Payments Gulf',
-          type: 'fiat',
-          isActive: true,
-        },
-      ],
+      items: filteredFallbackItems,
     };
   }
 
@@ -14542,8 +15160,10 @@ app.get('/payments/gateways', async () => {
       SELECT id, display_name, gateway_type, is_active
       FROM payment_gateways
       WHERE is_active = TRUE
+        AND ($1::text[] IS NULL OR id = ANY($1))
       ORDER BY id ASC
-    `
+    `,
+    [allowedGatewayIds]
   );
 
   return {
@@ -14691,10 +15311,10 @@ app.get('/users/:userId/payout-accounts', async (request, reply) => {
 app.post('/users/:userId/payout-accounts', async (request, reply) => {
   const paramsSchema = z.object({ userId: z.string().min(2) });
   const bodySchema = z.object({
-    gatewayId: z.string().min(2).max(80).default('stripe_americas'),
+    gatewayId: z.string().min(2).max(80).optional(),
     providerAccountRef: z.string().min(3).max(140).optional(),
     countryCode: z.string().min(2).max(3).optional(),
-    currency: z.string().length(3).default('GBP'),
+    currency: z.string().length(3).optional(),
     status: z.enum(['pending', 'active', 'disabled']).default('active'),
     metadata: z.record(z.unknown()).optional(),
   });
@@ -14712,9 +15332,41 @@ app.post('/users/:userId/payout-accounts', async (request, reply) => {
 
   await ensureUserExists(userId);
 
+  const complianceProfile = await getOrCreateComplianceProfile(db, userId);
+  const capabilities = resolveCountryCapabilities({
+    countryCode: complianceProfile.countryCode,
+    residencyCountryCode: complianceProfile.residencyCountryCode,
+  });
+
+  const payoutDefaults = resolvePayoutPolicyDefaults(capabilities, {
+    gatewayId: payload.gatewayId,
+    currency: payload.currency,
+    countryCode: payload.countryCode,
+    fallbackGatewayId: 'stripe_americas',
+  });
+  const resolvedCurrency = payoutDefaults.currency;
+  const resolvedGatewayId = payoutDefaults.gatewayId;
+  const resolvedCountryCode = payoutDefaults.countryCode;
+
+  if (!isPayoutCurrencyAllowed(capabilities, resolvedCurrency)) {
+    reply.code(400);
+    return {
+      ok: false,
+      error: `Payout currency '${resolvedCurrency}' is unavailable for this country policy`,
+    };
+  }
+
+  if (!isPayoutGatewayAllowed(capabilities, resolvedGatewayId)) {
+    reply.code(400);
+    return {
+      ok: false,
+      error: `Gateway '${resolvedGatewayId}' is unavailable for this country policy`,
+    };
+  }
+
   const gateway = await db.query<{ id: string }>(
     'SELECT id FROM payment_gateways WHERE id = $1 AND is_active = TRUE LIMIT 1',
-    [payload.gatewayId]
+    [resolvedGatewayId]
   );
 
   if (!gateway.rowCount) {
@@ -14764,12 +15416,16 @@ app.post('/users/:userId/payout-accounts', async (request, reply) => {
     `,
     [
       userId,
-      payload.gatewayId,
+      resolvedGatewayId,
       providerAccountRef,
-      payload.countryCode?.toUpperCase() ?? null,
-      payload.currency.toUpperCase(),
+      resolvedCountryCode,
+      resolvedCurrency,
       payload.status,
-      toJsonString(payload.metadata ?? {}),
+      toJsonString({
+        ...(payload.metadata ?? {}),
+        countryCluster: capabilities.countryCluster,
+        capabilityPolicyVersion: capabilities.policyVersion,
+      }),
     ]
   );
 
@@ -14895,7 +15551,7 @@ app.post('/users/:userId/payout-requests', async (request, reply) => {
     payoutAccountId: z.coerce.number().int().positive(),
     amountGbp: z.number().positive().optional(),
     amount: z.number().positive().optional(),
-    amountCurrency: z.string().length(3).default('GBP'),
+    amountCurrency: z.string().length(3).optional(),
     metadata: z.record(z.unknown()).optional(),
   });
 
@@ -14953,7 +15609,7 @@ app.post('/users/:userId/payout-requests', async (request, reply) => {
       };
     }
 
-    const payoutCurrency = payload.amountCurrency.toUpperCase();
+    const payoutCurrency = (payload.amountCurrency ?? payoutAccountRow.currency).toUpperCase();
     if (payoutAccountRow.currency.toUpperCase() !== payoutCurrency) {
       await client.query('ROLLBACK');
       reply.code(400);
@@ -15215,7 +15871,7 @@ app.post('/payments/intents', async (request, reply) => {
     gatewayId: z.string().min(2).max(80).optional(),
     instrumentId: z.coerce.number().int().positive().optional(),
     orderId: z.string().min(4).max(64).optional(),
-    syndicateOrderId: z.coerce.number().int().positive().optional(),
+    coOwnOrderId: z.coerce.number().int().positive().optional(),
     channel: z.enum(['wallet_topup', 'wallet_withdrawal']).optional(),
     amountGbp: z.number().positive().optional(),
     amountCurrency: z.string().length(3).default('GBP'),
@@ -15236,19 +15892,19 @@ app.post('/payments/intents', async (request, reply) => {
     };
   }
 
-  if (payload.orderId && payload.syndicateOrderId) {
+  if (payload.orderId && payload.coOwnOrderId) {
     reply.code(400);
     return {
       ok: false,
-      error: 'Provide either orderId or syndicateOrderId, not both',
+      error: 'Provide either orderId or coOwnOrderId, not both',
     };
   }
 
-  if (!payload.orderId && !payload.syndicateOrderId && !payload.channel) {
+  if (!payload.orderId && !payload.coOwnOrderId && !payload.channel) {
     reply.code(400);
     return {
       ok: false,
-      error: 'A payment intent source is required (orderId, syndicateOrderId, or channel)',
+      error: 'A payment intent source is required (orderId, coOwnOrderId, or channel)',
     };
   }
 
@@ -15261,7 +15917,7 @@ app.post('/payments/intents', async (request, reply) => {
           gateway_id,
           channel,
           order_id,
-          syndicate_order_id,
+          coOwn_order_id,
           instrument_id,
           amount_gbp,
           amount_currency,
@@ -15298,11 +15954,26 @@ app.post('/payments/intents', async (request, reply) => {
     await client.query('BEGIN');
     await ensureUserExists(actorUserId);
 
+    const actorProfile = await getOrCreateComplianceProfile(client, actorUserId);
+    const actorCapabilities = resolveCountryCapabilities({
+      countryCode: actorProfile.countryCode,
+      residencyCountryCode: actorProfile.residencyCountryCode,
+    });
+    const defaultGatewayForChannel = (
+      intentChannel: PaymentIntentChannel,
+      requestedGatewayId?: string
+    ): string => resolveChannelGateway(
+      actorCapabilities,
+      intentChannel,
+      requestedGatewayId,
+      resolveDefaultGatewayForChannel(intentChannel)
+    );
+
     let channel: PaymentIntentChannel;
     let amountGbp: number;
-    let gatewayId = payload.gatewayId ?? resolveDefaultGatewayForChannel('commerce');
+    let gatewayId = defaultGatewayForChannel('commerce', payload.gatewayId);
     let orderId: string | null = null;
-    let syndicateOrderId: number | null = null;
+    let coOwnOrderId: number | null = null;
 
     if (payload.orderId) {
       const order = await client.query<{
@@ -15346,40 +16017,40 @@ app.post('/payments/intents', async (request, reply) => {
       channel = 'commerce';
       amountGbp = Number(orderRow.total_gbp);
       orderId = orderRow.id;
-      gatewayId = payload.gatewayId ?? resolveDefaultGatewayForChannel(channel);
-    } else if (payload.syndicateOrderId) {
-      const syndicateOrder = await client.query<{
+      gatewayId = defaultGatewayForChannel(channel, payload.gatewayId);
+    } else if (payload.coOwnOrderId) {
+      const coOwnOrder = await client.query<{
         id: number;
         user_id: string;
         total_gbp: number | string;
       }>(
-        'SELECT id, user_id, total_gbp FROM syndicate_orders WHERE id = $1 LIMIT 1',
-        [payload.syndicateOrderId]
+        'SELECT id, user_id, total_gbp FROM coOwn_orders WHERE id = $1 LIMIT 1',
+        [payload.coOwnOrderId]
       );
 
-      const syndicateOrderRow = syndicateOrder.rows[0];
-      if (!syndicateOrderRow) {
+      const coOwnOrderRow = coOwnOrder.rows[0];
+      if (!coOwnOrderRow) {
         await client.query('ROLLBACK');
         reply.code(404);
         return {
           ok: false,
-          error: 'Syndicate order not found',
+          error: 'Co-Own order not found',
         };
       }
 
-      if (syndicateOrderRow.user_id !== actorUserId) {
+      if (coOwnOrderRow.user_id !== actorUserId) {
         await client.query('ROLLBACK');
         reply.code(400);
         return {
           ok: false,
-          error: 'Syndicate order does not belong to this user',
+          error: 'Co-Own order does not belong to this user',
         };
       }
 
-      channel = 'syndicate';
-      amountGbp = Number(syndicateOrderRow.total_gbp);
-      syndicateOrderId = syndicateOrderRow.id;
-      gatewayId = payload.gatewayId ?? resolveDefaultGatewayForChannel(channel);
+      channel = 'co-own';
+      amountGbp = Number(coOwnOrderRow.total_gbp);
+      coOwnOrderId = coOwnOrderRow.id;
+      gatewayId = defaultGatewayForChannel(channel, payload.gatewayId);
     } else {
       channel = payload.channel as PaymentIntentChannel;
       if (!payload.amountGbp || !Number.isFinite(payload.amountGbp) || payload.amountGbp <= 0) {
@@ -15392,7 +16063,16 @@ app.post('/payments/intents', async (request, reply) => {
       }
 
       amountGbp = roundTo(payload.amountGbp, 2);
-      gatewayId = payload.gatewayId ?? resolveDefaultGatewayForChannel(channel);
+      gatewayId = defaultGatewayForChannel(channel, payload.gatewayId);
+    }
+
+    if (!isGatewayAllowedForChannel(actorCapabilities, channel, gatewayId)) {
+      await client.query('ROLLBACK');
+      reply.code(403);
+      return {
+        ok: false,
+        error: 'Gateway is unavailable in your country policy for this payment channel',
+      };
     }
 
     const gateway = await client.query<{ id: string }>(
@@ -15443,7 +16123,7 @@ app.post('/payments/intents', async (request, reply) => {
         ...(payload.metadata ?? {}),
         userId: actorUserId,
         orderId,
-        syndicateOrderId,
+        coOwnOrderId,
       },
     });
 
@@ -15455,7 +16135,7 @@ app.post('/payments/intents', async (request, reply) => {
           gateway_id,
           channel,
           order_id,
-          syndicate_order_id,
+          coOwn_order_id,
           instrument_id,
           amount_gbp,
           amount_currency,
@@ -15475,7 +16155,7 @@ app.post('/payments/intents', async (request, reply) => {
           gateway_id,
           channel,
           order_id,
-          syndicate_order_id,
+          coOwn_order_id,
           instrument_id,
           amount_gbp,
           amount_currency,
@@ -15497,7 +16177,7 @@ app.post('/payments/intents', async (request, reply) => {
         gatewayId,
         channel,
         orderId,
-        syndicateOrderId,
+        coOwnOrderId,
         payload.instrumentId ?? null,
         amountGbp,
         payload.amountCurrency.toUpperCase(),
@@ -15552,7 +16232,7 @@ app.get('/payments/intents/:intentId', async (request, reply) => {
         gateway_id,
         channel,
         order_id,
-        syndicate_order_id,
+        coOwn_order_id,
         instrument_id,
         amount_gbp,
         amount_currency,
@@ -15761,7 +16441,7 @@ app.post('/payments/intents/:intentId/refunds', async (request, reply) => {
           gateway_id,
           channel,
           order_id,
-          syndicate_order_id,
+          coOwn_order_id,
           instrument_id,
           amount_gbp,
           amount_currency,
@@ -16420,7 +17100,7 @@ app.post('/webhooks/:provider', async (request, reply) => {
             gateway_id,
             channel,
             order_id,
-            syndicate_order_id,
+            coOwn_order_id,
             instrument_id,
             amount_gbp,
             amount_currency,
@@ -17099,7 +17779,7 @@ app.get('/users/:userId/orders', async (request) => {
 app.get('/users/:userId/market-history', async (request, reply) => {
   const paramsSchema = z.object({ userId: z.string().min(2) });
   const querySchema = z.object({
-    channel: z.enum(['all', 'auction', 'syndicate']).default('all'),
+    channel: z.enum(['all', 'auction', 'co-own']).default('all'),
     limit: z.coerce.number().int().min(1).max(500).default(200),
     cursorTs: z.string().datetime().optional(),
     cursorId: z.string().min(1).optional(),
@@ -17120,7 +17800,7 @@ app.get('/users/:userId/market-history', async (request, reply) => {
 
   const result = await db.query<{
     entry_id: string;
-    channel: 'auction' | 'syndicate';
+    channel: 'auction' | 'co-own';
     action: 'bid' | 'buy-units' | 'sell-units';
     reference_id: string;
     amount_gbp: number | string;
@@ -17169,8 +17849,8 @@ app.get('/users/:userId/market-history', async (request, reply) => {
         UNION ALL
 
         SELECT
-          ('syndicate_order_' || so.id::text) AS entry_id,
-          'syndicate'::text AS channel,
+          ('coOwn_order_' || so.id::text) AS entry_id,
+          'co-own'::text AS channel,
           CASE WHEN so.side = 'buy' THEN 'buy-units' ELSE 'sell-units' END AS action,
           so.asset_id AS reference_id,
           so.total_gbp AS amount_gbp,
@@ -17180,8 +17860,8 @@ app.get('/users/:userId/market-history', async (request, reply) => {
           so.status::text AS status,
           sa.title AS note,
           so.created_at AS timestamp
-        FROM syndicate_orders so
-        INNER JOIN syndicate_assets sa ON sa.id = so.asset_id
+        FROM coOwn_orders so
+        INNER JOIN coOwn_assets sa ON sa.id = so.asset_id
         WHERE so.user_id = $1
       ) history
       WHERE ($2 = 'all' OR history.channel = $2)
@@ -17738,7 +18418,7 @@ app.post('/auctions/:auctionId/bids', async (request, reply) => {
   }
 });
 
-app.get('/syndicate/assets', async (request) => {
+app.get('/co-own/assets', async (request) => {
   const querySchema = z.object({
     openOnly: z.union([z.string(), z.boolean()]).optional(),
     issuerId: z.string().min(2).max(128).optional(),
@@ -17802,7 +18482,7 @@ app.get('/syndicate/assets', async (request) => {
         sa.is_open,
         sa.created_at,
         sa.updated_at
-      FROM syndicate_assets sa
+      FROM coOwn_assets sa
       ${whereClause}
       ORDER BY sa.volume_24h_gbp DESC, sa.created_at DESC
       LIMIT ${limitPlaceholder}
@@ -17834,7 +18514,7 @@ app.get('/syndicate/assets', async (request) => {
   };
 });
 
-app.post('/syndicate/assets', async (request, reply) => {
+app.post('/co-own/assets', async (request, reply) => {
   const bodySchema = z.object({
     id: z.string().min(4).max(64).optional(),
     listingId: z.string().min(2),
@@ -17888,7 +18568,7 @@ app.post('/syndicate/assets', async (request, reply) => {
     updated_at: string;
   }>(
     `
-      INSERT INTO syndicate_assets (
+      INSERT INTO coOwn_assets (
         id,
         listing_id,
         issuer_id,
@@ -17964,10 +18644,10 @@ app.post('/syndicate/assets', async (request, reply) => {
   };
 });
 
-type SyndicateOrderStatus = 'open' | 'partially_filled' | 'filled' | 'cancelled' | 'rejected';
-type SyndicateOrderType = 'market' | 'limit';
+type CoOwnOrderStatus = 'open' | 'partially_filled' | 'filled' | 'cancelled' | 'rejected';
+type CoOwnOrderType = 'market' | 'limit';
 
-interface SyndicateHoldingRow {
+interface CoOwnHoldingRow {
   user_id: string;
   asset_id: string;
   units_owned: number;
@@ -17975,12 +18655,12 @@ interface SyndicateHoldingRow {
   realized_pnl_gbp: number | string;
 }
 
-async function getSyndicateHoldingForUpdate(
+async function getCoOwnHoldingForUpdate(
   client: PoolClient,
   userId: string,
   assetId: string
-): Promise<SyndicateHoldingRow | null> {
-  const result = await client.query<SyndicateHoldingRow>(
+): Promise<CoOwnHoldingRow | null> {
+  const result = await client.query<CoOwnHoldingRow>(
     `
       SELECT
         user_id,
@@ -17988,7 +18668,7 @@ async function getSyndicateHoldingForUpdate(
         units_owned,
         avg_entry_price_gbp,
         realized_pnl_gbp
-      FROM syndicate_holdings
+      FROM coOwn_holdings
       WHERE user_id = $1
         AND asset_id = $2
       LIMIT 1
@@ -18000,7 +18680,7 @@ async function getSyndicateHoldingForUpdate(
   return result.rows[0] ?? null;
 }
 
-async function saveSyndicateHolding(
+async function saveCoOwnHolding(
   client: PoolClient,
   input: {
     userId: string;
@@ -18012,7 +18692,7 @@ async function saveSyndicateHolding(
 ): Promise<void> {
   await client.query(
     `
-      INSERT INTO syndicate_holdings (
+      INSERT INTO coOwn_holdings (
         user_id,
         asset_id,
         units_owned,
@@ -18039,7 +18719,7 @@ async function saveSyndicateHolding(
   );
 }
 
-async function applySyndicateTransfer(
+async function applyCoOwnTransfer(
   client: PoolClient,
   input: {
     assetId: string;
@@ -18048,7 +18728,7 @@ async function applySyndicateTransfer(
     units: number;
     unitPriceGbp: number;
     feeGbp: number;
-    sourceType: 'syndicate_trade' | 'buyout';
+    sourceType: 'coOwn_trade' | 'buyout';
     buyOrderId?: number | null;
     sellOrderId?: number | null;
     enforceSellerHolding: boolean;
@@ -18062,13 +18742,13 @@ async function applySyndicateTransfer(
     };
   }
 
-  const buyerHolding = await getSyndicateHoldingForUpdate(client, input.buyerId, input.assetId);
-  const sellerHolding = await getSyndicateHoldingForUpdate(client, input.sellerId, input.assetId);
+  const buyerHolding = await getCoOwnHoldingForUpdate(client, input.buyerId, input.assetId);
+  const sellerHolding = await getCoOwnHoldingForUpdate(client, input.sellerId, input.assetId);
 
   if (input.enforceSellerHolding) {
     const sellerUnits = sellerHolding?.units_owned ?? 0;
     if (sellerUnits < units) {
-      throw createApiError('SYNDICATE_SELLER_UNITS_INSUFFICIENT', 'Seller does not have enough units', {
+      throw createApiError('CO_OWN_SELLER_UNITS_INSUFFICIENT', 'Seller does not have enough units', {
         sellerId: input.sellerId,
         availableUnits: sellerUnits,
         requestedUnits: units,
@@ -18085,7 +18765,7 @@ async function applySyndicateTransfer(
       ? (buyerAvgBefore * buyerUnitsBefore + input.unitPriceGbp * units) / buyerUnitsAfter
       : input.unitPriceGbp;
 
-  await saveSyndicateHolding(client, {
+  await saveCoOwnHolding(client, {
     userId: input.buyerId,
     assetId: input.assetId,
     unitsOwned: buyerUnitsAfter,
@@ -18100,7 +18780,7 @@ async function applySyndicateTransfer(
     const sellerUnitsAfter = sellerUnitsBefore - units;
     const realizedDelta = (input.unitPriceGbp - sellerAvgBefore) * units;
 
-    await saveSyndicateHolding(client, {
+    await saveCoOwnHolding(client, {
       userId: input.sellerId,
       assetId: input.assetId,
       unitsOwned: sellerUnitsAfter,
@@ -18113,7 +18793,7 @@ async function applySyndicateTransfer(
 
   await client.query(
     `
-      INSERT INTO syndicate_trades (
+      INSERT INTO coOwn_trades (
         asset_id,
         buy_order_id,
         sell_order_id,
@@ -18145,11 +18825,11 @@ async function applySyndicateTransfer(
   };
 }
 
-async function recalcSyndicateHolders(client: PoolClient, assetId: string): Promise<number> {
+async function recalcCoOwnHolders(client: PoolClient, assetId: string): Promise<number> {
   const result = await client.query<{ count: string }>(
     `
       SELECT COUNT(*)::text AS count
-      FROM syndicate_holdings
+      FROM coOwn_holdings
       WHERE asset_id = $1
         AND units_owned > 0
     `,
@@ -18159,7 +18839,7 @@ async function recalcSyndicateHolders(client: PoolClient, assetId: string): Prom
   return Number(result.rows[0]?.count ?? '0');
 }
 
-app.get('/syndicate/assets/:assetId/orders', async (request, reply) => {
+app.get('/co-own/assets/:assetId/orders', async (request, reply) => {
   const paramsSchema = z.object({ assetId: z.string().min(2) });
   const querySchema = z.object({
     status: z.enum(['open', 'partially_filled', 'filled', 'cancelled', 'rejected']).optional(),
@@ -18169,10 +18849,10 @@ app.get('/syndicate/assets/:assetId/orders', async (request, reply) => {
   const { assetId } = paramsSchema.parse(request.params);
   const { status, limit } = querySchema.parse(request.query);
 
-  const assetExists = await db.query('SELECT id FROM syndicate_assets WHERE id = $1 LIMIT 1', [assetId]);
+  const assetExists = await db.query('SELECT id FROM coOwn_assets WHERE id = $1 LIMIT 1', [assetId]);
   if (!assetExists.rowCount) {
     reply.code(404);
-    return { ok: false, error: 'Syndicate asset not found' };
+    return { ok: false, error: 'Co-Own asset not found' };
   }
 
   const result = await db.query<{
@@ -18180,7 +18860,7 @@ app.get('/syndicate/assets/:assetId/orders', async (request, reply) => {
     asset_id: string;
     user_id: string;
     side: 'buy' | 'sell';
-    order_type: SyndicateOrderType;
+    order_type: CoOwnOrderType;
     limit_price_gbp: number | string | null;
     units: number;
     remaining_units: number;
@@ -18188,7 +18868,7 @@ app.get('/syndicate/assets/:assetId/orders', async (request, reply) => {
     unit_price_gbp: number | string;
     fee_gbp: number | string;
     total_gbp: number | string;
-    status: SyndicateOrderStatus;
+    status: CoOwnOrderStatus;
     created_at: string;
     updated_at: string;
   }>(
@@ -18209,7 +18889,7 @@ app.get('/syndicate/assets/:assetId/orders', async (request, reply) => {
         status,
         created_at,
         updated_at
-      FROM syndicate_orders
+      FROM coOwn_orders
       WHERE asset_id = $1
         AND ($2::text IS NULL OR status = $2)
       ORDER BY created_at DESC
@@ -18240,7 +18920,7 @@ app.get('/syndicate/assets/:assetId/orders', async (request, reply) => {
   };
 });
 
-app.get('/syndicate/assets/:assetId/orderbook', async (request, reply) => {
+app.get('/co-own/assets/:assetId/orderbook', async (request, reply) => {
   const paramsSchema = z.object({ assetId: z.string().min(2) });
   const querySchema = z.object({
     limit: z.coerce.number().int().min(1).max(200).default(40),
@@ -18249,10 +18929,10 @@ app.get('/syndicate/assets/:assetId/orderbook', async (request, reply) => {
   const { assetId } = paramsSchema.parse(request.params);
   const { limit } = querySchema.parse(request.query);
 
-  const assetExists = await db.query('SELECT id FROM syndicate_assets WHERE id = $1 LIMIT 1', [assetId]);
+  const assetExists = await db.query('SELECT id FROM coOwn_assets WHERE id = $1 LIMIT 1', [assetId]);
   if (!assetExists.rowCount) {
     reply.code(404);
-    return { ok: false, error: 'Syndicate asset not found' };
+    return { ok: false, error: 'Co-Own asset not found' };
   }
 
   const result = await db.query<{
@@ -18267,7 +18947,7 @@ app.get('/syndicate/assets/:assetId/orderbook', async (request, reply) => {
         unit_price_gbp::text,
         SUM(remaining_units)::text AS units,
         COUNT(*)::text AS order_count
-      FROM syndicate_orders
+      FROM coOwn_orders
       WHERE asset_id = $1
         AND status IN ('open', 'partially_filled')
         AND remaining_units > 0
@@ -18302,7 +18982,7 @@ app.get('/syndicate/assets/:assetId/orderbook', async (request, reply) => {
   };
 });
 
-app.get('/syndicate/assets/:assetId/holdings', async (request, reply) => {
+app.get('/co-own/assets/:assetId/holdings', async (request, reply) => {
   const paramsSchema = z.object({ assetId: z.string().min(2) });
   const querySchema = z.object({
     limit: z.coerce.number().int().min(1).max(200).default(100),
@@ -18325,7 +19005,7 @@ app.get('/syndicate/assets/:assetId/holdings', async (request, reply) => {
         avg_entry_price_gbp::text,
         realized_pnl_gbp::text,
         updated_at::text
-      FROM syndicate_holdings
+      FROM coOwn_holdings
       WHERE asset_id = $1
       ORDER BY units_owned DESC, updated_at DESC
       LIMIT $2
@@ -18345,7 +19025,7 @@ app.get('/syndicate/assets/:assetId/holdings', async (request, reply) => {
   };
 });
 
-app.post('/syndicate/assets/:assetId/orders', async (request, reply) => {
+app.post('/co-own/assets/:assetId/orders', async (request, reply) => {
   const paramsSchema = z.object({ assetId: z.string().min(2) });
   const bodySchema = z.object({
     userId: z.string().min(2),
@@ -18402,7 +19082,7 @@ app.post('/syndicate/assets/:assetId/orders', async (request, reply) => {
           holders,
           volume_24h_gbp,
           is_open
-        FROM syndicate_assets
+        FROM coOwn_assets
         WHERE id = $1
         FOR UPDATE
       `,
@@ -18413,13 +19093,13 @@ app.post('/syndicate/assets/:assetId/orders', async (request, reply) => {
     if (!asset) {
       await client.query('ROLLBACK');
       reply.code(404);
-      return { ok: false, error: 'Syndicate asset not found' };
+      return { ok: false, error: 'Co-Own asset not found' };
     }
 
     if (!asset.is_open) {
       await client.query('ROLLBACK');
       reply.code(409);
-      return { ok: false, error: 'Syndicate asset is closed for trading' };
+      return { ok: false, error: 'Co-Own asset is closed for trading' };
     }
 
     const referencePriceGbp = Number(asset.unit_price_gbp);
@@ -18431,7 +19111,7 @@ app.post('/syndicate/assets/:assetId/orders', async (request, reply) => {
 
     const eligibility = await evaluateMarketEligibility(client, {
       userId: payload.userId,
-      market: 'syndicate',
+      market: 'co-own',
       orderNotionalGbp: proposedNotionalGbp,
     });
 
@@ -18439,7 +19119,7 @@ app.post('/syndicate/assets/:assetId/orders', async (request, reply) => {
       await client.query('ROLLBACK');
 
       await appendComplianceAuditSafe(request, {
-        eventType: 'syndicate.order.blocked.eligibility',
+        eventType: 'co-own.order.blocked.eligibility',
         subjectUserId: payload.userId,
         payload: {
           assetId,
@@ -18462,7 +19142,7 @@ app.post('/syndicate/assets/:assetId/orders', async (request, reply) => {
 
     const preTradeAml = await evaluateAmlRisk(client, {
       userId: payload.userId,
-      market: 'syndicate',
+      market: 'co-own',
       amountGbp: proposedNotionalGbp,
       counterpartyUserId: asset.issuer_id,
     });
@@ -18474,12 +19154,12 @@ app.post('/syndicate/assets/:assetId/orders', async (request, reply) => {
         amlAlert = await createAmlAlert(db, {
           userId: payload.userId,
           relatedUserId: asset.issuer_id,
-          market: 'syndicate',
+          market: 'co-own',
           eventType: 'trade',
           amountGbp: proposedNotionalGbp,
           referenceId: `${assetId}:pretrade`,
           ruleCode: 'AML_PRE_TRADE_BLOCK',
-          notes: 'Syndicate order blocked by AML pre-trade evaluation',
+          notes: 'Co-Own order blocked by AML pre-trade evaluation',
           context: {
             assetId,
             side: payload.side,
@@ -18491,7 +19171,7 @@ app.post('/syndicate/assets/:assetId/orders', async (request, reply) => {
       }
 
       await appendComplianceAuditSafe(request, {
-        eventType: 'syndicate.order.blocked.aml',
+        eventType: 'co-own.order.blocked.aml',
         subjectUserId: payload.userId,
         payload: {
           assetId,
@@ -18516,7 +19196,7 @@ app.post('/syndicate/assets/:assetId/orders', async (request, reply) => {
     }
 
     if (payload.side === 'sell') {
-      const sellerHolding = await getSyndicateHoldingForUpdate(client, payload.userId, assetId);
+      const sellerHolding = await getCoOwnHoldingForUpdate(client, payload.userId, assetId);
       const sellerUnits = sellerHolding?.units_owned ?? 0;
       if (sellerUnits < payload.units) {
         await client.query('ROLLBACK');
@@ -18543,7 +19223,7 @@ app.post('/syndicate/assets/:assetId/orders', async (request, reply) => {
       created_at: string;
     }>(
       `
-        INSERT INTO syndicate_orders (
+        INSERT INTO coOwn_orders (
           asset_id,
           user_id,
           side,
@@ -18601,7 +19281,7 @@ app.post('/syndicate/assets/:assetId/orders', async (request, reply) => {
           unit_price_gbp::text,
           fee_gbp::text,
           total_gbp::text
-        FROM syndicate_orders
+        FROM coOwn_orders
         WHERE asset_id = $1
           AND side = $2
           AND status IN ('open', 'partially_filled')
@@ -18643,30 +19323,30 @@ app.post('/syndicate/assets/:assetId/orders', async (request, reply) => {
       const fillUnits = Math.min(remainingUnits, restingRemaining);
       const tradePrice = Number(resting.unit_price_gbp);
       const tradeNotional = roundTo(fillUnits * tradePrice, 4);
-      const tradeFee = roundTo(tradeNotional * SYNDICATE_TRADE_FEE_RATE, 4);
+      const tradeFee = roundTo(tradeNotional * CO_OWN_TRADE_FEE_RATE, 4);
 
       if (payload.side === 'buy') {
-        await applySyndicateTransfer(client, {
+        await applyCoOwnTransfer(client, {
           assetId,
           buyerId: payload.userId,
           sellerId: resting.user_id,
           units: fillUnits,
           unitPriceGbp: tradePrice,
           feeGbp: tradeFee,
-          sourceType: 'syndicate_trade',
+          sourceType: 'coOwn_trade',
           buyOrderId: incomingOrderId,
           sellOrderId: resting.id,
           enforceSellerHolding: true,
         });
       } else {
-        await applySyndicateTransfer(client, {
+        await applyCoOwnTransfer(client, {
           assetId,
           buyerId: resting.user_id,
           sellerId: payload.userId,
           units: fillUnits,
           unitPriceGbp: tradePrice,
           feeGbp: tradeFee,
-          sourceType: 'syndicate_trade',
+          sourceType: 'coOwn_trade',
           buyOrderId: resting.id,
           sellOrderId: incomingOrderId,
           enforceSellerHolding: true,
@@ -18680,7 +19360,7 @@ app.post('/syndicate/assets/:assetId/orders', async (request, reply) => {
 
       const restingRemainingAfter = restingRemaining - fillUnits;
       const restingFilledAfter = resting.filled_units + fillUnits;
-      const restingStatus: SyndicateOrderStatus =
+      const restingStatus: CoOwnOrderStatus =
         restingRemainingAfter <= 0 ? 'filled' : 'partially_filled';
       const restingTradeNet =
         resting.side === 'buy'
@@ -18691,7 +19371,7 @@ app.post('/syndicate/assets/:assetId/orders', async (request, reply) => {
 
       await client.query(
         `
-          UPDATE syndicate_orders
+          UPDATE coOwn_orders
           SET
             remaining_units = $2,
             filled_units = $3,
@@ -18722,16 +19402,16 @@ app.post('/syndicate/assets/:assetId/orders', async (request, reply) => {
       if (primaryFillUnits > 0) {
         const tradePrice = referencePriceGbp;
         const tradeNotional = roundTo(primaryFillUnits * tradePrice, 4);
-        const tradeFee = roundTo(tradeNotional * SYNDICATE_TRADE_FEE_RATE, 4);
+        const tradeFee = roundTo(tradeNotional * CO_OWN_TRADE_FEE_RATE, 4);
 
-        await applySyndicateTransfer(client, {
+        await applyCoOwnTransfer(client, {
           assetId,
           buyerId: payload.userId,
           sellerId: asset.issuer_id,
           units: primaryFillUnits,
           unitPriceGbp: tradePrice,
           feeGbp: tradeFee,
-          sourceType: 'syndicate_trade',
+          sourceType: 'coOwn_trade',
           buyOrderId: incomingOrderId,
           sellOrderId: null,
           enforceSellerHolding: false,
@@ -18745,7 +19425,7 @@ app.post('/syndicate/assets/:assetId/orders', async (request, reply) => {
       }
     }
 
-    let orderStatus: SyndicateOrderStatus;
+    let orderStatus: CoOwnOrderStatus;
     let persistedRemainingUnits = Math.max(0, remainingUnits);
 
     if (payload.orderType === 'market') {
@@ -18768,12 +19448,12 @@ app.post('/syndicate/assets/:assetId/orders', async (request, reply) => {
       id: number;
       created_at: string;
       updated_at: string;
-      status: SyndicateOrderStatus;
+      status: CoOwnOrderStatus;
       remaining_units: number;
       filled_units: number;
     }>(
       `
-        UPDATE syndicate_orders
+        UPDATE coOwn_orders
         SET
           remaining_units = $2,
           filled_units = $3,
@@ -18804,7 +19484,7 @@ app.post('/syndicate/assets/:assetId/orders', async (request, reply) => {
       3
     );
     const nextVolume24hGbp = roundTo(Number(asset.volume_24h_gbp) + tradedNotionalGbp, 2);
-    const nextHolders = await recalcSyndicateHolders(client, assetId);
+    const nextHolders = await recalcCoOwnHolders(client, assetId);
 
     const updatedAssetResult = await client.query<{
       id: string;
@@ -18817,7 +19497,7 @@ app.post('/syndicate/assets/:assetId/orders', async (request, reply) => {
       updated_at: string;
     }>(
       `
-        UPDATE syndicate_assets
+        UPDATE coOwn_assets
         SET
           available_units = $2,
           holders = $3,
@@ -18853,12 +19533,12 @@ app.post('/syndicate/assets/:assetId/orders', async (request, reply) => {
       amlAlert = await createAmlAlert(client, {
         userId: payload.userId,
         relatedUserId: asset.issuer_id,
-        market: 'syndicate',
+        market: 'co-own',
         eventType: 'trade',
         amountGbp: monitoredAmount,
         referenceId: String(incomingOrder.rows[0].id),
         ruleCode: 'AML_POST_TRADE_MONITOR',
-        notes: 'Syndicate order generated elevated AML risk score',
+        notes: 'Co-Own order generated elevated AML risk score',
         context: {
           assetId,
           side: payload.side,
@@ -18873,7 +19553,7 @@ app.post('/syndicate/assets/:assetId/orders', async (request, reply) => {
     await client.query('COMMIT');
 
     await appendComplianceAuditSafe(request, {
-      eventType: 'syndicate.order.created',
+      eventType: 'co-own.order.created',
       subjectUserId: payload.userId,
       payload: {
         assetId,
@@ -18929,7 +19609,7 @@ app.post('/syndicate/assets/:assetId/orders', async (request, reply) => {
     await client.query('ROLLBACK');
 
     const apiError = getApiError(error);
-    if (apiError?.code === 'SYNDICATE_SELLER_UNITS_INSUFFICIENT') {
+    if (apiError?.code === 'CO_OWN_SELLER_UNITS_INSUFFICIENT') {
       reply.code(409);
       return {
         ok: false,
@@ -18941,14 +19621,14 @@ app.post('/syndicate/assets/:assetId/orders', async (request, reply) => {
     reply.code(500);
     return {
       ok: false,
-      error: `Unable to place syndicate order: ${(error as Error).message}`,
+      error: `Unable to place co-own order: ${(error as Error).message}`,
     };
   } finally {
     client.release();
   }
 });
 
-app.get('/syndicate/assets/:assetId/buyout-offers', async (request, reply) => {
+app.get('/co-own/assets/:assetId/buyout-offers', async (request, reply) => {
   const paramsSchema = z.object({ assetId: z.string().min(2) });
   const querySchema = z.object({
     status: z.enum(['open', 'accepted', 'expired', 'cancelled', 'rejected', 'settled']).optional(),
@@ -18984,7 +19664,7 @@ app.get('/syndicate/assets/:assetId/buyout-offers', async (request, reply) => {
         metadata,
         created_at::text,
         updated_at::text
-      FROM syndicate_buyout_offers
+      FROM coOwn_buyout_offers
       WHERE asset_id = $1
         AND ($2::text IS NULL OR status = $2)
       ORDER BY created_at DESC
@@ -19011,7 +19691,7 @@ app.get('/syndicate/assets/:assetId/buyout-offers', async (request, reply) => {
   };
 });
 
-app.post('/syndicate/assets/:assetId/buyout-offers', async (request, reply) => {
+app.post('/co-own/assets/:assetId/buyout-offers', async (request, reply) => {
   const paramsSchema = z.object({ assetId: z.string().min(2) });
   const bodySchema = z.object({
     bidderUserId: z.string().min(2),
@@ -19037,7 +19717,7 @@ app.post('/syndicate/assets/:assetId/buyout-offers', async (request, reply) => {
     }>(
       `
         SELECT id, total_units, is_open
-        FROM syndicate_assets
+        FROM coOwn_assets
         WHERE id = $1
         FOR UPDATE
       `,
@@ -19048,16 +19728,16 @@ app.post('/syndicate/assets/:assetId/buyout-offers', async (request, reply) => {
     if (!asset) {
       await client.query('ROLLBACK');
       reply.code(404);
-      return { ok: false, error: 'Syndicate asset not found' };
+      return { ok: false, error: 'Co-Own asset not found' };
     }
 
     if (!asset.is_open) {
       await client.query('ROLLBACK');
       reply.code(409);
-      return { ok: false, error: 'Syndicate asset is closed for buyout offers' };
+      return { ok: false, error: 'Co-Own asset is closed for buyout offers' };
     }
 
-    const bidderHolding = await getSyndicateHoldingForUpdate(client, payload.bidderUserId, assetId);
+    const bidderHolding = await getCoOwnHoldingForUpdate(client, payload.bidderUserId, assetId);
     const bidderUnits = bidderHolding?.units_owned ?? 0;
     const inferredTarget = Math.max(0, asset.total_units - bidderUnits);
     const targetUnits = payload.targetUnits ?? inferredTarget;
@@ -19075,7 +19755,7 @@ app.post('/syndicate/assets/:assetId/buyout-offers', async (request, reply) => {
 
     const eligibility = await evaluateMarketEligibility(client, {
       userId: payload.bidderUserId,
-      market: 'syndicate',
+      market: 'co-own',
       orderNotionalGbp: offerNotionalGbp,
     });
 
@@ -19105,7 +19785,7 @@ app.post('/syndicate/assets/:assetId/buyout-offers', async (request, reply) => {
 
     const amlAssessment = await evaluateAmlRisk(client, {
       userId: payload.bidderUserId,
-      market: 'syndicate',
+      market: 'co-own',
       amountGbp: offerNotionalGbp,
     });
 
@@ -19115,7 +19795,7 @@ app.post('/syndicate/assets/:assetId/buyout-offers', async (request, reply) => {
       if (amlAssessment.shouldCreateAlert) {
         amlAlert = await createAmlAlert(db, {
           userId: payload.bidderUserId,
-          market: 'syndicate',
+          market: 'co-own',
           eventType: 'trade',
           amountGbp: offerNotionalGbp,
           referenceId: `${assetId}:buyout-offer`,
@@ -19164,7 +19844,7 @@ app.post('/syndicate/assets/:assetId/buyout-offers', async (request, reply) => {
       updated_at: string;
     }>(
       `
-        INSERT INTO syndicate_buyout_offers (
+        INSERT INTO coOwn_buyout_offers (
           id,
           asset_id,
           bidder_user_id,
@@ -19192,7 +19872,7 @@ app.post('/syndicate/assets/:assetId/buyout-offers', async (request, reply) => {
     if (amlAssessment.shouldCreateAlert) {
       amlAlert = await createAmlAlert(client, {
         userId: payload.bidderUserId,
-        market: 'syndicate',
+        market: 'co-own',
         eventType: 'trade',
         amountGbp: offerNotionalGbp,
         referenceId: offerId,
@@ -19211,7 +19891,7 @@ app.post('/syndicate/assets/:assetId/buyout-offers', async (request, reply) => {
     await client.query('COMMIT');
 
     publishRealtimeEvent({
-      topic: `syndicate.asset:${assetId}`,
+      topic: `co-own.asset:${assetId}`,
       type: 'buyout.offer.opened',
       payload: {
         offerId,
@@ -19269,7 +19949,7 @@ app.post('/syndicate/assets/:assetId/buyout-offers', async (request, reply) => {
   }
 });
 
-app.post('/syndicate/buyout-offers/:offerId/accept', async (request, reply) => {
+app.post('/co-own/buyout-offers/:offerId/accept', async (request, reply) => {
   const paramsSchema = z.object({ offerId: z.string().min(4) });
   const bodySchema = z.object({
     holderUserId: z.string().min(2),
@@ -19308,8 +19988,8 @@ app.post('/syndicate/buyout-offers/:offerId/accept', async (request, reply) => {
           bo.status,
           bo.expires_at::text,
           sa.total_units
-        FROM syndicate_buyout_offers bo
-        INNER JOIN syndicate_assets sa ON sa.id = bo.asset_id
+        FROM coOwn_buyout_offers bo
+        INNER JOIN coOwn_assets sa ON sa.id = bo.asset_id
         WHERE bo.id = $1
         LIMIT 1
         FOR UPDATE
@@ -19340,7 +20020,7 @@ app.post('/syndicate/buyout-offers/:offerId/accept', async (request, reply) => {
     if (offer.status !== 'open' || offerExpired) {
       await client.query(
         `
-          UPDATE syndicate_buyout_offers
+          UPDATE coOwn_buyout_offers
           SET status = CASE WHEN expires_at <= NOW() THEN 'expired' ELSE status END,
               updated_at = NOW()
           WHERE id = $1
@@ -19370,7 +20050,7 @@ app.post('/syndicate/buyout-offers/:offerId/accept', async (request, reply) => {
 
     const holderEligibility = await evaluateMarketEligibility(client, {
       userId: payload.holderUserId,
-      market: 'syndicate',
+      market: 'co-own',
       orderNotionalGbp: acceptanceNotionalGbp,
     });
 
@@ -19400,7 +20080,7 @@ app.post('/syndicate/buyout-offers/:offerId/accept', async (request, reply) => {
 
     const bidderEligibility = await evaluateMarketEligibility(client, {
       userId: offer.bidder_user_id,
-      market: 'syndicate',
+      market: 'co-own',
       orderNotionalGbp: acceptanceNotionalGbp,
     });
 
@@ -19430,7 +20110,7 @@ app.post('/syndicate/buyout-offers/:offerId/accept', async (request, reply) => {
 
     const amlAssessment = await evaluateAmlRisk(client, {
       userId: payload.holderUserId,
-      market: 'syndicate',
+      market: 'co-own',
       amountGbp: acceptanceNotionalGbp,
       counterpartyUserId: offer.bidder_user_id,
     });
@@ -19442,7 +20122,7 @@ app.post('/syndicate/buyout-offers/:offerId/accept', async (request, reply) => {
         amlAlert = await createAmlAlert(db, {
           userId: payload.holderUserId,
           relatedUserId: offer.bidder_user_id,
-          market: 'syndicate',
+          market: 'co-own',
           eventType: 'trade',
           amountGbp: acceptanceNotionalGbp,
           referenceId: offerId,
@@ -19483,7 +20163,7 @@ app.post('/syndicate/buyout-offers/:offerId/accept', async (request, reply) => {
       };
     }
 
-    await applySyndicateTransfer(client, {
+    await applyCoOwnTransfer(client, {
       assetId: offer.asset_id,
       buyerId: offer.bidder_user_id,
       sellerId: payload.holderUserId,
@@ -19498,7 +20178,7 @@ app.post('/syndicate/buyout-offers/:offerId/accept', async (request, reply) => {
 
     await client.query(
       `
-        INSERT INTO syndicate_buyout_acceptances (
+        INSERT INTO coOwn_buyout_acceptances (
           offer_id,
           holder_user_id,
           units,
@@ -19513,7 +20193,7 @@ app.post('/syndicate/buyout-offers/:offerId/accept', async (request, reply) => {
             units = EXCLUDED.units,
             status = EXCLUDED.status,
             responded_at = NOW(),
-            metadata = syndicate_buyout_acceptances.metadata || EXCLUDED.metadata
+            metadata = coOwn_buyout_acceptances.metadata || EXCLUDED.metadata
       `,
       [offerId, payload.holderUserId, acceptedUnits, toJsonString(payload.metadata ?? {})]
     );
@@ -19523,7 +20203,7 @@ app.post('/syndicate/buyout-offers/:offerId/accept', async (request, reply) => {
 
     await client.query(
       `
-        UPDATE syndicate_buyout_offers
+        UPDATE coOwn_buyout_offers
         SET
           accepted_units = $2,
           status = $3,
@@ -19533,12 +20213,12 @@ app.post('/syndicate/buyout-offers/:offerId/accept', async (request, reply) => {
       [offerId, nextAcceptedUnits, nextStatus]
     );
 
-    const bidderHolding = await getSyndicateHoldingForUpdate(client, offer.bidder_user_id, offer.asset_id);
+    const bidderHolding = await getCoOwnHoldingForUpdate(client, offer.bidder_user_id, offer.asset_id);
     const bidderUnits = bidderHolding?.units_owned ?? 0;
     if (nextStatus === 'settled' && bidderUnits >= offer.total_units) {
       await client.query(
         `
-          UPDATE syndicate_assets
+          UPDATE coOwn_assets
           SET is_open = FALSE, updated_at = NOW()
           WHERE id = $1
         `,
@@ -19546,10 +20226,10 @@ app.post('/syndicate/buyout-offers/:offerId/accept', async (request, reply) => {
       );
     }
 
-    const nextHolders = await recalcSyndicateHolders(client, offer.asset_id);
+    const nextHolders = await recalcCoOwnHolders(client, offer.asset_id);
     await client.query(
       `
-        UPDATE syndicate_assets
+        UPDATE coOwn_assets
         SET holders = $2, updated_at = NOW()
         WHERE id = $1
       `,
@@ -19560,7 +20240,7 @@ app.post('/syndicate/buyout-offers/:offerId/accept', async (request, reply) => {
       amlAlert = await createAmlAlert(client, {
         userId: payload.holderUserId,
         relatedUserId: offer.bidder_user_id,
-        market: 'syndicate',
+        market: 'co-own',
         eventType: 'trade',
         amountGbp: acceptanceNotionalGbp,
         referenceId: offerId,
@@ -19580,7 +20260,7 @@ app.post('/syndicate/buyout-offers/:offerId/accept', async (request, reply) => {
     await client.query('COMMIT');
 
     publishRealtimeEvent({
-      topic: `syndicate.asset:${offer.asset_id}`,
+      topic: `co-own.asset:${offer.asset_id}`,
       type: 'buyout.offer.accepted',
       payload: {
         offerId,
@@ -19652,7 +20332,7 @@ app.post('/syndicate/buyout-offers/:offerId/accept', async (request, reply) => {
     await client.query('ROLLBACK');
 
     const apiError = getApiError(error);
-    if (apiError?.code === 'SYNDICATE_SELLER_UNITS_INSUFFICIENT') {
+    if (apiError?.code === 'CO_OWN_SELLER_UNITS_INSUFFICIENT') {
       reply.code(409);
       return {
         ok: false,

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { Poster } from '../data/posters';
-import type { AuctionMarketItem, AuctionViewModel, SyndicateAsset } from '../data/tradeHub';
+import type { AuctionMarketItem, AuctionViewModel, CoOwnAsset } from '../data/tradeHub';
 import type { ChatBot, Conversation, Message as ConversationMessage } from '../data/mockData';
 import { MOCK_CHAT_BOTS, MOCK_CONVERSATIONS, MY_USER } from '../data/mockData';
 import { ENABLE_RUNTIME_MOCKS } from '../constants/runtimeFlags';
@@ -58,14 +58,14 @@ interface SavedPaymentMethod {
   isDefault?: boolean;
 }
 
-interface SyndicateComplianceProfile {
+interface CoOwnComplianceProfile {
   countryCode: string;
   kycVerified: boolean;
   riskDisclosureAccepted: boolean;
   stableCoinWalletConnected: boolean;
 }
 
-type SyndicateEligibilityResult = {
+type CoOwnEligibilityResult = {
   ok: boolean;
   message?: string;
 };
@@ -87,7 +87,7 @@ interface AuctionRuntimeState {
   settled?: boolean;
 }
 
-interface SyndicateRuntimeState {
+interface CoOwnRuntimeState {
   availableUnits: number;
   holders: number;
   volume24hGBP: number;
@@ -103,7 +103,7 @@ interface SyndicateRuntimeState {
 interface MarketLedgerEntry {
   id: string;
   timestamp: string;
-  channel: 'auction' | 'syndicate';
+  channel: 'auction' | 'co-own';
   action: 'bid' | 'win' | 'buy-units' | 'sell-units';
   referenceId: string;
   amountGBP: number;
@@ -166,14 +166,14 @@ interface StoreState {
   placeAuctionBid: (auction: AuctionViewModel, bidderId: string, amount: number) => TradeActionResult;
   buyNowAuction: (auction: AuctionViewModel, buyerId: string) => TradeActionResult;
   settleExpiredAuctions: (auctions: AuctionViewModel[]) => void;
-  customSyndicates: SyndicateAsset[];
-  addSyndicate: (asset: SyndicateAsset) => void;
-  syndicateRuntime: Record<string, SyndicateRuntimeState>;
-  syndicateCompliance: SyndicateComplianceProfile;
-  updateSyndicateCompliance: (updates: Partial<SyndicateComplianceProfile>) => void;
-  checkSyndicateEligibility: (settlementMode?: 'GBP' | 'TVUSD' | 'HYBRID') => SyndicateEligibilityResult;
-  buySyndicateUnits: (asset: SyndicateAsset, buyerId: string, units: number) => TradeActionResult;
-  sellSyndicateUnits: (asset: SyndicateAsset, sellerId: string, units: number) => TradeActionResult;
+  customCoOwns: CoOwnAsset[];
+  addCoOwn: (asset: CoOwnAsset) => void;
+  coOwnRuntime: Record<string, CoOwnRuntimeState>;
+  coOwnCompliance: CoOwnComplianceProfile;
+  updateCoOwnCompliance: (updates: Partial<CoOwnComplianceProfile>) => void;
+  checkCoOwnEligibility: (settlementMode?: 'GBP' | 'TVUSD' | 'HYBRID') => CoOwnEligibilityResult;
+  buyCoOwnUnits: (asset: CoOwnAsset, buyerId: string, units: number) => TradeActionResult;
+  sellCoOwnUnits: (asset: CoOwnAsset, sellerId: string, units: number) => TradeActionResult;
   marketLedger: MarketLedgerEntry[];
 
   // Browse filters/search
@@ -410,39 +410,39 @@ export const useStore = create<StoreState>((set, get) => ({
         marketLedger: nextLedger,
       };
     }),
-  customSyndicates: [],
-  addSyndicate: (asset) =>
+  customCoOwns: [],
+  addCoOwn: (asset) =>
     set((state) => ({
-      customSyndicates: [asset, ...state.customSyndicates],
+      customCoOwns: [asset, ...state.customCoOwns],
     })),
-  syndicateRuntime: {},
-  syndicateCompliance: {
+  coOwnRuntime: {},
+  coOwnCompliance: {
     countryCode: 'GB',
     kycVerified: false,
     riskDisclosureAccepted: false,
     stableCoinWalletConnected: false,
   },
-  updateSyndicateCompliance: (updates) =>
+  updateCoOwnCompliance: (updates) =>
     set((state) => ({
-      syndicateCompliance: {
-        ...state.syndicateCompliance,
+      coOwnCompliance: {
+        ...state.coOwnCompliance,
         ...updates,
       },
     })),
-  checkSyndicateEligibility: (settlementMode = 'HYBRID') => {
-    const profile = get().syndicateCompliance;
+  checkCoOwnEligibility: (settlementMode = 'HYBRID') => {
+    const profile = get().coOwnCompliance;
 
     if (!profile.kycVerified) {
       return {
         ok: false,
-        message: 'Complete KYC verification to access Syndicate markets.',
+        message: 'Complete KYC verification to access Co-Own markets.',
       };
     }
 
     if (!profile.riskDisclosureAccepted) {
       return {
         ok: false,
-        message: 'Accept the risk disclosure before trading syndicate units.',
+        message: 'Accept the risk disclosure before trading co-own units.',
       };
     }
 
@@ -455,12 +455,12 @@ export const useStore = create<StoreState>((set, get) => ({
 
     return { ok: true };
   },
-  buySyndicateUnits: (asset, buyerId, units) => {
+  buyCoOwnUnits: (asset, buyerId, units) => {
     if (!asset.isOpen) {
       return { ok: false, message: 'Pool currently closed' };
     }
 
-    const eligibility = get().checkSyndicateEligibility(asset.settlementMode);
+    const eligibility = get().checkCoOwnEligibility(asset.settlementMode);
     if (!eligibility.ok) {
       return { ok: false, message: eligibility.message };
     }
@@ -471,7 +471,7 @@ export const useStore = create<StoreState>((set, get) => ({
     }
 
     const state = get();
-    const runtime = state.syndicateRuntime[asset.id] ?? {
+    const runtime = state.coOwnRuntime[asset.id] ?? {
       availableUnits: asset.availableUnits,
       holders: asset.holders,
       volume24hGBP: asset.volume24hGBP,
@@ -509,7 +509,7 @@ export const useStore = create<StoreState>((set, get) => ({
       (((nextUnitPriceGBP - referencePrice) / referencePrice) * 100).toFixed(1)
     );
 
-    const nextRuntime: SyndicateRuntimeState = {
+    const nextRuntime: CoOwnRuntimeState = {
       availableUnits: runtime.availableUnits - requestedUnits,
       holders: runtime.yourUnits > 0 ? runtime.holders : runtime.holders + 1,
       volume24hGBP: runtime.volume24hGBP + totalSpend,
@@ -524,13 +524,13 @@ export const useStore = create<StoreState>((set, get) => ({
     const deliveryTriggered = nextRuntime.availableUnits === 0 && nextYourUnits >= totalUnits;
 
     set({
-      syndicateRuntime: {
-        ...state.syndicateRuntime,
+      coOwnRuntime: {
+        ...state.coOwnRuntime,
         [asset.id]: nextRuntime,
       },
       marketLedger: [
         makeLedgerEntry({
-          channel: 'syndicate',
+          channel: 'co-own',
           action: 'buy-units',
           referenceId: asset.id,
           amountGBP: totalSpend,
@@ -550,12 +550,12 @@ export const useStore = create<StoreState>((set, get) => ({
       deliveryListingId: deliveryTriggered ? asset.listingId : undefined,
     };
   },
-  sellSyndicateUnits: (asset, sellerId, units) => {
+  sellCoOwnUnits: (asset, sellerId, units) => {
     if (!asset.isOpen) {
       return { ok: false, message: 'Pool currently closed' };
     }
 
-    const eligibility = get().checkSyndicateEligibility(asset.settlementMode);
+    const eligibility = get().checkCoOwnEligibility(asset.settlementMode);
     if (!eligibility.ok) {
       return { ok: false, message: eligibility.message };
     }
@@ -566,7 +566,7 @@ export const useStore = create<StoreState>((set, get) => ({
     }
 
     const state = get();
-    const runtime = state.syndicateRuntime[asset.id] ?? {
+    const runtime = state.coOwnRuntime[asset.id] ?? {
       availableUnits: asset.availableUnits,
       holders: asset.holders,
       volume24hGBP: asset.volume24hGBP,
@@ -600,7 +600,7 @@ export const useStore = create<StoreState>((set, get) => ({
       (((nextUnitPriceGBP - referencePrice) / referencePrice) * 100).toFixed(1)
     );
 
-    const nextRuntime: SyndicateRuntimeState = {
+    const nextRuntime: CoOwnRuntimeState = {
       availableUnits: runtime.availableUnits + requestedUnits,
       holders: nextYourUnits === 0 ? Math.max(0, runtime.holders - 1) : runtime.holders,
       volume24hGBP: runtime.volume24hGBP + totalReceive,
@@ -614,13 +614,13 @@ export const useStore = create<StoreState>((set, get) => ({
     };
 
     set({
-      syndicateRuntime: {
-        ...state.syndicateRuntime,
+      coOwnRuntime: {
+        ...state.coOwnRuntime,
         [asset.id]: nextRuntime,
       },
       marketLedger: [
         makeLedgerEntry({
-          channel: 'syndicate',
+          channel: 'co-own',
           action: 'sell-units',
           referenceId: asset.id,
           amountGBP: totalReceive,

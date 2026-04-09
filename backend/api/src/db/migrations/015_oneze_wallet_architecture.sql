@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS wallet_ledger (
       'WITHDRAWAL_FEE',
       'SALE',
       'PURCHASE',
-      'SYNDICATE_TRADE',
+      'CO_OWN_TRADE',
       'FEE',
       'REDEMPTION'
     )

@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import {
   View,
   Text,
@@ -28,7 +28,7 @@ import { RootStackParamList } from '../navigation/types';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useBackendData } from '../context/BackendDataContext';
 import { useStore } from '../store/useStore';
-import { getSyndicateMarket } from '../data/tradeHub';
+import { getCoOwnMarket } from '../data/tradeHub';
 import { resolveAssetMarketState } from '../data/mockSyndicateData';
 import { AnimatedPressable } from '../components/AnimatedPressable';
 import { AnimatedCounter } from '../components/AnimatedCounter';
@@ -72,8 +72,8 @@ export default function MyProfileScreen() {
   const { show } = useToast();
   const { formatFromFiat } = useFormattedPrice();
   const { listings } = useBackendData();
-  const customSyndicates = useStore((state) => state.customSyndicates);
-  const syndicateRuntime = useStore((state) => state.syndicateRuntime);
+  const customCoOwns = useStore((state) => state.customCoOwns);
+  const coOwnRuntime = useStore((state) => state.coOwnRuntime);
   
   const userAvatar = useStore((state) => state.userAvatar);
   const userCover = useStore((state) => state.userCover);
@@ -212,25 +212,25 @@ export default function MyProfileScreen() {
     [myListings]
   );
 
-  const syndicateHoldings = React.useMemo(() => {
-    const marketAssets = getSyndicateMarket(customSyndicates).map((asset) =>
-      resolveAssetMarketState(asset, syndicateRuntime[asset.id])
+  const coOwnHoldings = React.useMemo(() => {
+    const marketAssets = getCoOwnMarket(customCoOwns).map((asset) =>
+      resolveAssetMarketState(asset, coOwnRuntime[asset.id])
     );
     return marketAssets.filter((asset) => asset.yourUnits > 0);
-  }, [customSyndicates, syndicateRuntime]);
+  }, [customCoOwns, coOwnRuntime]);
 
   const holdingsValue = React.useMemo(
-    () => syndicateHoldings.reduce((sum, asset) => sum + asset.yourUnits * asset.unitPriceGBP, 0),
-    [syndicateHoldings]
+    () => coOwnHoldings.reduce((sum, asset) => sum + asset.yourUnits * asset.unitPriceGBP, 0),
+    [coOwnHoldings]
   );
 
   const holdingsUnrealized = React.useMemo(
     () =>
-      syndicateHoldings.reduce((sum, asset) => {
+      coOwnHoldings.reduce((sum, asset) => {
         const avgEntry = asset.avgEntryPriceGBP ?? asset.unitPriceGBP;
         return sum + (asset.unitPriceGBP - avgEntry) * asset.yourUnits;
       }, 0),
-    [syndicateHoldings]
+    [coOwnHoldings]
   );
 
   // Parallax scroll for cover
@@ -275,16 +275,16 @@ export default function MyProfileScreen() {
       },
       {
         icon: 'pie-chart-outline',
-        label: 'Syndicate',
+        label: 'Co-Own',
         route: 'Portfolio',
-        value: `${syndicateHoldings.length} assets`,
+        value: `${coOwnHoldings.length} assets`,
         color: IS_LIGHT ? '#5c4830' : '#ccb893',
       },
       { icon: 'bookmark-outline', label: 'Wishlist', route: 'Favourites', color: IS_LIGHT ? '#704b3b' : '#e6c8b4' },
       { icon: 'color-palette-outline', label: 'Style', route: 'Personalisation', color: IS_LIGHT ? '#6a5a45' : '#d6c6b4' },
       { icon: 'settings-outline', label: 'Settings', route: 'Settings', color: '#a0a0a0' },
     ],
-    [formatFromFiat, syndicateHoldings.length]
+    [formatFromFiat, coOwnHoldings.length]
   );
 
   const AnimatedScrollView = Reanimated.createAnimatedComponent(ScrollView);
@@ -449,10 +449,10 @@ export default function MyProfileScreen() {
           </View>
         </View>
 
-        {/* â”€â”€ Syndicate Portfolio Summary â”€â”€ */}
+        {/* ── Co-Own Portfolio Summary ── */}
         <View style={styles.portfolioSummaryCard}>
           <View style={styles.portfolioSummaryTop}>
-            <Text style={styles.portfolioSummaryLabel}>MY SYNDICATE HOLDINGS</Text>
+            <Text style={styles.portfolioSummaryLabel}>MY CO-OWN HOLDINGS</Text>
             <AnimatedPressable
               style={styles.portfolioSummaryLinkBtn}
               activeOpacity={0.8}
@@ -467,7 +467,7 @@ export default function MyProfileScreen() {
 
           <View style={styles.portfolioSummaryMetaRow}>
             <Text style={styles.portfolioSummaryMeta}>
-              {syndicateHoldings.length} active position{syndicateHoldings.length === 1 ? '' : 's'}
+              {coOwnHoldings.length} active position{coOwnHoldings.length === 1 ? '' : 's'}
             </Text>
             <Text
               style={[
@@ -480,14 +480,14 @@ export default function MyProfileScreen() {
             </Text>
           </View>
 
-          {syndicateHoldings.length === 0 && (
+          {coOwnHoldings.length === 0 && (
             <AnimatedPressable
               style={styles.portfolioSummaryCta}
               activeOpacity={0.85}
-              onPress={() => navigation.navigate('SyndicateHub')}
+              onPress={() => navigation.navigate('CoOwnHub')}
             >
               <Ionicons name="sparkles-outline" size={14} color={Colors.background} />
-              <Text style={styles.portfolioSummaryCtaText}>Explore Syndicate Hub</Text>
+              <Text style={styles.portfolioSummaryCtaText}>Explore Co-Own Hub</Text>
             </AnimatedPressable>
           )}
         </View>

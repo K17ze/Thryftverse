@@ -1,4 +1,4 @@
-﻿import React, { useState } from 'react';
+﻿import React, { useEffect, useState } from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -15,6 +15,9 @@ import { StackScreenProps } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
+import { useStore } from '../store/useStore';
+import { formatCountryPolicyScope } from '../utils/capabilityPolicy';
+import { CapabilityCarrier, getUserCountryCapabilities } from '../services/capabilitiesApi';
 
 type Props = StackScreenProps<RootStackParamList, 'Postage'>;
 
@@ -34,11 +37,59 @@ const CARRIERS = [
   { key: 'inpost', label: 'InPost', priceFromGBP: 2.99, selected: false },
 ];
 
+function mapCapabilityCarriers(carriers: CapabilityCarrier[]) {
+  return carriers.map((carrier, index) => ({
+    key: carrier.id,
+    label: carrier.label,
+    priceFromGBP: carrier.priceFromGbp,
+    selected: index === 0,
+  }));
+}
+
 export default function PostageScreen({ navigation }: Props) {
+  const currentUser = useStore((state) => state.currentUser);
   const { formatFromFiat } = useFormattedPrice();
   const [carriers, setCarriers] = useState(CARRIERS);
   const [freeShipping, setFreeShipping] = useState(false);
   const [bundleDiscount, setBundleDiscount] = useState(true);
+  const [carrierScopeLabel, setCarrierScopeLabel] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const hydrateCountryCarriers = async () => {
+      if (!currentUser?.id) {
+        setCarriers(CARRIERS);
+        setCarrierScopeLabel(null);
+        return;
+      }
+
+      try {
+        const capabilities = await getUserCountryCapabilities(currentUser.id);
+        if (cancelled) {
+          return;
+        }
+
+        const nextCarriers = capabilities.postage.carriers.length > 0
+          ? mapCapabilityCarriers(capabilities.postage.carriers)
+          : CARRIERS;
+
+        setCarriers(nextCarriers);
+        setCarrierScopeLabel(formatCountryPolicyScope(capabilities));
+      } catch {
+        if (!cancelled) {
+          setCarriers(CARRIERS);
+          setCarrierScopeLabel(null);
+        }
+      }
+    };
+
+    void hydrateCountryCarriers();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser?.id]);
 
   const selectCarrier = (key: string) =>
     setCarriers(prev => prev.map(c => ({ ...c, selected: c.key === key })));
@@ -58,6 +109,9 @@ export default function PostageScreen({ navigation }: Props) {
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <Text style={styles.sectionLabel}>DEFAULT CARRIER</Text>
+        {carrierScopeLabel ? (
+          <Text style={styles.scopeLabel}>Region policy: {carrierScopeLabel}</Text>
+        ) : null}
         <View style={styles.card}>
           {carriers.map((c, idx) => (
             <View key={c.key}>
@@ -133,6 +187,12 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     marginBottom: 10,
     marginLeft: 4,
+  },
+  scopeLabel: {
+    fontSize: 12,
+    color: MUTED,
+    marginLeft: 4,
+    marginBottom: 10,
   },
   card: { backgroundColor: CARD, borderWidth: 1, borderColor: BORDER, borderRadius: 16, overflow: 'hidden', marginBottom: 24 },
   row: {

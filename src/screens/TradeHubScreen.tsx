@@ -12,13 +12,13 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { Typography } from '../constants/typography';
 import AuctionsScreen from './AuctionsScreen';
-import SyndicateScreen from './SyndicateScreen';
+import CoOwnScreen from './SyndicateScreen';
 import { useStore } from '../store/useStore';
 import { RootStackParamList } from '../navigation/types';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { AnimatedCounter } from '../components/AnimatedCounter';
 
-type TradeHubTab = 'AUCTIONS' | 'SYNDICATE';
+type TradeHubTab = 'AUCTIONS' | 'CO-OWN';
 type NavT = StackNavigationProp<RootStackParamList>;
 const BRAND = Colors.accent;
 const PANEL_TINT_BG = Colors.cardAlt;
@@ -31,8 +31,8 @@ export default function TradeHubScreen() {
   const [activeTab, setActiveTab] = React.useState<TradeHubTab>('AUCTIONS');
   const marketLedger = useStore((state) => state.marketLedger);
   const customAuctions = useStore((state) => state.customAuctions);
-  const customSyndicates = useStore((state) => state.customSyndicates);
-  const syndicateRuntime = useStore((state) => state.syndicateRuntime);
+  const customCoOwns = useStore((state) => state.customCoOwns);
+  const coOwnRuntime = useStore((state) => state.coOwnRuntime);
 
   // ── Animated tab slider ──
   const tabLayouts = React.useRef<{ [key: string]: { x: number; width: number } }>({});
@@ -73,7 +73,7 @@ export default function TradeHubScreen() {
     if (latestActivity.channel === 'auction' && latestActivity.action === 'win') {
       return `Auction settled ${formatFromFiat(latestActivity.amountGBP, 'GBP', { displayMode: 'fiat' })} on ${latestActivity.referenceId}`;
     }
-    if (latestActivity.channel === 'syndicate' && latestActivity.action === 'sell-units') {
+    if (latestActivity.channel === 'co-own' && latestActivity.action === 'sell-units') {
       const units = latestActivity.units ?? 0;
       return `Sold ${units} unit${units === 1 ? '' : 's'} on ${latestActivity.referenceId}`;
     }
@@ -90,10 +90,10 @@ export default function TradeHubScreen() {
       return startsAtMs <= nowTs && endsAtMs > nowTs;
     }).length;
 
-    const openPools = customSyndicates.filter((asset) => asset.isOpen).length;
+    const openPools = customCoOwns.filter((asset) => asset.isOpen).length;
 
-    const holdingsValue = customSyndicates.reduce((sum, asset) => {
-      const runtime = syndicateRuntime[asset.id];
+    const holdingsValue = customCoOwns.reduce((sum, asset) => {
+      const runtime = coOwnRuntime[asset.id];
       const units = runtime?.yourUnits ?? asset.yourUnits ?? 0;
       const unitPrice = runtime?.unitPriceGBP ?? asset.unitPriceGBP;
       return sum + units * unitPrice;
@@ -104,7 +104,7 @@ export default function TradeHubScreen() {
       openPools,
       holdingsValue,
     };
-  }, [customAuctions, customSyndicates, syndicateRuntime]);
+  }, [customAuctions, customCoOwns, coOwnRuntime]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -148,14 +148,14 @@ export default function TradeHubScreen() {
           <Text style={styles.snapshotValueMoney} numberOfLines={1}>
             {formatFromFiat(marketSnapshot.holdingsValue, 'GBP', { displayMode: 'fiat' })}
           </Text>
-          <Text style={styles.snapshotLabel}>Your syndicate value</Text>
+          <Text style={styles.snapshotLabel}>Your co-own value</Text>
         </View>
       </View>
 
       {/* Animated tab switcher with sliding pill */}
       <View style={styles.tabSwitcher}>
         <Reanimated.View style={[styles.tabIndicator, indicatorStyle]} />
-        {(['AUCTIONS', 'SYNDICATE'] as const).map((tab) => (
+        {(['AUCTIONS', 'CO-OWN'] as const).map((tab) => (
           <AnimatedPressable
             key={tab}
             style={styles.tabBtn}
@@ -164,7 +164,7 @@ export default function TradeHubScreen() {
             onLayout={(e: LayoutChangeEvent) => handleTabLayout(tab, e)}
           >
             <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
-              {tab === 'AUCTIONS' ? 'Auctions' : 'Syndicate'}
+              {tab === 'AUCTIONS' ? 'Auctions' : 'Co-Own'}
             </Text>
           </AnimatedPressable>
         ))}
@@ -189,7 +189,7 @@ export default function TradeHubScreen() {
       </AnimatedPressable>
 
       <View style={styles.contentWrap}>
-        {activeTab === 'AUCTIONS' ? <AuctionsScreen /> : <SyndicateScreen />}
+        {activeTab === 'AUCTIONS' ? <AuctionsScreen /> : <CoOwnScreen />}
       </View>
     </SafeAreaView>
   );

@@ -10,8 +10,8 @@ import {
 import { parseRealtimeTopics, publishRealtimeEvent } from '../lib/realtime.js';
 
 test('parseRealtimeTopics normalizes both string and array payloads', () => {
-  const fromString = parseRealtimeTopics(' Auctions.Market , syndicate.asset:ABC ,,  ');
-  assert.deepEqual(fromString, ['auctions.market', 'syndicate.asset:abc']);
+  const fromString = parseRealtimeTopics(' Auctions.Market , co-own.asset:ABC ,,  ');
+  assert.deepEqual(fromString, ['auctions.market', 'co-own.asset:abc']);
 
   const fromArray = parseRealtimeTopics([' notifications.user:U1 ', 'SYSTEM', 123, null]);
   assert.deepEqual(fromArray, ['notifications.user:u1', 'system']);

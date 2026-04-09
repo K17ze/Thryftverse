@@ -1,4 +1,4 @@
-﻿import React, { useState } from 'react';
+﻿import React, { useEffect, useMemo, useState } from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -19,7 +19,10 @@ import { ActiveTheme, Colors } from '../constants/colors';
 import { useStore } from '../store/useStore';
 import { useToast } from '../context/ToastContext';
 import { buildCardPaymentMethod } from '../utils/checkoutFlow';
+import { formatCountryPolicyScope, isPaymentMethodAllowed } from '../utils/capabilityPolicy';
 import { createUserPaymentMethod } from '../services/commerceApi';
+import { getUserCountryCapabilities, UserCountryCapabilities } from '../services/capabilitiesApi';
+import { parseApiError } from '../lib/apiClient';
 
 type Props = StackScreenProps<RootStackParamList, 'AddCard'>;
 
@@ -41,9 +44,38 @@ export default function AddCardScreen({ navigation }: Props) {
   const [cvv, setCvv] = useState('');
   const [name, setName] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [countryCapabilities, setCountryCapabilities] = useState<UserCountryCapabilities | null>(null);
   const currentUser = useStore((state) => state.currentUser);
   const savePaymentMethod = useStore((state) => state.savePaymentMethod);
   const { show } = useToast();
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const hydrateCapabilities = async () => {
+      if (!currentUser?.id) {
+        setCountryCapabilities(null);
+        return;
+      }
+
+      try {
+        const capabilities = await getUserCountryCapabilities(currentUser.id);
+        if (!cancelled) {
+          setCountryCapabilities(capabilities);
+        }
+      } catch {
+        if (!cancelled) {
+          setCountryCapabilities(null);
+        }
+      }
+    };
+
+    void hydrateCapabilities();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser?.id]);
 
   const formatCardNumber = (val: string) =>
     val.replace(/\D/g, '').slice(0, 16).replace(/(.{4})/g, '$1 ').trim();
@@ -67,7 +99,22 @@ export default function AddCardScreen({ navigation }: Props) {
     cvv.length >= 3 &&
     name.trim().length >= 2;
 
+  const cardAllowed = isPaymentMethodAllowed(countryCapabilities, 'card');
+
+  const policyLabel = useMemo(() => {
+    if (!countryCapabilities) {
+      return null;
+    }
+
+    return formatCountryPolicyScope(countryCapabilities);
+  }, [countryCapabilities]);
+
   const handleSaveCard = async () => {
+    if (!cardAllowed) {
+      show('Card payments are unavailable for your country policy.', 'error');
+      return;
+    }
+
     if (!isComplete || isSaving) {
       return;
     }
@@ -76,6 +123,7 @@ export default function AddCardScreen({ navigation }: Props) {
     const localPaymentMethod = buildCardPaymentMethod(last4, expiry, 'Visa');
 
     setIsSaving(true);
+    let shouldCloseScreen = true;
     try {
       const userId = currentUser?.id ?? 'u1';
       const saved = await createUserPaymentMethod(userId, {
@@ -93,12 +141,20 @@ export default function AddCardScreen({ navigation }: Props) {
         isDefault: saved.isDefault,
       });
       show('Card saved', 'success');
-    } catch {
-      savePaymentMethod(localPaymentMethod);
-      show('Card saved locally. Backend sync unavailable.', 'info');
+    } catch (error) {
+      const parsed = parseApiError(error, 'Unable to save card right now.');
+      if (parsed.isNetworkError) {
+        savePaymentMethod(localPaymentMethod);
+        show('Card saved locally. Backend sync unavailable.', 'info');
+      } else {
+        shouldCloseScreen = false;
+        show(parsed.message, 'error');
+      }
     } finally {
       setIsSaving(false);
-      navigation.goBack();
+      if (shouldCloseScreen) {
+        navigation.goBack();
+      }
     }
   };
 
@@ -113,8 +169,17 @@ export default function AddCardScreen({ navigation }: Props) {
         <View style={{ width: 24 }} />
       </View>
 
+      {policyLabel ? <Text style={styles.policyLabel}>Policy scope: {policyLabel}</Text> : null}
+
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          {!cardAllowed ? (
+            <View style={styles.blockedCard}>
+              <Text style={styles.blockedTitle}>Cards unavailable in your region</Text>
+              <Text style={styles.blockedText}>Update your country policy or use supported payment rails.</Text>
+            </View>
+          ) : null}
+
           {/* Card Preview */}
           <View style={styles.cardPreview}>
             <Text style={styles.cardPreviewNumber}>
@@ -202,8 +267,8 @@ export default function AddCardScreen({ navigation }: Props) {
 
         <View style={styles.footer}>
           <AnimatedPressable
-            style={[styles.saveBtn, (!isComplete || isSaving) && { opacity: 0.4 }]}
-            disabled={!isComplete || isSaving}
+            style={[styles.saveBtn, (!isComplete || isSaving || !cardAllowed) && { opacity: 0.4 }]}
+            disabled={!isComplete || isSaving || !cardAllowed}
             onPress={handleSaveCard}
           >
             <Text style={styles.saveBtnText}>{isSaving ? 'Saving...' : 'Save card'}</Text>
@@ -221,7 +286,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: BORDER,
   },
   headerTitle: { fontSize: 17, fontWeight: '700', color: TEXT },
+  policyLabel: { fontSize: 12, color: MUTED, textAlign: 'center', marginTop: 8 },
   content: { padding: 20, paddingBottom: 40 },
+  blockedCard: {
+    backgroundColor: CARD_SOFT,
+    borderColor: BORDER,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 16,
+  },
+  blockedTitle: { fontSize: 13, fontWeight: '700', color: TEXT, marginBottom: 4 },
+  blockedText: { fontSize: 12, color: MUTED, lineHeight: 18 },
   cardPreview: {
     backgroundColor: CARD_PREVIEW_BG,
     borderRadius: 20,

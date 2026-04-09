@@ -15,7 +15,7 @@ export type RootStackParamList = {
   PosterViewer: { posterId: string };
   CreatePoster: undefined;
   CreateAuction: undefined;
-  CreateSyndicate:
+  CreateCoOwn:
     | {
         listingId?: string;
         totalUnits?: number;
@@ -25,14 +25,14 @@ export type RootStackParamList = {
       }
     | undefined;
   MarketLedger: undefined;
-  SyndicateHub: undefined;
+  CoOwnHub: undefined;
   AssetDetail: { assetId: string };
   Trade: { assetId: string; side: 'buy' | 'sell' };
   Portfolio: undefined;
-  SyndicateOrderHistory: undefined;
+  CoOwnOrderHistory: undefined;
   AssetLeaderboard: undefined;
   Buyout: { assetId: string };
-  SyndicateOnboarding: undefined;
+  CoOwnOnboarding: undefined;
   Chat: { conversationId: string };
   CreateGroupChat: undefined;
   GroupBotDirectory: { conversationId: string };

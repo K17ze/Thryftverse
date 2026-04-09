@@ -166,14 +166,14 @@ Trade Hub market:
 - `POST /auctions`
 - `GET /auctions/:auctionId/bids`
 - `POST /auctions/:auctionId/bids`
-- `GET /syndicate/assets`
-- `POST /syndicate/assets`
-- `GET /syndicate/assets/:assetId/orders`
-- `POST /syndicate/assets/:assetId/orders`
+- `GET /co-own/assets`
+- `POST /co-own/assets`
+- `GET /co-own/assets/:assetId/orders`
+- `POST /co-own/assets/:assetId/orders`
 
 Market history pagination:
 
-- `GET /users/:userId/market-history?channel=all|auction|syndicate&limit=80`
+- `GET /users/:userId/market-history?channel=all|auction|co-own&limit=80`
 - Cursor pagination uses `cursorTs` and `cursorId` together:
 	- Example next page: `GET /users/:userId/market-history?channel=all&limit=80&cursorTs=2026-04-03T01:11:00.000Z&cursorId=auction_bid_123`
 - Response includes `pageInfo.hasMore` and `pageInfo.nextCursor`.

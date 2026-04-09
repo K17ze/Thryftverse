@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 
-export type ComplianceMarket = 'syndicate' | 'auctions' | 'wallet' | 'p2p';
+export type ComplianceMarket = 'co-own' | 'auctions' | 'wallet' | 'p2p';
 export type JurisdictionScope = 'country' | 'region' | 'global';
 export type KycLevel = 'none' | 'basic' | 'enhanced';
 export type KycStatus = 'not_started' | 'pending' | 'verified' | 'rejected' | 'expired';
@@ -517,7 +517,7 @@ async function readMarketExposure(
   userId: string,
   market: ComplianceMarket
 ): Promise<{ dailyNotionalGbp: number; openOrderCount: number }> {
-  if (market === 'syndicate') {
+  if (market === 'co-own') {
     const dailyNotional = await client.query<{ notional: string }>(
       `
         SELECT COALESCE(
@@ -530,7 +530,7 @@ async function readMarketExposure(
           ),
           0
         )::text AS notional
-        FROM syndicate_orders
+        FROM coOwn_orders
         WHERE user_id = $1
           AND created_at >= date_trunc('day', NOW())
       `,
@@ -540,7 +540,7 @@ async function readMarketExposure(
     const openOrders = await client.query<{ count: string }>(
       `
         SELECT COUNT(*)::text AS count
-        FROM syndicate_orders
+        FROM coOwn_orders
         WHERE user_id = $1
           AND status IN ('open', 'partially_filled')
       `,
@@ -714,12 +714,12 @@ export async function evaluateMarketEligibility(
     );
   }
 
-  if (input.market === 'syndicate') {
+  if (input.market === 'co-own') {
     const acceptedRiskDisclosure = await hasAcceptedActiveRiskDisclosure(client, input.userId);
     if (!acceptedRiskDisclosure) {
       return deny(
         'RISK_DISCLOSURE_REQUIRED',
-        'Accept the active syndicate risk disclosure before trading.'
+        'Accept the active co-own risk disclosure before trading.'
       );
     }
   }

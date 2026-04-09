@@ -87,7 +87,7 @@ ALTER TABLE ledger_entries
       'adjustment',
       'mint',
       'burn',
-      'syndicate_trade',
+      'coOwn_trade',
       'buyout',
       'reserve_reconcile'
     )
@@ -186,55 +186,55 @@ CREATE TABLE IF NOT EXISTS gold_reserve_attestations (
 CREATE INDEX IF NOT EXISTS gold_reserve_attestations_created_idx
   ON gold_reserve_attestations (created_at DESC);
 
--- Syndicate matching and holdings
-ALTER TABLE syndicate_orders
+-- Co-Own matching and holdings
+ALTER TABLE coOwn_orders
   ADD COLUMN IF NOT EXISTS order_type TEXT NOT NULL DEFAULT 'market',
   ADD COLUMN IF NOT EXISTS limit_price_gbp NUMERIC(12, 4),
   ADD COLUMN IF NOT EXISTS remaining_units INTEGER,
   ADD COLUMN IF NOT EXISTS filled_units INTEGER NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
-UPDATE syndicate_orders
+UPDATE coOwn_orders
 SET remaining_units = CASE WHEN status = 'filled' THEN 0 ELSE units END
 WHERE remaining_units IS NULL;
 
-UPDATE syndicate_orders
+UPDATE coOwn_orders
 SET filled_units = GREATEST(0, units - remaining_units)
 WHERE filled_units = 0;
 
-ALTER TABLE syndicate_orders
-  DROP CONSTRAINT IF EXISTS syndicate_orders_status_check;
+ALTER TABLE coOwn_orders
+  DROP CONSTRAINT IF EXISTS coOwn_orders_status_check;
 
-ALTER TABLE syndicate_orders
-  ADD CONSTRAINT syndicate_orders_status_check CHECK (
+ALTER TABLE coOwn_orders
+  ADD CONSTRAINT coOwn_orders_status_check CHECK (
     status IN ('open', 'partially_filled', 'filled', 'cancelled', 'rejected')
   );
 
-ALTER TABLE syndicate_orders
-  DROP CONSTRAINT IF EXISTS syndicate_orders_order_type_check;
+ALTER TABLE coOwn_orders
+  DROP CONSTRAINT IF EXISTS coOwn_orders_order_type_check;
 
-ALTER TABLE syndicate_orders
-  ADD CONSTRAINT syndicate_orders_order_type_check CHECK (
+ALTER TABLE coOwn_orders
+  ADD CONSTRAINT coOwn_orders_order_type_check CHECK (
     order_type IN ('market', 'limit')
   );
 
-ALTER TABLE syndicate_orders
-  DROP CONSTRAINT IF EXISTS syndicate_orders_limit_price_required_check;
+ALTER TABLE coOwn_orders
+  DROP CONSTRAINT IF EXISTS coOwn_orders_limit_price_required_check;
 
-ALTER TABLE syndicate_orders
-  ADD CONSTRAINT syndicate_orders_limit_price_required_check CHECK (
+ALTER TABLE coOwn_orders
+  ADD CONSTRAINT coOwn_orders_limit_price_required_check CHECK (
     (order_type = 'market' AND limit_price_gbp IS NULL)
     OR (order_type = 'limit' AND limit_price_gbp IS NOT NULL AND limit_price_gbp > 0)
   );
 
-CREATE INDEX IF NOT EXISTS syndicate_orders_match_idx
-  ON syndicate_orders (asset_id, side, status, unit_price_gbp, created_at);
+CREATE INDEX IF NOT EXISTS coOwn_orders_match_idx
+  ON coOwn_orders (asset_id, side, status, unit_price_gbp, created_at);
 
-CREATE TABLE IF NOT EXISTS syndicate_trades (
+CREATE TABLE IF NOT EXISTS coOwn_trades (
   id BIGSERIAL PRIMARY KEY,
-  asset_id TEXT NOT NULL REFERENCES syndicate_assets(id) ON DELETE CASCADE,
-  buy_order_id BIGINT REFERENCES syndicate_orders(id) ON DELETE SET NULL,
-  sell_order_id BIGINT REFERENCES syndicate_orders(id) ON DELETE SET NULL,
+  asset_id TEXT NOT NULL REFERENCES coOwn_assets(id) ON DELETE CASCADE,
+  buy_order_id BIGINT REFERENCES coOwn_orders(id) ON DELETE SET NULL,
+  sell_order_id BIGINT REFERENCES coOwn_orders(id) ON DELETE SET NULL,
   buyer_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
   seller_id TEXT NOT NULL REFERENCES users(id) ON DELETE RESTRICT,
   units INTEGER NOT NULL CHECK (units > 0),
@@ -244,12 +244,12 @@ CREATE TABLE IF NOT EXISTS syndicate_trades (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS syndicate_trades_asset_idx
-  ON syndicate_trades (asset_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS coOwn_trades_asset_idx
+  ON coOwn_trades (asset_id, created_at DESC);
 
-CREATE TABLE IF NOT EXISTS syndicate_holdings (
+CREATE TABLE IF NOT EXISTS coOwn_holdings (
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  asset_id TEXT NOT NULL REFERENCES syndicate_assets(id) ON DELETE CASCADE,
+  asset_id TEXT NOT NULL REFERENCES coOwn_assets(id) ON DELETE CASCADE,
   units_owned INTEGER NOT NULL DEFAULT 0 CHECK (units_owned >= 0),
   avg_entry_price_gbp NUMERIC(12, 4) NOT NULL DEFAULT 0 CHECK (avg_entry_price_gbp >= 0),
   realized_pnl_gbp NUMERIC(12, 4) NOT NULL DEFAULT 0,
@@ -257,10 +257,10 @@ CREATE TABLE IF NOT EXISTS syndicate_holdings (
   PRIMARY KEY (user_id, asset_id)
 );
 
-CREATE INDEX IF NOT EXISTS syndicate_holdings_asset_idx
-  ON syndicate_holdings (asset_id, units_owned DESC);
+CREATE INDEX IF NOT EXISTS coOwn_holdings_asset_idx
+  ON coOwn_holdings (asset_id, units_owned DESC);
 
-INSERT INTO syndicate_holdings (user_id, asset_id, units_owned, avg_entry_price_gbp, realized_pnl_gbp, updated_at)
+INSERT INTO coOwn_holdings (user_id, asset_id, units_owned, avg_entry_price_gbp, realized_pnl_gbp, updated_at)
 SELECT
   so.user_id,
   so.asset_id,
@@ -273,14 +273,14 @@ SELECT
   END AS avg_entry_price_gbp,
   0,
   NOW()
-FROM syndicate_orders so
+FROM coOwn_orders so
 WHERE so.status IN ('filled', 'partially_filled')
 GROUP BY so.user_id, so.asset_id
 ON CONFLICT (user_id, asset_id) DO NOTHING;
 
-CREATE TABLE IF NOT EXISTS syndicate_buyout_offers (
+CREATE TABLE IF NOT EXISTS coOwn_buyout_offers (
   id TEXT PRIMARY KEY,
-  asset_id TEXT NOT NULL REFERENCES syndicate_assets(id) ON DELETE CASCADE,
+  asset_id TEXT NOT NULL REFERENCES coOwn_assets(id) ON DELETE CASCADE,
   bidder_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   offer_price_gbp NUMERIC(12, 4) NOT NULL CHECK (offer_price_gbp > 0),
   target_units INTEGER NOT NULL CHECK (target_units > 0),
@@ -292,12 +292,12 @@ CREATE TABLE IF NOT EXISTS syndicate_buyout_offers (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS syndicate_buyout_offers_asset_idx
-  ON syndicate_buyout_offers (asset_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS coOwn_buyout_offers_asset_idx
+  ON coOwn_buyout_offers (asset_id, created_at DESC);
 
-CREATE TABLE IF NOT EXISTS syndicate_buyout_acceptances (
+CREATE TABLE IF NOT EXISTS coOwn_buyout_acceptances (
   id BIGSERIAL PRIMARY KEY,
-  offer_id TEXT NOT NULL REFERENCES syndicate_buyout_offers(id) ON DELETE CASCADE,
+  offer_id TEXT NOT NULL REFERENCES coOwn_buyout_offers(id) ON DELETE CASCADE,
   holder_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   units INTEGER NOT NULL CHECK (units > 0),
   status TEXT NOT NULL CHECK (status IN ('accepted', 'rejected', 'cancelled')),
@@ -306,5 +306,5 @@ CREATE TABLE IF NOT EXISTS syndicate_buyout_acceptances (
   UNIQUE (offer_id, holder_user_id)
 );
 
-CREATE INDEX IF NOT EXISTS syndicate_buyout_acceptances_offer_idx
-  ON syndicate_buyout_acceptances (offer_id, responded_at DESC);
+CREATE INDEX IF NOT EXISTS coOwn_buyout_acceptances_offer_idx
+  ON coOwn_buyout_acceptances (offer_id, responded_at DESC);

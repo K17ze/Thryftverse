@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -15,7 +15,7 @@ import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { RootStackParamList } from '../navigation/types';
-import { getSyndicateMarket } from '../data/tradeHub';
+import { getCoOwnMarket } from '../data/tradeHub';
 import { useStore } from '../store/useStore';
 import { resolveAssetMarketState } from '../data/mockSyndicateData';
 import { useCurrencyContext } from '../context/CurrencyContext';
@@ -28,11 +28,11 @@ import {
   isTradeSubmitEnabled,
   sanitizeTradePriceInput,
   sanitizeTradeQuantityInput,
-  SYNDICATE_FEE_RATE,
+  CO_OWN_FEE_RATE,
   TradeSide,
 } from '../utils/tradeFlow';
 import { parseApiError } from '../lib/apiClient';
-import { placeSyndicateOrder } from '../services/marketApi';
+import { placeCoOwnOrder } from '../services/marketApi';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 type RouteT = RouteProp<RootStackParamList, 'Trade'>;
@@ -70,10 +70,10 @@ export default function TradeScreen() {
   const route = useRoute<RouteT>();
   const { show } = useToast();
 
-  const customSyndicates = useStore((state) => state.customSyndicates);
-  const syndicateRuntime = useStore((state) => state.syndicateRuntime);
+  const customCoOwns = useStore((state) => state.customCoOwns);
+  const coOwnRuntime = useStore((state) => state.coOwnRuntime);
   const currentUser = useStore((state) => state.currentUser);
-  const checkSyndicateEligibility = useStore((state) => state.checkSyndicateEligibility);
+  const checkCoOwnEligibility = useStore((state) => state.checkCoOwnEligibility);
   const { goldRates } = useCurrencyContext();
 
   const { formatFromIze } = useFormattedPrice();
@@ -83,10 +83,10 @@ export default function TradeScreen() {
   const [offerPriceInput, setOfferPriceInput] = React.useState('');
   const [isSubmittingOrder, setIsSubmittingOrder] = React.useState(false);
 
-  const baseAssets = React.useMemo(() => getSyndicateMarket(customSyndicates), [customSyndicates]);
+  const baseAssets = React.useMemo(() => getCoOwnMarket(customCoOwns), [customCoOwns]);
   const marketAssets = React.useMemo(
-    () => baseAssets.map((asset) => resolveAssetMarketState(asset, syndicateRuntime[asset.id])),
-    [baseAssets, syndicateRuntime]
+    () => baseAssets.map((asset) => resolveAssetMarketState(asset, coOwnRuntime[asset.id])),
+    [baseAssets, coOwnRuntime]
   );
 
   const asset = marketAssets.find((item) => item.id === route.params.assetId);
@@ -104,7 +104,7 @@ export default function TradeScreen() {
     [marketPrice, offerPriceInput, orderMode, quantityInput, side]
   );
 
-  const eligibility = asset ? checkSyndicateEligibility(asset.settlementMode) : { ok: false, message: 'Asset not found' };
+  const eligibility = asset ? checkCoOwnEligibility(asset.settlementMode) : { ok: false, message: 'Asset not found' };
 
   const canSubmit = isTradeSubmitEnabled({
     assetFound: !!asset,
@@ -144,10 +144,10 @@ export default function TradeScreen() {
 
     try {
       const actingUserId = currentUser?.id ?? 'u1';
-      let remoteOrder: Awaited<ReturnType<typeof placeSyndicateOrder>> | null = null;
+      let remoteOrder: Awaited<ReturnType<typeof placeCoOwnOrder>> | null = null;
 
       try {
-        remoteOrder = await placeSyndicateOrder(asset.id, {
+        remoteOrder = await placeCoOwnOrder(asset.id, {
           userId: actingUserId,
           side,
           units: quote.quantity,
@@ -179,7 +179,7 @@ export default function TradeScreen() {
         if (remoteOrder.order.status === 'open' || remoteOrder.order.status === 'partially_filled' || expectedQueue) {
           show('Offer placed on the server order book.', 'info');
         } else {
-          show('Order executed on SYNDICATE engine.', 'success');
+          show('Order executed on CO-OWN engine.', 'success');
         }
 
         if (remoteOrder.aml?.alertId) {
@@ -235,7 +235,7 @@ export default function TradeScreen() {
         <View style={styles.pegCard}>
           <Ionicons name="sparkles-outline" size={14} color={BRAND} />
           <Text style={styles.pegCardText}>
-            Syndicate trades settle in 1ze only. 1 1ze = 1 gram of gold. Current local value is {formatFromIze(1, { displayMode: 'fiat' })}.
+            Co-Own trades settle in 1ze only. 1 1ze = 1 gram of gold. Current local value is {formatFromIze(1, { displayMode: 'fiat' })}.
           </Text>
         </View>
 
@@ -294,7 +294,7 @@ export default function TradeScreen() {
             <Text style={styles.summaryValue}>{formatIzeAmount(quote.grossValue)} | {formatFromIze(quote.grossValue, { displayMode: 'fiat' })}</Text>
           </View>
           <View style={styles.summaryRow}>
-            <Text style={styles.summaryLabel}>Fee ({(SYNDICATE_FEE_RATE * 100).toFixed(0)}%)</Text>
+            <Text style={styles.summaryLabel}>Fee ({(CO_OWN_FEE_RATE * 100).toFixed(0)}%)</Text>
             <Text style={styles.summaryValue}>{formatIzeAmount(quote.fee)} | {formatFromIze(quote.fee, { displayMode: 'fiat' })}</Text>
           </View>
           <View style={[styles.summaryRow, styles.summaryRowTotal]}>

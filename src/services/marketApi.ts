@@ -40,9 +40,9 @@ export interface MarketAuctionBidResult {
   } | null;
 }
 
-export type SyndicateSettlementMode = 'GBP' | 'TVUSD' | 'HYBRID';
+export type CoOwnSettlementMode = 'GBP' | 'TVUSD' | 'HYBRID';
 
-export interface MarketSyndicateAsset {
+export interface MarketCoOwnAsset {
   id: string;
   listingId: string;
   issuerId: string;
@@ -52,7 +52,7 @@ export interface MarketSyndicateAsset {
   availableUnits: number;
   unitPriceGbp: number;
   unitPriceStable: number;
-  settlementMode: SyndicateSettlementMode;
+  settlementMode: CoOwnSettlementMode;
   issuerJurisdiction: string | null;
   marketMovePct24h: number;
   holders: number;
@@ -62,13 +62,13 @@ export interface MarketSyndicateAsset {
   updatedAt: string;
 }
 
-export type SyndicateOrderSide = 'buy' | 'sell';
+export type CoOwnOrderSide = 'buy' | 'sell';
 
-export interface MarketSyndicateOrder {
+export interface MarketCoOwnOrder {
   id: number;
   assetId: string;
   userId: string;
-  side: SyndicateOrderSide;
+  side: CoOwnOrderSide;
   orderType?: 'market' | 'limit';
   limitPriceGbp?: number | null;
   units: number;
@@ -82,7 +82,7 @@ export interface MarketSyndicateOrder {
   updatedAt?: string;
 }
 
-export interface MarketSyndicateBuyoutOffer {
+export interface MarketCoOwnBuyoutOffer {
   id: string;
   assetId: string;
   bidderUserId: string;
@@ -95,7 +95,7 @@ export interface MarketSyndicateBuyoutOffer {
   updatedAt: string;
 }
 
-export type MarketHistoryChannel = 'auction' | 'syndicate';
+export type MarketHistoryChannel = 'auction' | 'co-own';
 export type MarketHistoryAction = 'bid' | 'buy-units' | 'sell-units';
 
 export interface MarketHistoryItem {
@@ -145,14 +145,14 @@ interface ListAuctionBidsResponse {
   items: MarketAuctionBid[];
 }
 
-interface ListSyndicateAssetsResponse {
+interface ListCoOwnAssetsResponse {
   ok: true;
-  items: MarketSyndicateAsset[];
+  items: MarketCoOwnAsset[];
 }
 
-interface PlaceSyndicateOrderResponse {
+interface PlaceCoOwnOrderResponse {
   ok: true;
-  order: MarketSyndicateOrder;
+  order: MarketCoOwnOrder;
   asset: {
     id: string;
     availableUnits: number;
@@ -166,18 +166,18 @@ interface PlaceSyndicateOrderResponse {
   } | null;
 }
 
-interface CreateSyndicateBuyoutOfferResponse {
+interface CreateCoOwnBuyoutOfferResponse {
   ok: true;
-  offer: MarketSyndicateBuyoutOffer;
+  offer: MarketCoOwnBuyoutOffer;
   aml?: {
     alertId: string;
     status: string;
   } | null;
 }
 
-interface ListSyndicateOrdersResponse {
+interface ListCoOwnOrdersResponse {
   ok: true;
-  items: MarketSyndicateOrder[];
+  items: MarketCoOwnOrder[];
 }
 
 interface ListUserMarketHistoryResponse {
@@ -199,13 +199,13 @@ interface ListAuctionBidsOptions {
   limit?: number;
 }
 
-interface ListSyndicateAssetsOptions {
+interface ListCoOwnAssetsOptions {
   openOnly?: boolean;
   issuerId?: string;
   limit?: number;
 }
 
-interface ListSyndicateAssetOrdersOptions {
+interface ListCoOwnAssetOrdersOptions {
   limit?: number;
 }
 
@@ -221,15 +221,15 @@ interface PlaceAuctionBidInput {
   amountGbp: number;
 }
 
-interface PlaceSyndicateOrderInput {
+interface PlaceCoOwnOrderInput {
   userId: string;
-  side: SyndicateOrderSide;
+  side: CoOwnOrderSide;
   units: number;
   orderType?: 'market' | 'limit';
   limitPriceGbp?: number;
 }
 
-interface CreateSyndicateBuyoutOfferInput {
+interface CreateCoOwnBuyoutOfferInput {
   bidderUserId: string;
   offerPriceGbp: number;
   targetUnits?: number;
@@ -297,24 +297,24 @@ export async function listAuctionBids(
   return payload.items;
 }
 
-export async function listSyndicateAssets(
-  options: ListSyndicateAssetsOptions = {}
-): Promise<MarketSyndicateAsset[]> {
+export async function listCoOwnAssets(
+  options: ListCoOwnAssetsOptions = {}
+): Promise<MarketCoOwnAsset[]> {
   const query = toQuery({
     openOnly: options.openOnly,
     issuerId: options.issuerId,
     limit: options.limit,
   });
-  const payload = await fetchJson<ListSyndicateAssetsResponse>(`/syndicate/assets${query}`);
+  const payload = await fetchJson<ListCoOwnAssetsResponse>(`/co-own/assets${query}`);
   return payload.items;
 }
 
-export async function placeSyndicateOrder(
+export async function placeCoOwnOrder(
   assetId: string,
-  input: PlaceSyndicateOrderInput
-): Promise<PlaceSyndicateOrderResponse> {
-  return fetchJson<PlaceSyndicateOrderResponse>(
-    `/syndicate/assets/${encodeURIComponent(assetId)}/orders`,
+  input: PlaceCoOwnOrderInput
+): Promise<PlaceCoOwnOrderResponse> {
+  return fetchJson<PlaceCoOwnOrderResponse>(
+    `/co-own/assets/${encodeURIComponent(assetId)}/orders`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -323,12 +323,12 @@ export async function placeSyndicateOrder(
   );
 }
 
-export async function createSyndicateBuyoutOffer(
+export async function createCoOwnBuyoutOffer(
   assetId: string,
-  input: CreateSyndicateBuyoutOfferInput
-): Promise<CreateSyndicateBuyoutOfferResponse> {
-  return fetchJson<CreateSyndicateBuyoutOfferResponse>(
-    `/syndicate/assets/${encodeURIComponent(assetId)}/buyout-offers`,
+  input: CreateCoOwnBuyoutOfferInput
+): Promise<CreateCoOwnBuyoutOfferResponse> {
+  return fetchJson<CreateCoOwnBuyoutOfferResponse>(
+    `/co-own/assets/${encodeURIComponent(assetId)}/buyout-offers`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -337,16 +337,16 @@ export async function createSyndicateBuyoutOffer(
   );
 }
 
-export async function listSyndicateAssetOrders(
+export async function listCoOwnAssetOrders(
   assetId: string,
-  options: ListSyndicateAssetOrdersOptions = {}
-): Promise<MarketSyndicateOrder[]> {
+  options: ListCoOwnAssetOrdersOptions = {}
+): Promise<MarketCoOwnOrder[]> {
   const query = toQuery({
     limit: options.limit,
   });
 
-  const payload = await fetchJson<ListSyndicateOrdersResponse>(
-    `/syndicate/assets/${encodeURIComponent(assetId)}/orders${query}`
+  const payload = await fetchJson<ListCoOwnOrdersResponse>(
+    `/co-own/assets/${encodeURIComponent(assetId)}/orders${query}`
   );
 
   return payload.items;

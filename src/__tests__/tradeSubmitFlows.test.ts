@@ -6,7 +6,7 @@ import {
 } from '../utils/tradeFlow';
 
 const ELIGIBLE = { ok: true };
-const BLOCKED = { ok: false, message: 'Complete KYC verification to access Syndicate markets.' };
+const BLOCKED = { ok: false, message: 'Complete KYC verification to access Co-Own markets.' };
 
 describe('trade submit flow decisions', () => {
   it('enables submit and executes for valid market buy', () => {

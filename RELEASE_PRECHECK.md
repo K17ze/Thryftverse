@@ -81,7 +81,7 @@ Validate these app flows in Expo Go or emulator:
 - Browse/search: global search to browse results, filter apply/clear, wishlist add/remove.
 - Checkout: add address, add card/bank account, pay button enabled only when requirements are met.
 - Currency: switch local fiat currency and display mode; prices update across item detail, checkout, offers, wallet.
-- Syndicate: create syndicate with compliance requirements, buy/sell units, order history updates.
+- Co-Own: create co-own with compliance requirements, buy/sell units, order history updates.
 
 ## 3) Safety and Regression Checks
 

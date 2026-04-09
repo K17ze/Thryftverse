@@ -14,16 +14,16 @@ import FavouritesScreen from '../screens/FavouritesScreen';
 import PosterViewerScreen from '../screens/PosterViewerScreen';
 import CreatePosterScreen from '../screens/CreatePosterScreen';
 import CreateAuctionScreen from '../screens/CreateAuctionScreen';
-import CreateSyndicateScreen from '../screens/CreateSyndicateScreen';
+import CreateCoOwnScreen from '../screens/CreateSyndicateScreen';
 import MarketLedgerScreen from '../screens/MarketLedgerScreen';
-import SyndicateHubScreen from '../screens/SyndicateHubScreen';
+import CoOwnHubScreen from '../screens/SyndicateHubScreen';
 import AssetDetailScreen from '../screens/AssetDetailScreen';
 import TradeScreen from '../screens/TradeScreen';
 import PortfolioScreen from '../screens/PortfolioScreen';
-import SyndicateOrderHistoryScreen from '../screens/SyndicateOrderHistoryScreen';
+import CoOwnOrderHistoryScreen from '../screens/SyndicateOrderHistoryScreen';
 import AssetLeaderboardScreen from '../screens/AssetLeaderboardScreen';
 import BuyoutScreen from '../screens/BuyoutScreen';
-import SyndicateOnboardingScreen from '../screens/SyndicateOnboardingScreen';
+import CoOwnOnboardingScreen from '../screens/SyndicateOnboardingScreen';
 import ChatScreen from '../screens/ChatScreen';
 import CreateGroupChatScreen from '../screens/CreateGroupChatScreen';
 import GroupBotDirectoryScreen from '../screens/GroupBotDirectoryScreen';
@@ -107,16 +107,16 @@ export default function AppNavigator() {
       <Stack.Screen name="PosterViewer" component={PosterViewerScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="CreatePoster" component={CreatePosterScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="CreateAuction" component={CreateAuctionScreen} options={{ presentation: 'modal' }} />
-      <Stack.Screen name="CreateSyndicate" component={CreateSyndicateScreen} options={{ presentation: 'modal' }} />
+      <Stack.Screen name="CreateCoOwn" component={CreateCoOwnScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="MarketLedger" component={MarketLedgerScreen} />
-      <Stack.Screen name="SyndicateHub" component={SyndicateHubScreen} />
+      <Stack.Screen name="CoOwnHub" component={CoOwnHubScreen} />
       <Stack.Screen name="AssetDetail" component={AssetDetailScreen} />
       <Stack.Screen name="Trade" component={TradeScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="Portfolio" component={PortfolioScreen} />
-      <Stack.Screen name="SyndicateOrderHistory" component={SyndicateOrderHistoryScreen} />
+      <Stack.Screen name="CoOwnOrderHistory" component={CoOwnOrderHistoryScreen} />
       <Stack.Screen name="AssetLeaderboard" component={AssetLeaderboardScreen} />
       <Stack.Screen name="Buyout" component={BuyoutScreen} />
-      <Stack.Screen name="SyndicateOnboarding" component={SyndicateOnboardingScreen} options={{ presentation: 'modal' }} />
+      <Stack.Screen name="CoOwnOnboarding" component={CoOwnOnboardingScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="Chat" component={ChatScreen} />
       <Stack.Screen name="CreateGroupChat" component={CreateGroupChatScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="GroupBotDirectory" component={GroupBotDirectoryScreen} options={{ presentation: 'modal' }} />

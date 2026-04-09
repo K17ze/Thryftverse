@@ -24,7 +24,7 @@ export interface AuctionViewModel extends AuctionMarketItem {
   progress: number;
 }
 
-export interface SyndicateAsset {
+export interface CoOwnAsset {
   id: string;
   listingId: string;
   issuerId: string;
@@ -115,7 +115,7 @@ export const MOCK_AUCTIONS: AuctionMarketItem[] = [
   },
 ];
 
-export const MOCK_SYNDICATE_ASSETS: SyndicateAsset[] = [
+export const MOCK_CO_OWN_ASSETS: CoOwnAsset[] = [
   {
     id: 's1',
     listingId: 'l2',
@@ -138,7 +138,7 @@ export const MOCK_SYNDICATE_ASSETS: SyndicateAsset[] = [
     id: 's2',
     listingId: 'l4',
     issuerId: 'u1',
-    title: 'Stussy Tee Syndicate',
+    title: 'Stussy Tee Co-Own',
     image: MOCK_LISTINGS[3]?.images[0] ?? 'https://picsum.photos/seed/synd2/500/700',
     totalUnits: 20,
     availableUnits: 3,
@@ -244,8 +244,8 @@ export function getAuctionMarket(
     });
 }
 
-export function getSyndicateMarket(runtimeAssets: SyndicateAsset[] = []) {
-  const seedAssets = ENABLE_RUNTIME_MOCKS ? MOCK_SYNDICATE_ASSETS : [];
+export function getCoOwnMarket(runtimeAssets: CoOwnAsset[] = []) {
+  const seedAssets = ENABLE_RUNTIME_MOCKS ? MOCK_CO_OWN_ASSETS : [];
 
   return [...runtimeAssets, ...seedAssets].sort(
     (a, b) => b.totalUnits * b.unitPriceGBP - a.totalUnits * a.unitPriceGBP

@@ -70,7 +70,7 @@ CREATE TABLE IF NOT EXISTS auction_bids (
 
 CREATE INDEX IF NOT EXISTS auction_bids_auction_idx ON auction_bids (auction_id, created_at DESC);
 
-CREATE TABLE IF NOT EXISTS syndicate_assets (
+CREATE TABLE IF NOT EXISTS coOwn_assets (
   id TEXT PRIMARY KEY,
   listing_id TEXT NOT NULL REFERENCES listings(id) ON DELETE CASCADE,
   issuer_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -90,11 +90,11 @@ CREATE TABLE IF NOT EXISTS syndicate_assets (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS syndicate_assets_open_idx ON syndicate_assets (is_open, created_at DESC);
+CREATE INDEX IF NOT EXISTS coOwn_assets_open_idx ON coOwn_assets (is_open, created_at DESC);
 
-CREATE TABLE IF NOT EXISTS syndicate_orders (
+CREATE TABLE IF NOT EXISTS coOwn_orders (
   id BIGSERIAL PRIMARY KEY,
-  asset_id TEXT NOT NULL REFERENCES syndicate_assets(id) ON DELETE CASCADE,
+  asset_id TEXT NOT NULL REFERENCES coOwn_assets(id) ON DELETE CASCADE,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   side TEXT NOT NULL CHECK (side IN ('buy', 'sell')),
   units INTEGER NOT NULL CHECK (units > 0),
@@ -105,8 +105,8 @@ CREATE TABLE IF NOT EXISTS syndicate_orders (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS syndicate_orders_asset_idx ON syndicate_orders (asset_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS syndicate_orders_user_idx ON syndicate_orders (user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS coOwn_orders_asset_idx ON coOwn_orders (asset_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS coOwn_orders_user_idx ON coOwn_orders (user_id, created_at DESC);
 
 INSERT INTO auctions (
   id,
@@ -134,7 +134,7 @@ VALUES (
 )
 ON CONFLICT (id) DO NOTHING;
 
-INSERT INTO syndicate_assets (
+INSERT INTO coOwn_assets (
   id,
   listing_id,
   issuer_id,

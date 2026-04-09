@@ -13,8 +13,8 @@ INSERT INTO jurisdiction_rules (
   metadata
 )
 VALUES (
-  'jr_syndicate_us',
-  'syndicate',
+  'jr_coOwn_us',
+  'co-own',
   'country',
   'US',
   TRUE,

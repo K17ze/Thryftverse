@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -17,7 +17,7 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import Reanimated, { FadeInDown } from 'react-native-reanimated';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { RootStackParamList } from '../navigation/types';
-import { getSyndicateMarket, SyndicateAsset } from '../data/tradeHub';
+import { getCoOwnMarket, CoOwnAsset } from '../data/tradeHub';
 import { useStore } from '../store/useStore';
 import { resolveAssetMarketState } from '../data/mockSyndicateData';
 import { EmptyState } from '../components/EmptyState';
@@ -43,10 +43,10 @@ const DOWN_TEXT_COLOR = IS_LIGHT ? '#b64242' : '#ff9d9d';
 const OUTLINE_BTN_BG = Colors.cardAlt;
 const OUTLINE_BTN_BORDER = Colors.border;
 
-export default function SyndicateHubScreen() {
+export default function CoOwnHubScreen() {
   const navigation = useNavigation<NavT>();
-  const customSyndicates = useStore((state) => state.customSyndicates);
-  const syndicateRuntime = useStore((state) => state.syndicateRuntime);
+  const customCoOwns = useStore((state) => state.customCoOwns);
+  const coOwnRuntime = useStore((state) => state.coOwnRuntime);
   const { formatFromFiat } = useFormattedPrice();
 
   const [query, setQuery] = React.useState('');
@@ -61,11 +61,11 @@ export default function SyndicateHubScreen() {
     navigation.navigate('MainTabs');
   }, [navigation]);
 
-  const baseAssets = React.useMemo(() => getSyndicateMarket(customSyndicates), [customSyndicates]);
+  const baseAssets = React.useMemo(() => getCoOwnMarket(customCoOwns), [customCoOwns]);
 
   const marketAssets = React.useMemo(
-    () => baseAssets.map((asset) => resolveAssetMarketState(asset, syndicateRuntime[asset.id])),
-    [baseAssets, syndicateRuntime]
+    () => baseAssets.map((asset) => resolveAssetMarketState(asset, coOwnRuntime[asset.id])),
+    [baseAssets, coOwnRuntime]
   );
 
   const filteredAssets = React.useMemo(() => {
@@ -101,7 +101,7 @@ export default function SyndicateHubScreen() {
     [marketAssets]
   );
 
-  const renderAsset = ({ item, index }: { item: SyndicateAsset; index: number }) => {
+  const renderAsset = ({ item, index }: { item: CoOwnAsset; index: number }) => {
     const isPositive = item.marketMovePct24h >= 0;
     const marketValue = item.totalUnits * item.unitPriceGBP;
     const openValue = item.availableUnits * item.unitPriceGBP;
@@ -195,8 +195,8 @@ export default function SyndicateHubScreen() {
               </AnimatedPressable>
             </View>
 
-            <Text style={styles.headerLabel}>SYNDICATE MARKET</Text>
-            <Text style={styles.headerTitle}>Syndicate Hub</Text>
+            <Text style={styles.headerLabel}>CO-OWN MARKET</Text>
+            <Text style={styles.headerTitle}>Co-Own Hub</Text>
 
             <View style={styles.searchWrap}>
               <Ionicons name="search" size={18} color={Colors.textMuted} />
@@ -229,7 +229,7 @@ export default function SyndicateHubScreen() {
                 <Ionicons name="pie-chart-outline" size={15} color={Colors.background} />
                 <Text style={styles.quickBtnText}>Portfolio</Text>
               </AnimatedPressable>
-              <AnimatedPressable style={styles.quickBtn} onPress={() => navigation.navigate('SyndicateOrderHistory')}>
+              <AnimatedPressable style={styles.quickBtn} onPress={() => navigation.navigate('CoOwnOrderHistory')}>
                 <Ionicons name="time-outline" size={15} color={Colors.background} />
                 <Text style={styles.quickBtnText}>Orders</Text>
               </AnimatedPressable>
@@ -258,10 +258,10 @@ export default function SyndicateHubScreen() {
             <AnimatedPressable
               style={styles.issueBtn}
               activeOpacity={0.9}
-              onPress={() => navigation.navigate('CreateSyndicate')}
+              onPress={() => navigation.navigate('CreateCoOwn')}
             >
               <Ionicons name="add" size={16} color={Colors.background} />
-              <Text style={styles.issueBtnText}>Issue New Syndicate</Text>
+              <Text style={styles.issueBtnText}>Issue New Co-Own</Text>
             </AnimatedPressable>
           </View>
         }

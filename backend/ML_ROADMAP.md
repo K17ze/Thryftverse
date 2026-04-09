@@ -46,12 +46,12 @@ Recommended sequence:
 3. Export model (TorchScript/ONNX) for inference.
 4. Replace `/classify-image` heuristic with model inference.
 
-## Phase D: Syndicate LSTM Price Predictor
+## Phase D: Co-Own LSTM Price Predictor
 
 Use case: assistive analytics for asset price trends (not financial advice).
 
 Recommended sequence:
-1. Build time-series table from syndicate trades and order-book snapshots.
+1. Build time-series table from co-own trades and order-book snapshots.
 2. Train baseline models first (ARIMA/XGBoost) as sanity checks.
 3. Train LSTM/Temporal Fusion model for multi-horizon forecasting.
 4. Serve confidence intervals, not point forecasts only.
@@ -59,7 +59,7 @@ Recommended sequence:
 Endpoint fit:
 - Replace internals of `/forecast-price`
 
-## Phase E: RL Pricing Agent (Syndicate)
+## Phase E: RL Pricing Agent (Co-Own)
 
 Use case: pricing strategy suggestions under inventory + demand dynamics.
 

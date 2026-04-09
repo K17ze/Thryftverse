@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -16,7 +16,7 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import Reanimated, { FadeInDown } from 'react-native-reanimated';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { RootStackParamList } from '../navigation/types';
-import { getSyndicateMarket, SyndicateAsset } from '../data/tradeHub';
+import { getCoOwnMarket, CoOwnAsset } from '../data/tradeHub';
 import { useStore } from '../store/useStore';
 import { resolveAssetMarketState } from '../data/mockSyndicateData';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
@@ -29,15 +29,15 @@ const CONTROL_BG = IS_LIGHT ? '#f7f4ef' : '#121212';
 
 export default function AssetLeaderboardScreen() {
   const navigation = useNavigation<NavT>();
-  const customSyndicates = useStore((state) => state.customSyndicates);
-  const syndicateRuntime = useStore((state) => state.syndicateRuntime);
+  const customCoOwns = useStore((state) => state.customCoOwns);
+  const coOwnRuntime = useStore((state) => state.coOwnRuntime);
   const { formatFromFiat } = useFormattedPrice();
 
-  const baseAssets = React.useMemo(() => getSyndicateMarket(customSyndicates), [customSyndicates]);
+  const baseAssets = React.useMemo(() => getCoOwnMarket(customCoOwns), [customCoOwns]);
 
   const marketAssets = React.useMemo(
-    () => baseAssets.map((asset) => resolveAssetMarketState(asset, syndicateRuntime[asset.id])),
-    [baseAssets, syndicateRuntime]
+    () => baseAssets.map((asset) => resolveAssetMarketState(asset, coOwnRuntime[asset.id])),
+    [baseAssets, coOwnRuntime]
   );
 
   const topMovers = React.useMemo(() => [...marketAssets].sort((a, b) => b.marketMovePct24h - a.marketMovePct24h).slice(0, 5), [marketAssets]);
@@ -47,7 +47,7 @@ export default function AssetLeaderboardScreen() {
   );
   const topHolders = React.useMemo(() => [...marketAssets].sort((a, b) => b.holders - a.holders).slice(0, 5), [marketAssets]);
 
-  const renderList = (title: string, icon: keyof typeof Ionicons.glyphMap, data: SyndicateAsset[], metric: (asset: SyndicateAsset) => string) => (
+  const renderList = (title: string, icon: keyof typeof Ionicons.glyphMap, data: CoOwnAsset[], metric: (asset: CoOwnAsset) => string) => (
     <View style={styles.sectionCard}>
       <View style={styles.sectionHeader}>
         <Ionicons name={icon} size={16} color="#d7b98f" />

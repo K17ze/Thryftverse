@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -47,7 +47,7 @@ const SLIDES = [
   },
 ];
 
-export default function SyndicateOnboardingScreen() {
+export default function CoOwnOnboardingScreen() {
   const navigation = useNavigation<NavT>();
   const [index, setIndex] = React.useState(0);
 
@@ -56,7 +56,7 @@ export default function SyndicateOnboardingScreen() {
 
   const handleNext = () => {
     if (isLast) {
-      navigation.replace('SyndicateHub');
+      navigation.replace('CoOwnHub');
       return;
     }
 
@@ -71,7 +71,7 @@ export default function SyndicateOnboardingScreen() {
         <AnimatedPressable onPress={() => navigation.goBack()} style={styles.headerBtn}>
           <Ionicons name="close" size={22} color={Colors.textPrimary} />
         </AnimatedPressable>
-        <AnimatedPressable onPress={() => navigation.replace('SyndicateHub')}>
+        <AnimatedPressable onPress={() => navigation.replace('CoOwnHub')}>
           <Text style={styles.skipText}>Skip</Text>
         </AnimatedPressable>
       </View>
@@ -99,7 +99,7 @@ export default function SyndicateOnboardingScreen() {
         </View>
 
         <AnimatedPressable style={styles.primaryBtn} onPress={handleNext} activeOpacity={0.9}>
-          <Text style={styles.primaryBtnText}>{isLast ? 'Enter Syndicate Hub' : 'Next'}</Text>
+          <Text style={styles.primaryBtnText}>{isLast ? 'Enter Co-Own Hub' : 'Next'}</Text>
           <Ionicons name="arrow-forward" size={16} color={Colors.background} />
         </AnimatedPressable>
       </View>

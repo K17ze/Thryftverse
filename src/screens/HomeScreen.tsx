@@ -120,19 +120,19 @@ function MediaPreview({
   );
 }
 
-type StoryStatus = 'new-listing' | 'live-auction' | 'syndicate-launching' | 'sold-recently';
+type StoryStatus = 'new-listing' | 'live-auction' | 'co-own-launching' | 'sold-recently';
 
 const STORY_STATUS_LABEL: Record<StoryStatus, string> = {
   'new-listing': 'new listing',
   'live-auction': 'auction',
-  'syndicate-launching': 'syndicate launch',
+  'co-own-launching': 'co-own launch',
   'sold-recently': 'sold recently',
 };
 
 const STORY_STATUS_GRADIENT: Record<StoryStatus, [string, string]> = {
   'new-listing': [Colors.accent, Colors.accentGold],
   'live-auction': ['#f3c17c', '#dd6a33'],
-  'syndicate-launching': ['#d4a94a', '#8f6721'],
+  'co-own-launching': ['#d4a94a', '#8f6721'],
   'sold-recently': ['#f2ddaa', '#d69044'],
 };
 

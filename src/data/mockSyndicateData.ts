@@ -1,4 +1,4 @@
-import { MOCK_SYNDICATE_ASSETS, SyndicateAsset } from './tradeHub';
+import { MOCK_CO_OWN_ASSETS, CoOwnAsset } from './tradeHub';
 import {
   BuyoutOffer,
   OrderBookEntry,
@@ -39,12 +39,12 @@ function createPriceSeries(basePrice: number, points: number, stepMs: number): P
   return series;
 }
 
-const PRICE_SERIES: Record<string, PricePoint[]> = MOCK_SYNDICATE_ASSETS.reduce((acc, asset) => {
+const PRICE_SERIES: Record<string, PricePoint[]> = MOCK_CO_OWN_ASSETS.reduce((acc, asset) => {
   acc[asset.id] = createPriceSeries(asset.unitPriceGBP, 90, 60 * 60 * 1000);
   return acc;
 }, {} as Record<string, PricePoint[]>);
 
-const ORDER_BOOK: Record<string, OrderBookEntry[]> = MOCK_SYNDICATE_ASSETS.reduce((acc, asset) => {
+const ORDER_BOOK: Record<string, OrderBookEntry[]> = MOCK_CO_OWN_ASSETS.reduce((acc, asset) => {
   const center = asset.unitPriceGBP;
   const bids: OrderBookEntry[] = [
     { price: Number((center * 0.998).toFixed(2)), quantity: 2, side: 'bid', orderCount: 4 },
@@ -196,7 +196,7 @@ export function getOrderHistoryForAsset(assetId?: string): TradeOrder[] {
 }
 
 export function resolveAssetMarketState(
-  asset: SyndicateAsset,
+  asset: CoOwnAsset,
   runtime?: {
     availableUnits: number;
     holders: number;
@@ -208,7 +208,7 @@ export function resolveAssetMarketState(
     avgEntryPriceGBP: number;
     realizedProfitGBP: number;
   }
-): SyndicateAsset {
+): CoOwnAsset {
   if (!runtime) {
     return asset;
   }

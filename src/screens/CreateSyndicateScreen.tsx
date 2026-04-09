@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -17,20 +17,20 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { RootStackParamList } from '../navigation/types';
 import { MOCK_LISTINGS, MOCK_USERS, Listing } from '../data/mockData';
-import type { SyndicateAsset } from '../data/tradeHub';
+import type { CoOwnAsset } from '../data/tradeHub';
 import { useStore } from '../store/useStore';
 import { useToast } from '../context/ToastContext';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useCurrencyContext } from '../context/CurrencyContext';
 import { toFiat, toIze } from '../utils/currency';
 import { sanitizeDecimalInput, sanitizeIntegerInput } from '../utils/currencyAuthoringFlows';
-import { getCreateSyndicateInitialState } from '../utils/syndicatePrefill';
+import { getCreateCoOwnInitialState } from '../utils/syndicatePrefill';
 import { useBackendData } from '../context/BackendDataContext';
 import { CachedImage } from '../components/CachedImage';
 import { getListingCoverUri } from '../utils/media';
 
 type NavT = StackNavigationProp<RootStackParamList>;
-type RouteT = RouteProp<RootStackParamList, 'CreateSyndicate'>;
+type RouteT = RouteProp<RootStackParamList, 'CreateCoOwn'>;
 
 const STABLE_COIN = '1ze';
 const COUNTRY_OPTIONS = ['GB', 'EU', 'SG', 'AE', 'US', 'CA'] as const;
@@ -47,7 +47,7 @@ const SETTLEMENT_MODES: Array<{ key: 'GBP' | 'TVUSD' | 'HYBRID' }> = [
   { key: 'HYBRID' },
 ];
 
-export default function CreateSyndicateScreen() {
+export default function CreateCoOwnScreen() {
   const navigation = useNavigation<NavT>();
   const route = useRoute<RouteT>();
   const { show } = useToast();
@@ -58,10 +58,10 @@ export default function CreateSyndicateScreen() {
   const prefill = route.params;
 
   const currentUser = useStore((state) => state.currentUser);
-  const addSyndicate = useStore((state) => state.addSyndicate);
-  const syndicateCompliance = useStore((state) => state.syndicateCompliance);
-  const updateSyndicateCompliance = useStore((state) => state.updateSyndicateCompliance);
-  const checkSyndicateEligibility = useStore((state) => state.checkSyndicateEligibility);
+  const addCoOwn = useStore((state) => state.addCoOwn);
+  const coOwnCompliance = useStore((state) => state.coOwnCompliance);
+  const updateCoOwnCompliance = useStore((state) => state.updateCoOwnCompliance);
+  const checkCoOwnEligibility = useStore((state) => state.checkCoOwnEligibility);
 
   const issuerId = currentUser?.id ?? MOCK_USERS[0]?.id ?? 'u1';
 
@@ -72,7 +72,7 @@ export default function CreateSyndicateScreen() {
   }, [issuerId, listings]);
 
   const initialState = React.useMemo(
-    () => getCreateSyndicateInitialState(prefill, issuerListings[0]?.id ?? ''),
+    () => getCreateCoOwnInitialState(prefill, issuerListings[0]?.id ?? ''),
     [prefill, issuerListings]
   );
 
@@ -124,7 +124,7 @@ export default function CreateSyndicateScreen() {
     [issuerListings, selectedListingId]
   );
 
-  const issueSyndicate = () => {
+  const issueCoOwn = () => {
     if (!selectedListing) {
       show('Select a listing to issue', 'error');
       return;
@@ -148,7 +148,7 @@ export default function CreateSyndicateScreen() {
       return;
     }
 
-    const eligibility = checkSyndicateEligibility(settlementMode);
+    const eligibility = checkCoOwnEligibility(settlementMode);
     if (!eligibility.ok) {
       show(eligibility.message ?? 'Complete compliance checks before issuing', 'error');
       return;
@@ -156,18 +156,18 @@ export default function CreateSyndicateScreen() {
 
     const now = Date.now();
 
-    const newAsset: SyndicateAsset = {
+    const newAsset: CoOwnAsset = {
       id: `s_user_${now}`,
       listingId: selectedListing.id,
       issuerId,
       title: `${selectedListing.title} Split`,
-      image: getListingCoverUri(selectedListing.images, 'https://picsum.photos/seed/new-syndicate/500/700'),
+      image: getListingCoverUri(selectedListing.images, 'https://picsum.photos/seed/new-co-own/500/700'),
       totalUnits,
       availableUnits: totalUnits,
       unitPriceGBP,
       unitPriceStable,
       settlementMode,
-      issuerJurisdiction: syndicateCompliance.countryCode,
+      issuerJurisdiction: coOwnCompliance.countryCode,
       marketMovePct24h: 0,
       holders: 0,
       volume24hGBP: 0,
@@ -177,8 +177,8 @@ export default function CreateSyndicateScreen() {
       isOpen: true,
     };
 
-    addSyndicate(newAsset);
-    show('Syndicate issued successfully', 'success');
+    addCoOwn(newAsset);
+    show('Co-Own issued successfully', 'success');
     navigation.goBack();
   };
 
@@ -202,7 +202,7 @@ export default function CreateSyndicateScreen() {
         onPress={() => setSelectedListingId(item.id)}
         activeOpacity={0.9}
       >
-        <CachedImage uri={getListingCoverUri(item.images, 'https://picsum.photos/seed/listing-syndicate-fallback/300/400')} style={styles.listingImage} contentFit="cover" />
+        <CachedImage uri={getListingCoverUri(item.images, 'https://picsum.photos/seed/listing-co-own-fallback/300/400')} style={styles.listingImage} contentFit="cover" />
         <View style={styles.listingMeta}>
           <Text style={styles.listingTitle} numberOfLines={1}>{item.title}</Text>
           <Text style={styles.listingPrice}>{formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}</Text>
@@ -217,8 +217,8 @@ export default function CreateSyndicateScreen() {
   };
 
   const previewImage = selectedListing
-    ? getListingCoverUri(selectedListing.images, 'https://picsum.photos/seed/syndicate-preview/500/700')
-    : 'https://picsum.photos/seed/syndicate-preview/500/700';
+    ? getListingCoverUri(selectedListing.images, 'https://picsum.photos/seed/co-own-preview/500/700')
+    : 'https://picsum.photos/seed/co-own-preview/500/700';
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -231,10 +231,10 @@ export default function CreateSyndicateScreen() {
 
         <View>
           <Text style={styles.headerLabel}>ISSUER CONSOLE</Text>
-          <Text style={styles.headerTitle}>Create Syndicate</Text>
+          <Text style={styles.headerTitle}>Create Co-Own</Text>
         </View>
 
-        <AnimatedPressable style={styles.issueBtn} onPress={issueSyndicate} activeOpacity={0.9}>
+        <AnimatedPressable style={styles.issueBtn} onPress={issueCoOwn} activeOpacity={0.9}>
           <Text style={styles.issueBtnText}>Issue</Text>
         </AnimatedPressable>
       </View>
@@ -268,12 +268,12 @@ export default function CreateSyndicateScreen() {
           <Text style={styles.inputLabel}>Country</Text>
           <View style={styles.rowWrap}>
             {COUNTRY_OPTIONS.map((countryCode) => {
-              const active = syndicateCompliance.countryCode === countryCode;
+              const active = coOwnCompliance.countryCode === countryCode;
               return (
                 <AnimatedPressable
                   key={countryCode}
                   style={[styles.chipBtn, active && styles.chipBtnActive]}
-                  onPress={() => updateSyndicateCompliance({ countryCode })}
+                  onPress={() => updateCoOwnCompliance({ countryCode })}
                   activeOpacity={0.9}
                 >
                   <Text style={[styles.chipBtnText, active && styles.chipBtnTextActive]}>{countryCode}</Text>
@@ -285,12 +285,12 @@ export default function CreateSyndicateScreen() {
           <View style={styles.toggleRow}>
             <Text style={styles.toggleLabel}>KYC verified</Text>
             <AnimatedPressable
-              style={[styles.toggleBtn, syndicateCompliance.kycVerified && styles.toggleBtnActive]}
-              onPress={() => updateSyndicateCompliance({ kycVerified: !syndicateCompliance.kycVerified })}
+              style={[styles.toggleBtn, coOwnCompliance.kycVerified && styles.toggleBtnActive]}
+              onPress={() => updateCoOwnCompliance({ kycVerified: !coOwnCompliance.kycVerified })}
               activeOpacity={0.9}
             >
-              <Text style={[styles.toggleText, syndicateCompliance.kycVerified && styles.toggleTextActive]}>
-                {syndicateCompliance.kycVerified ? 'ON' : 'OFF'}
+              <Text style={[styles.toggleText, coOwnCompliance.kycVerified && styles.toggleTextActive]}>
+                {coOwnCompliance.kycVerified ? 'ON' : 'OFF'}
               </Text>
             </AnimatedPressable>
           </View>
@@ -298,14 +298,14 @@ export default function CreateSyndicateScreen() {
           <View style={styles.toggleRow}>
             <Text style={styles.toggleLabel}>Risk disclosure accepted</Text>
             <AnimatedPressable
-              style={[styles.toggleBtn, syndicateCompliance.riskDisclosureAccepted && styles.toggleBtnActive]}
+              style={[styles.toggleBtn, coOwnCompliance.riskDisclosureAccepted && styles.toggleBtnActive]}
               onPress={() =>
-                updateSyndicateCompliance({ riskDisclosureAccepted: !syndicateCompliance.riskDisclosureAccepted })
+                updateCoOwnCompliance({ riskDisclosureAccepted: !coOwnCompliance.riskDisclosureAccepted })
               }
               activeOpacity={0.9}
             >
-              <Text style={[styles.toggleText, syndicateCompliance.riskDisclosureAccepted && styles.toggleTextActive]}>
-                {syndicateCompliance.riskDisclosureAccepted ? 'ON' : 'OFF'}
+              <Text style={[styles.toggleText, coOwnCompliance.riskDisclosureAccepted && styles.toggleTextActive]}>
+                {coOwnCompliance.riskDisclosureAccepted ? 'ON' : 'OFF'}
               </Text>
             </AnimatedPressable>
           </View>
@@ -313,16 +313,16 @@ export default function CreateSyndicateScreen() {
           <View style={styles.toggleRow}>
             <Text style={styles.toggleLabel}>{STABLE_COIN} wallet connected</Text>
             <AnimatedPressable
-              style={[styles.toggleBtn, syndicateCompliance.stableCoinWalletConnected && styles.toggleBtnActive]}
+              style={[styles.toggleBtn, coOwnCompliance.stableCoinWalletConnected && styles.toggleBtnActive]}
               onPress={() =>
-                updateSyndicateCompliance({
-                  stableCoinWalletConnected: !syndicateCompliance.stableCoinWalletConnected,
+                updateCoOwnCompliance({
+                  stableCoinWalletConnected: !coOwnCompliance.stableCoinWalletConnected,
                 })
               }
               activeOpacity={0.9}
             >
-              <Text style={[styles.toggleText, syndicateCompliance.stableCoinWalletConnected && styles.toggleTextActive]}>
-                {syndicateCompliance.stableCoinWalletConnected ? 'ON' : 'OFF'}
+              <Text style={[styles.toggleText, coOwnCompliance.stableCoinWalletConnected && styles.toggleTextActive]}>
+                {coOwnCompliance.stableCoinWalletConnected ? 'ON' : 'OFF'}
               </Text>
             </AnimatedPressable>
           </View>

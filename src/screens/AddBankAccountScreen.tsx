@@ -1,4 +1,4 @@
-﻿import React, { useState } from 'react';
+﻿import React, { useEffect, useMemo, useState } from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -18,8 +18,11 @@ import { RootStackParamList } from '../navigation/types';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { useStore } from '../store/useStore';
 import { useToast } from '../context/ToastContext';
+import { formatCountryPolicyScope, isPaymentMethodAllowed } from '../utils/capabilityPolicy';
 import { buildBankAccountPaymentMethod } from '../utils/checkoutFlow';
 import { createUserPaymentMethod } from '../services/commerceApi';
+import { getUserCountryCapabilities, UserCountryCapabilities } from '../services/capabilitiesApi';
+import { parseApiError } from '../lib/apiClient';
 
 type Props = StackScreenProps<RootStackParamList, 'AddBankAccount'>;
 
@@ -38,9 +41,38 @@ export default function AddBankAccountScreen({ navigation }: Props) {
   const [accountNumber, setAccountNumber] = useState('');
   const [sortCode, setSortCode] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [countryCapabilities, setCountryCapabilities] = useState<UserCountryCapabilities | null>(null);
   const currentUser = useStore((state) => state.currentUser);
   const savePaymentMethod = useStore((state) => state.savePaymentMethod);
   const { show } = useToast();
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const hydrateCapabilities = async () => {
+      if (!currentUser?.id) {
+        setCountryCapabilities(null);
+        return;
+      }
+
+      try {
+        const capabilities = await getUserCountryCapabilities(currentUser.id);
+        if (!cancelled) {
+          setCountryCapabilities(capabilities);
+        }
+      } catch {
+        if (!cancelled) {
+          setCountryCapabilities(null);
+        }
+      }
+    };
+
+    void hydrateCapabilities();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser?.id]);
 
   const formatSortCode = (v: string) => {
     const clean = v.replace(/\D/g, '').slice(0, 6);
@@ -51,7 +83,22 @@ export default function AddBankAccountScreen({ navigation }: Props) {
 
   const isComplete = accountName.trim().length >= 2 && accountNumber.length === 8 && sortCode.replace(/-/g, '').length === 6;
 
+  const bankAllowed = isPaymentMethodAllowed(countryCapabilities, 'bank_account');
+
+  const policyLabel = useMemo(() => {
+    if (!countryCapabilities) {
+      return null;
+    }
+
+    return formatCountryPolicyScope(countryCapabilities);
+  }, [countryCapabilities]);
+
   const handleSaveBank = async () => {
+    if (!bankAllowed) {
+      show('Bank accounts are unavailable for your country policy.', 'error');
+      return;
+    }
+
     if (!isComplete || isSaving) {
       return;
     }
@@ -59,6 +106,7 @@ export default function AddBankAccountScreen({ navigation }: Props) {
     const localPaymentMethod = buildBankAccountPaymentMethod(accountNumber.slice(-4), sortCode);
 
     setIsSaving(true);
+    let shouldCloseScreen = true;
     try {
       const userId = currentUser?.id ?? 'u1';
       const saved = await createUserPaymentMethod(userId, {
@@ -76,12 +124,20 @@ export default function AddBankAccountScreen({ navigation }: Props) {
         isDefault: saved.isDefault,
       });
       show('Bank account saved', 'success');
-    } catch {
-      savePaymentMethod(localPaymentMethod);
-      show('Bank account saved locally. Backend sync unavailable.', 'info');
+    } catch (error) {
+      const parsed = parseApiError(error, 'Unable to save bank account right now.');
+      if (parsed.isNetworkError) {
+        savePaymentMethod(localPaymentMethod);
+        show('Bank account saved locally. Backend sync unavailable.', 'info');
+      } else {
+        shouldCloseScreen = false;
+        show(parsed.message, 'error');
+      }
     } finally {
       setIsSaving(false);
-      navigation.goBack();
+      if (shouldCloseScreen) {
+        navigation.goBack();
+      }
     }
   };
 
@@ -96,8 +152,17 @@ export default function AddBankAccountScreen({ navigation }: Props) {
         <View style={{ width: 24 }} />
       </View>
 
+      {policyLabel ? <Text style={styles.policyLabel}>Policy scope: {policyLabel}</Text> : null}
+
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+          {!bankAllowed ? (
+            <View style={styles.blockedCard}>
+              <Text style={styles.blockedTitle}>Bank payouts unavailable in your region</Text>
+              <Text style={styles.blockedText}>Switch your country policy to enable bank withdrawal rails.</Text>
+            </View>
+          ) : null}
+
           <Text style={styles.intro}>
             Your bank account is used for withdrawals. We use bank-grade encryption to keep your details safe.
           </Text>
@@ -161,8 +226,8 @@ export default function AddBankAccountScreen({ navigation }: Props) {
 
         <View style={styles.footer}>
           <AnimatedPressable
-            style={[styles.saveBtn, (!isComplete || isSaving) && { opacity: 0.4 }]}
-            disabled={!isComplete || isSaving}
+            style={[styles.saveBtn, (!isComplete || isSaving || !bankAllowed) && { opacity: 0.4 }]}
+            disabled={!isComplete || isSaving || !bankAllowed}
             onPress={handleSaveBank}
           >
             <Text style={styles.saveBtnText}>{isSaving ? 'Saving...' : 'Save bank account'}</Text>
@@ -180,7 +245,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: BORDER,
   },
   headerTitle: { fontSize: 17, fontWeight: '700', color: TEXT },
+  policyLabel: { fontSize: 12, color: MUTED, textAlign: 'center', marginTop: 8 },
   content: { padding: 20, paddingBottom: 40 },
+  blockedCard: {
+    backgroundColor: CARD_SOFT,
+    borderColor: BORDER,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 16,
+  },
+  blockedTitle: { fontSize: 13, fontWeight: '700', color: TEXT, marginBottom: 4 },
+  blockedText: { fontSize: 12, color: MUTED, lineHeight: 18 },
   intro: { fontSize: 14, color: MUTED, lineHeight: 20, marginBottom: 24 },
   sectionLabel: { fontSize: 11, color: MUTED, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 10, marginLeft: 4 },
   card: { backgroundColor: CARD, borderWidth: 1, borderColor: BORDER, borderRadius: 16, overflow: 'hidden', marginBottom: 16 },

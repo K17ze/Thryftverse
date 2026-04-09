@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildCreateSyndicatePrefillFromSell,
-  getCreateSyndicateInitialState,
+  buildCreateCoOwnPrefillFromSell,
+  getCreateCoOwnInitialState,
 } from '../utils/syndicatePrefill';
 
-describe('sell to syndicate prefill mapping', () => {
-  it('builds route params for CreateSyndicate from sell draft values', () => {
-    const result = buildCreateSyndicatePrefillFromSell({
+describe('sell to co-own prefill mapping', () => {
+  it('builds route params for CreateCoOwn from sell draft values', () => {
+    const result = buildCreateCoOwnPrefillFromSell({
       listingId: 'listing-01',
       shareCountInput: '20',
       sharePriceInput: '2.35',
@@ -24,15 +24,15 @@ describe('sell to syndicate prefill mapping', () => {
     });
   });
 
-  it('rejects invalid syndicate drafts before navigation', () => {
-    const invalidShares = buildCreateSyndicatePrefillFromSell({
+  it('rejects invalid co-own drafts before navigation', () => {
+    const invalidShares = buildCreateCoOwnPrefillFromSell({
       shareCountInput: '21',
       sharePriceInput: '1.2',
       offeringWindowHours: 24,
       authPhotos: ['proof'],
     });
 
-    const invalidPhotos = buildCreateSyndicatePrefillFromSell({
+    const invalidPhotos = buildCreateCoOwnPrefillFromSell({
       shareCountInput: '20',
       sharePriceInput: '1.2',
       offeringWindowHours: 24,
@@ -46,7 +46,7 @@ describe('sell to syndicate prefill mapping', () => {
   });
 
   it('hydrates create screen initial state from prefill data', () => {
-    const initial = getCreateSyndicateInitialState(
+    const initial = getCreateCoOwnInitialState(
       {
         listingId: 'listing-prefill',
         totalUnits: 250,

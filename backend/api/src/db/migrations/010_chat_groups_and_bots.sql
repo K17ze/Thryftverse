@@ -76,7 +76,7 @@ VALUES
     'bot_trade',
     'tradeops',
     'TradeOps Bot',
-    'Posts auction and syndicate market alerts into your group.',
+    'Posts auction and co-own market alerts into your group.',
     '/tradeops alerts on',
     'commerce',
     '{}'::jsonb

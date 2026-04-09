@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -16,7 +16,7 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import Reanimated, { FadeInDown } from 'react-native-reanimated';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { RootStackParamList } from '../navigation/types';
-import { getSyndicateMarket, SyndicateAsset } from '../data/tradeHub';
+import { getCoOwnMarket, CoOwnAsset } from '../data/tradeHub';
 import { useStore } from '../store/useStore';
 import { resolveAssetMarketState } from '../data/mockSyndicateData';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
@@ -36,15 +36,15 @@ const NEGATIVE_COLOR = IS_LIGHT ? '#b64242' : '#ff9d9d';
 
 export default function PortfolioScreen() {
   const navigation = useNavigation<NavT>();
-  const customSyndicates = useStore((state) => state.customSyndicates);
-  const syndicateRuntime = useStore((state) => state.syndicateRuntime);
+  const customCoOwns = useStore((state) => state.customCoOwns);
+  const coOwnRuntime = useStore((state) => state.coOwnRuntime);
   const { formatFromFiat } = useFormattedPrice();
 
-  const baseAssets = React.useMemo(() => getSyndicateMarket(customSyndicates), [customSyndicates]);
+  const baseAssets = React.useMemo(() => getCoOwnMarket(customCoOwns), [customCoOwns]);
 
   const marketAssets = React.useMemo(
-    () => baseAssets.map((asset) => resolveAssetMarketState(asset, syndicateRuntime[asset.id])),
-    [baseAssets, syndicateRuntime]
+    () => baseAssets.map((asset) => resolveAssetMarketState(asset, coOwnRuntime[asset.id])),
+    [baseAssets, coOwnRuntime]
   );
 
   const holdings = React.useMemo(
@@ -83,7 +83,7 @@ export default function PortfolioScreen() {
     }));
   }, [holdings, totalValue]);
 
-  const renderHolding = ({ item, index }: { item: SyndicateAsset; index: number }) => {
+  const renderHolding = ({ item, index }: { item: CoOwnAsset; index: number }) => {
     const value = item.yourUnits * item.unitPriceGBP;
     const avg = item.avgEntryPriceGBP ?? item.unitPriceGBP;
     const pnl = (item.unitPriceGBP - avg) * item.yourUnits;
@@ -120,7 +120,7 @@ export default function PortfolioScreen() {
           <Ionicons name="arrow-back" size={22} color={Colors.textPrimary} />
         </AnimatedPressable>
         <Text style={styles.headerTitle}>Portfolio</Text>
-        <AnimatedPressable style={styles.iconBtn} onPress={() => navigation.navigate('SyndicateOrderHistory')}>
+        <AnimatedPressable style={styles.iconBtn} onPress={() => navigation.navigate('CoOwnOrderHistory')}>
           <Ionicons name="receipt-outline" size={20} color={Colors.textPrimary} />
         </AnimatedPressable>
       </View>
@@ -176,9 +176,9 @@ export default function PortfolioScreen() {
           <EmptyState
             icon="pie-chart-outline"
             title="No holdings yet"
-            subtitle="Buy your first syndicated shares from the hub to build your portfolio."
+            subtitle="Buy your first co-owned shares from the hub to build your portfolio."
             ctaLabel="Browse Hub"
-            onCtaPress={() => navigation.navigate('SyndicateHub')}
+            onCtaPress={() => navigation.navigate('CoOwnHub')}
           />
         }
       />

@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -15,7 +15,7 @@ import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { RootStackParamList } from '../navigation/types';
-import { getSyndicateMarket, getUserLabel } from '../data/tradeHub';
+import { getCoOwnMarket, getUserLabel } from '../data/tradeHub';
 import { MOCK_USERS } from '../data/mockData';
 import { useStore } from '../store/useStore';
 import { resolveAssetMarketState, getOrderBookSnapshot, getPriceSeries, ChartRange } from '../data/mockSyndicateData';
@@ -41,17 +41,17 @@ export default function AssetDetailScreen() {
   const navigation = useNavigation<NavT>();
   const route = useRoute<RouteT>();
   const insets = useSafeAreaInsets();
-  const customSyndicates = useStore((state) => state.customSyndicates);
-  const syndicateRuntime = useStore((state) => state.syndicateRuntime);
+  const customCoOwns = useStore((state) => state.customCoOwns);
+  const coOwnRuntime = useStore((state) => state.coOwnRuntime);
   const currentUser = useStore((state) => state.currentUser);
   const { formatFromFiat } = useFormattedPrice();
 
   const [range, setRange] = React.useState<ChartRange>('1D');
 
-  const baseAssets = React.useMemo(() => getSyndicateMarket(customSyndicates), [customSyndicates]);
+  const baseAssets = React.useMemo(() => getCoOwnMarket(customCoOwns), [customCoOwns]);
   const marketAssets = React.useMemo(
-    () => baseAssets.map((asset) => resolveAssetMarketState(asset, syndicateRuntime[asset.id])),
-    [baseAssets, syndicateRuntime]
+    () => baseAssets.map((asset) => resolveAssetMarketState(asset, coOwnRuntime[asset.id])),
+    [baseAssets, coOwnRuntime]
   );
 
   const asset = marketAssets.find((item) => item.id === route.params.assetId);
@@ -108,9 +108,9 @@ export default function AssetDetailScreen() {
         <EmptyState
           icon="analytics-outline"
           title="Asset not found"
-          subtitle="This syndicate may have been delisted or does not exist yet."
+          subtitle="This co-own may have been delisted or does not exist yet."
           ctaLabel="Back to hub"
-          onCtaPress={() => navigation.navigate('SyndicateHub')}
+          onCtaPress={() => navigation.navigate('CoOwnHub')}
         />
       </SafeAreaView>
     );
@@ -173,7 +173,7 @@ export default function AssetDetailScreen() {
           <Ionicons name="arrow-back" size={22} color={Colors.textPrimary} />
         </AnimatedPressable>
         <Text style={styles.headerTitle}>Asset Detail</Text>
-        <AnimatedPressable style={styles.iconBtn} onPress={() => navigation.navigate('SyndicateOrderHistory')}>
+        <AnimatedPressable style={styles.iconBtn} onPress={() => navigation.navigate('CoOwnOrderHistory')}>
           <Ionicons name="time-outline" size={20} color={Colors.textPrimary} />
         </AnimatedPressable>
       </View>

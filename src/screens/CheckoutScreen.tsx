@@ -18,6 +18,7 @@ import { useStore } from '../store/useStore';
 import { useToast } from '../context/ToastContext';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { isCheckoutReady } from '../utils/checkoutFlow';
+import { formatCountryPolicyScope, isPaymentMethodAllowed } from '../utils/capabilityPolicy';
 import { calculatePlatformChargeGbp } from '../utils/currencyAuthoringFlows';
 import { useBackendData } from '../context/BackendDataContext';
 import { SyncStatusPill } from '../components/SyncStatusPill';
@@ -29,6 +30,7 @@ import {
   listUserPaymentMethods,
   payOrder,
 } from '../services/commerceApi';
+import { CapabilityCarrier, getUserCountryCapabilities, UserCountryCapabilities } from '../services/capabilitiesApi';
 import { CachedImage } from '../components/CachedImage';
 import { getListingCoverUri } from '../utils/media';
 
@@ -39,6 +41,26 @@ const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111111';
 const PANEL_SOFT_BG = IS_LIGHT ? '#f7f4ef' : '#161616';
 const PANEL_BORDER = IS_LIGHT ? '#d8d1c6' : '#2a2a2a';
 const FOOTER_BG = IS_LIGHT ? 'rgba(236,234,230,0.97)' : 'rgba(10,10,10,0.95)';
+
+interface CheckoutPostageOption {
+  label: string;
+  etaLabel: string;
+  priceFromGbp: number;
+}
+
+const DEFAULT_POSTAGE_OPTION: CheckoutPostageOption = {
+  label: 'Standard shipping',
+  etaLabel: '2-3 working days',
+  priceFromGbp: 2.89,
+};
+
+function toEtaLabel(carrier: CapabilityCarrier): string {
+  if (carrier.etaMinDays === carrier.etaMaxDays) {
+    return `${carrier.etaMinDays} working day${carrier.etaMinDays === 1 ? '' : 's'}`;
+  }
+
+  return `${carrier.etaMinDays}-${carrier.etaMaxDays} working days`;
+}
 
 export default function CheckoutScreen() {
   const navigation = useNavigation<any>();
@@ -54,6 +76,8 @@ export default function CheckoutScreen() {
   const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
   const [addCardSheetVisible, setAddCardSheetVisible] = useState(false);
   const [addAddressSheetVisible, setAddAddressSheetVisible] = useState(false);
+  const [postageOption, setPostageOption] = useState<CheckoutPostageOption>(DEFAULT_POSTAGE_OPTION);
+  const [checkoutCapabilities, setCheckoutCapabilities] = useState<UserCountryCapabilities | null>(null);
   const { show } = useToast();
   const { formatFromFiat } = useFormattedPrice();
 
@@ -61,9 +85,55 @@ export default function CheckoutScreen() {
   const seller = MOCK_USERS.find(u => u.id === item.sellerId) || MOCK_USERS[0];
 
   const PLATFORM_CHARGE = calculatePlatformChargeGbp(item.price);
-  const POSTAGE_FEE = 2.89;
+  const POSTAGE_FEE = postageOption.priceFromGbp;
   const TOTAL = item.price + PLATFORM_CHARGE + POSTAGE_FEE;
   const checkoutReady = isCheckoutReady(savedAddress, savedPaymentMethod);
+  const allowCardPayments = isPaymentMethodAllowed(checkoutCapabilities, 'card');
+  const paymentPolicyLabel = formatCountryPolicyScope(checkoutCapabilities);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const hydratePostageOption = async () => {
+      if (!currentUser?.id) {
+        setPostageOption(DEFAULT_POSTAGE_OPTION);
+        setCheckoutCapabilities(null);
+        return;
+      }
+
+      try {
+        const capabilities = await getUserCountryCapabilities(currentUser.id);
+        if (cancelled) {
+          return;
+        }
+
+        setCheckoutCapabilities(capabilities);
+
+        const primaryCarrier = capabilities.postage.carriers[0];
+        if (!primaryCarrier) {
+          setPostageOption(DEFAULT_POSTAGE_OPTION);
+          return;
+        }
+
+        setPostageOption({
+          label: primaryCarrier.label,
+          etaLabel: toEtaLabel(primaryCarrier),
+          priceFromGbp: primaryCarrier.priceFromGbp,
+        });
+      } catch {
+        if (!cancelled) {
+          setPostageOption(DEFAULT_POSTAGE_OPTION);
+          setCheckoutCapabilities(null);
+        }
+      }
+    };
+
+    void hydratePostageOption();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser?.id]);
 
   const checkoutStatus = React.useMemo(() => {
     if (isSubmittingPayment) {
@@ -247,21 +317,36 @@ export default function CheckoutScreen() {
           <View style={styles.blockLeft}>
             <Ionicons name="cube-outline" size={24} color={Colors.textPrimary} />
             <View style={styles.blockTextCol}>
-              <Text style={styles.blockTitle}>Evri Standard</Text>
-              <Text style={styles.blockSub}>2-3 working days</Text>
+              <Text style={styles.blockTitle}>{postageOption.label}</Text>
+              <Text style={styles.blockSub}>{postageOption.etaLabel}</Text>
             </View>
           </View>
           <Text style={styles.blockRightPrice}>{formatFromFiat(POSTAGE_FEE, 'GBP')}</Text>
         </AnimatedPressable>
 
         <Text style={styles.sectionTitle}>Payment</Text>
-        <AnimatedPressable style={styles.blockBtn} activeOpacity={0.8} onPress={() => setAddCardSheetVisible(true)}>
+        {paymentPolicyLabel ? <Text style={styles.policyHint}>Policy scope: {paymentPolicyLabel}</Text> : null}
+        <AnimatedPressable
+          style={styles.blockBtn}
+          activeOpacity={0.8}
+          onPress={() => {
+            if (!allowCardPayments) {
+              show('Cards are unavailable for your region. Open Payments for supported rails.', 'error');
+              navigation.navigate('Payments');
+              return;
+            }
+
+            setAddCardSheetVisible(true);
+          }}
+        >
           <View style={styles.blockLeft}>
             <Ionicons name="card-outline" size={24} color={Colors.textPrimary} />
             <View style={styles.blockTextCol}>
               <Text style={styles.blockTitle}>{savedPaymentMethod ? savedPaymentMethod.label : 'Add payment method'}</Text>
               <Text style={styles.blockSub}>
-                {savedPaymentMethod?.details ?? 'Card, Apple Pay, or Google Pay'}
+                {!allowCardPayments
+                  ? 'Cards unavailable in your policy region'
+                  : (savedPaymentMethod?.details ?? 'Card, Apple Pay, or Google Pay')}
               </Text>
             </View>
           </View>
@@ -412,6 +497,13 @@ const styles = StyleSheet.create({
   },
 
   sectionTitle: { fontSize: 13, fontFamily: 'Inter_600SemiBold', color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 12 },
+  policyHint: {
+    fontSize: 12,
+    fontFamily: 'Inter_500Medium',
+    color: Colors.textMuted,
+    marginBottom: 10,
+    marginLeft: 4,
+  },
 
   blockBtn: {
     flexDirection: 'row',

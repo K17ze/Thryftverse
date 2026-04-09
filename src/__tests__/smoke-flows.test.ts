@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { SyndicateAsset } from '../data/tradeHub';
+import type { CoOwnAsset } from '../data/tradeHub';
 import { useStore } from '../store/useStore';
 
-const SAMPLE_ASSET: SyndicateAsset = {
+const SAMPLE_ASSET: CoOwnAsset = {
   id: 's_smoke_1',
   listingId: 'l_smoke_1',
   issuerId: 'u_issuer',
@@ -27,10 +27,10 @@ function resetStore() {
   useStore.setState(useStore.getInitialState(), true);
 }
 
-describe('syndicate trade lifecycle smoke', () => {
+describe('co-own trade lifecycle smoke', () => {
   beforeEach(() => {
     resetStore();
-    useStore.getState().updateSyndicateCompliance({
+    useStore.getState().updateCoOwnCompliance({
       countryCode: 'GB',
       kycVerified: true,
       riskDisclosureAccepted: true,
@@ -41,18 +41,18 @@ describe('syndicate trade lifecycle smoke', () => {
   it('completes buy -> sell lifecycle and writes order history entries', () => {
     const state = useStore.getState();
 
-    const buyResult = state.buySyndicateUnits(SAMPLE_ASSET, 'u_buyer', 12);
+    const buyResult = state.buyCoOwnUnits(SAMPLE_ASSET, 'u_buyer', 12);
     expect(buyResult.ok).toBe(true);
 
-    const runtimeAfterBuy = useStore.getState().syndicateRuntime[SAMPLE_ASSET.id];
+    const runtimeAfterBuy = useStore.getState().coOwnRuntime[SAMPLE_ASSET.id];
     expect(runtimeAfterBuy).toBeDefined();
     expect(runtimeAfterBuy.availableUnits).toBe(8);
     expect(runtimeAfterBuy.yourUnits).toBe(12);
 
-    const sellResult = useStore.getState().sellSyndicateUnits(SAMPLE_ASSET, 'u_seller', 5);
+    const sellResult = useStore.getState().sellCoOwnUnits(SAMPLE_ASSET, 'u_seller', 5);
     expect(sellResult.ok).toBe(true);
 
-    const runtimeAfterSell = useStore.getState().syndicateRuntime[SAMPLE_ASSET.id];
+    const runtimeAfterSell = useStore.getState().coOwnRuntime[SAMPLE_ASSET.id];
     expect(runtimeAfterSell.availableUnits).toBe(13);
     expect(runtimeAfterSell.yourUnits).toBe(7);
     expect(runtimeAfterSell.realizedProfitGBP).toBeGreaterThan(0);
@@ -66,17 +66,17 @@ describe('syndicate trade lifecycle smoke', () => {
   });
 
   it('blocks trading when compliance is incomplete', () => {
-    useStore.getState().updateSyndicateCompliance({
+    useStore.getState().updateCoOwnCompliance({
       kycVerified: false,
     });
 
-    const result = useStore.getState().buySyndicateUnits(SAMPLE_ASSET, 'u_buyer', 2);
+    const result = useStore.getState().buyCoOwnUnits(SAMPLE_ASSET, 'u_buyer', 2);
     expect(result.ok).toBe(false);
     expect(result.message?.toLowerCase()).toContain('kyc');
   });
 
   it('initiates delivery when buyer reaches full ownership', () => {
-    const nearFullAsset: SyndicateAsset = {
+    const nearFullAsset: CoOwnAsset = {
       ...SAMPLE_ASSET,
       id: 's_smoke_full',
       listingId: 'l_full_delivery',
@@ -86,12 +86,12 @@ describe('syndicate trade lifecycle smoke', () => {
       holders: 2,
     };
 
-    const result = useStore.getState().buySyndicateUnits(nearFullAsset, 'u_buyer', 5);
+    const result = useStore.getState().buyCoOwnUnits(nearFullAsset, 'u_buyer', 5);
     expect(result.ok).toBe(true);
     expect(result.deliveryTriggered).toBe(true);
     expect(result.deliveryListingId).toBe('l_full_delivery');
 
-    const runtime = useStore.getState().syndicateRuntime[nearFullAsset.id];
+    const runtime = useStore.getState().coOwnRuntime[nearFullAsset.id];
     expect(runtime.availableUnits).toBe(0);
     expect(runtime.yourUnits).toBe(20);
   });

@@ -1,4 +1,4 @@
-﻿import React, { useState } from 'react';
+import React, { useState } from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import { 
@@ -26,7 +26,7 @@ import { SyncStatusPill } from '../components/SyncStatusPill';
 import { CURRENCIES } from '../constants/currencies';
 import { useCurrencyPref } from '../hooks/useCurrencyPref';
 import { sanitizeDecimalInput, sanitizeIntegerInput } from '../utils/currencyAuthoringFlows';
-import { buildCreateSyndicatePrefillFromSell } from '../utils/syndicatePrefill';
+import { buildCreateCoOwnPrefillFromSell } from '../utils/syndicatePrefill';
 import { filterImageUris } from '../utils/media';
 
 const CONDITIONS = ['New with tags', 'Very good', 'Good', 'Satisfactory'];
@@ -55,7 +55,7 @@ export default function SellScreen() {
   const [desc, setDesc] = useState('');
   const [price, setPrice] = useState('');
   const [photos, setPhotos] = useState<string[]>([]);
-  const [syndicateEnabled, setSyndicateEnabled] = useState(false);
+  const [coOwnEnabled, setCoOwnEnabled] = useState(false);
   const [shareCountInput, setShareCountInput] = useState('20');
   const [sharePriceInput, setSharePriceInput] = useState('');
   const [offeringWindowHours, setOfferingWindowHours] = useState(24);
@@ -98,7 +98,7 @@ export default function SellScreen() {
   };
 
   React.useEffect(() => {
-    if (!syndicateEnabled || sharePriceInput) {
+    if (!coOwnEnabled || sharePriceInput) {
       return;
     }
 
@@ -107,12 +107,12 @@ export default function SellScreen() {
     if (Number.isFinite(listingPrice) && listingPrice > 0 && Number.isFinite(shareCount) && shareCount > 0) {
       setSharePriceInput((listingPrice / shareCount).toFixed(2));
     }
-  }, [price, shareCountInput, sharePriceInput, syndicateEnabled]);
+  }, [price, shareCountInput, sharePriceInput, coOwnEnabled]);
 
   const appendPhotoUri = (uri: string) => {
     setPhotos((prev) => {
       const next = [...prev, uri].slice(0, 10);
-      if (syndicateEnabled && authPhotos.length === 0) {
+      if (coOwnEnabled && authPhotos.length === 0) {
         setAuthPhotos(filterImageUris(next, 2));
       }
       return next;
@@ -194,8 +194,8 @@ export default function SellScreen() {
       return;
     }
 
-    if (syndicateEnabled) {
-      const prefillResult = buildCreateSyndicatePrefillFromSell({
+    if (coOwnEnabled) {
+      const prefillResult = buildCreateCoOwnPrefillFromSell({
         shareCountInput,
         sharePriceInput,
         offeringWindowHours,
@@ -203,13 +203,13 @@ export default function SellScreen() {
       });
 
       if (!prefillResult.ok) {
-        setErrorMsg(prefillResult.error ?? 'Unable to prepare syndicate listing.');
+        setErrorMsg(prefillResult.error ?? 'Unable to prepare co-own listing.');
         shake();
         return;
       }
 
       setErrorMsg('');
-      navigation.replace('CreateSyndicate', prefillResult.params);
+      navigation.replace('CreateCoOwn', prefillResult.params);
       return;
     }
 
@@ -236,21 +236,21 @@ export default function SellScreen() {
   const hasValidShareCount = Number.isFinite(parsedShareCount) && parsedShareCount > 0;
   const parsedSharePrice = Number(sanitizeDecimalInput(sharePriceInput));
   const hasValidSharePrice = Number.isFinite(parsedSharePrice) && parsedSharePrice > 0;
-  const syndicateFinancialReady = !syndicateEnabled || (hasValidShareCount && hasValidSharePrice);
-  const syndicateAuthReady = !syndicateEnabled || authPhotos.length > 0;
+  const coOwnFinancialReady = !coOwnEnabled || (hasValidShareCount && hasValidSharePrice);
+  const coOwnAuthReady = !coOwnEnabled || authPhotos.length > 0;
 
   const readinessItems = [
     { key: 'photos', label: 'Media', done: hasBasePhotos },
     { key: 'details', label: 'Details', done: hasRequiredDetails },
     { key: 'description', label: 'Description', done: hasDescription },
     { key: 'price', label: 'Price', done: hasValidPrice },
-    { key: 'syndicatePrice', label: 'Share setup', done: syndicateFinancialReady },
-    { key: 'syndicateAuth', label: 'Auth proof', done: syndicateAuthReady },
+    { key: 'coOwnPrice', label: 'Share setup', done: coOwnFinancialReady },
+    { key: 'coOwnAuth', label: 'Auth proof', done: coOwnAuthReady },
   ];
 
-  const visibleReadinessItems = syndicateEnabled
+  const visibleReadinessItems = coOwnEnabled
     ? readinessItems
-    : readinessItems.filter((item) => item.key !== 'syndicatePrice' && item.key !== 'syndicateAuth');
+    : readinessItems.filter((item) => item.key !== 'coOwnPrice' && item.key !== 'coOwnAuth');
 
   const incompleteReadinessCount = visibleReadinessItems.reduce(
     (count, item) => (item.done ? count : count + 1),
@@ -259,7 +259,7 @@ export default function SellScreen() {
 
   const publishReady = incompleteReadinessCount === 0;
   const readinessLabel = publishReady
-    ? syndicateEnabled
+    ? coOwnEnabled
       ? 'Ready for issuing'
       : 'Ready to publish'
     : `${incompleteReadinessCount} checks left`;
@@ -301,7 +301,7 @@ export default function SellScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
-      {/* â”€â”€ Scan Header / Upload Area â”€â”€ */}
+      {/* ── Scan Header / Upload Area ── */}
       <View style={styles.scanHeader}>
         <View style={styles.headerTop}>
           <AnimatedPressable style={styles.iconBtn} onPress={() => navigation.goBack()} activeOpacity={0.8}>
@@ -350,7 +350,7 @@ export default function SellScreen() {
           
           <Text style={styles.sectionHeading}>Item Details</Text>
 
-          {/* â”€â”€ Core Details (Floating Pills) â”€â”€ */}
+          {/* ── Core Details (Floating Pills) ── */}
           <View style={styles.pillInputBox}>
             <Text style={styles.inputLabel}>Title</Text>
             <TextInput 
@@ -375,7 +375,7 @@ export default function SellScreen() {
             />
           </View>
 
-          {/* â”€â”€ Pickers (Floating Cards) â”€â”€ */}
+          {/* ── Pickers (Floating Cards) ── */}
           <View style={styles.cardGroup}>
             <AnimatedPressable 
               style={styles.pickerRow} 
@@ -440,7 +440,7 @@ export default function SellScreen() {
             </AnimatedPressable>
           </View>
 
-          {/* â”€â”€ Price Input â”€â”€ */}
+          {/* ── Price Input ── */}
           <Text style={[styles.sectionHeading, { marginTop: 24 }]}>Pricing</Text>
           
           <View style={styles.pricePillBox}>
@@ -457,52 +457,52 @@ export default function SellScreen() {
 
           <Text style={styles.priceCurrencyHint}>Listing currency: {currencyCode}</Text>
 
-          <Text style={[styles.sectionHeading, { marginTop: 24 }]}>Syndicate Listing</Text>
-          <View style={styles.syndicateCard}>
-            <View style={styles.syndicateTopRow}>
+          <Text style={[styles.sectionHeading, { marginTop: 24 }]}>Co-Own Listing</Text>
+          <View style={styles.coOwnCard}>
+            <View style={styles.coOwnTopRow}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.syndicateTitle}>Tokenize this item</Text>
-                <Text style={styles.syndicateHint}>Create fractional shares for the Syndicate marketplace.</Text>
+                <Text style={styles.coOwnTitle}>Tokenize this item</Text>
+                <Text style={styles.coOwnHint}>Create fractional shares for the Co-Own marketplace.</Text>
               </View>
-              <View style={styles.syndicateToggleWrap}>
+              <View style={styles.coOwnToggleWrap}>
                 <AnimatedPressable
-                  style={[styles.syndicateToggleBtn, !syndicateEnabled && styles.syndicateToggleBtnActive]}
+                  style={[styles.coOwnToggleBtn, !coOwnEnabled && styles.coOwnToggleBtnActive]}
                   activeOpacity={0.85}
-                  onPress={() => setSyndicateEnabled(false)}
+                  onPress={() => setCoOwnEnabled(false)}
                 >
-                  <Text style={[styles.syndicateToggleText, !syndicateEnabled && styles.syndicateToggleTextActive]}>Off</Text>
+                  <Text style={[styles.coOwnToggleText, !coOwnEnabled && styles.coOwnToggleTextActive]}>Off</Text>
                 </AnimatedPressable>
                 <AnimatedPressable
-                  style={[styles.syndicateToggleBtn, syndicateEnabled && styles.syndicateToggleBtnActive]}
+                  style={[styles.coOwnToggleBtn, coOwnEnabled && styles.coOwnToggleBtnActive]}
                   activeOpacity={0.85}
                   onPress={() => {
-                    setSyndicateEnabled(true);
+                    setCoOwnEnabled(true);
                     if (authPhotos.length === 0 && photos.length > 0) {
                       setAuthPhotos(filterImageUris(photos, 2));
                     }
                   }}
                 >
-                  <Text style={[styles.syndicateToggleText, syndicateEnabled && styles.syndicateToggleTextActive]}>On</Text>
+                  <Text style={[styles.coOwnToggleText, coOwnEnabled && styles.coOwnToggleTextActive]}>On</Text>
                 </AnimatedPressable>
               </View>
             </View>
 
-            {syndicateEnabled ? (
-              <View style={styles.syndicateFieldsWrap}>
+            {coOwnEnabled ? (
+              <View style={styles.coOwnFieldsWrap}>
                 <Text style={styles.inputLabel}>Share count</Text>
                 <TextInput
-                  style={styles.syndicateInput}
+                  style={styles.coOwnInput}
                   value={shareCountInput}
                   onChangeText={handleShareCountChange}
                   keyboardType="number-pad"
                   placeholder="20"
                   placeholderTextColor={Colors.textMuted}
                 />
-                <Text style={styles.syndicateInputHint}>Maximum 20 units per syndicate</Text>
+                <Text style={styles.coOwnInputHint}>Maximum 20 units per co-own</Text>
 
                 <Text style={styles.inputLabel}>Initial share price ({currencyCode})</Text>
                 <TextInput
-                  style={styles.syndicateInput}
+                  style={styles.coOwnInput}
                   value={sharePriceInput}
                   onChangeText={(value) => setSharePriceInput(sanitizeDecimalInput(value))}
                   keyboardType="decimal-pad"
@@ -566,7 +566,7 @@ export default function SellScreen() {
                 </View>
               </View>
             ) : (
-              <Text style={styles.syndicateHintMuted}>Enable this to route publishing into the Syndicate issuer flow.</Text>
+              <Text style={styles.coOwnHintMuted}>Enable this to route publishing into the Co-Own issuer flow.</Text>
             )}
           </View>
 
@@ -606,7 +606,7 @@ export default function SellScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* â”€â”€ Huge Action Button â”€â”€ */}
+      {/* ── Huge Action Button ── */}
       <View style={styles.stickyFooter}>
         {!!errorMsg && (
           <Reanimated.Text 
@@ -626,7 +626,7 @@ export default function SellScreen() {
             disabled={!publishReady}
           >
             <Text style={[styles.uploadCtaText, !publishReady && styles.uploadCtaTextDisabled]}>
-              {publishReady ? (syndicateEnabled ? 'Continue to Issue' : 'Publish Item') : 'Complete Required Fields'}
+              {publishReady ? (coOwnEnabled ? 'Continue to Issue' : 'Publish Item') : 'Complete Required Fields'}
             </Text>
           </AnimatedPressable>
         </Reanimated.View>
@@ -657,7 +657,7 @@ const styles = StyleSheet.create({
     borderBottomColor: PANEL_BORDER,
     paddingBottom: 24,
   },
-  syndicateInputHint: {
+  coOwnInputHint: {
     marginTop: -4,
     marginBottom: 8,
     color: Colors.textMuted,
@@ -784,7 +784,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: 'Inter_500Medium',
   },
-  syndicateCard: {
+  coOwnCard: {
     backgroundColor: PANEL_BG,
     borderRadius: 20,
     paddingHorizontal: 16,
@@ -793,30 +793,30 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: PANEL_BORDER,
   },
-  syndicateTopRow: {
+  coOwnTopRow: {
     flexDirection: 'row',
     gap: 12,
   },
-  syndicateTitle: {
+  coOwnTitle: {
     fontSize: 15,
     fontFamily: 'Inter_700Bold',
     color: Colors.textPrimary,
     marginBottom: 2,
   },
-  syndicateHint: {
+  coOwnHint: {
     fontSize: 12,
     fontFamily: 'Inter_500Medium',
     color: Colors.textSecondary,
     lineHeight: 18,
   },
-  syndicateHintMuted: {
+  coOwnHintMuted: {
     marginTop: 10,
     fontSize: 12,
     fontFamily: 'Inter_500Medium',
     color: Colors.textMuted,
     lineHeight: 18,
   },
-  syndicateToggleWrap: {
+  coOwnToggleWrap: {
     flexDirection: 'row',
     backgroundColor: PANEL_SOFT_BG,
     borderRadius: 14,
@@ -825,28 +825,28 @@ const styles = StyleSheet.create({
     borderColor: PANEL_BORDER,
     height: 36,
   },
-  syndicateToggleBtn: {
+  coOwnToggleBtn: {
     borderRadius: 10,
     minWidth: 40,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 10,
   },
-  syndicateToggleBtnActive: {
+  coOwnToggleBtnActive: {
     backgroundColor: Colors.accent,
   },
-  syndicateToggleText: {
+  coOwnToggleText: {
     fontSize: 11,
     fontFamily: 'Inter_700Bold',
     color: Colors.textSecondary,
   },
-  syndicateToggleTextActive: {
+  coOwnToggleTextActive: {
     color: Colors.textInverse,
   },
-  syndicateFieldsWrap: {
+  coOwnFieldsWrap: {
     marginTop: 14,
   },
-  syndicateInput: {
+  coOwnInput: {
     fontSize: 16,
     fontFamily: 'Inter_600SemiBold',
     color: Colors.textPrimary,
