@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, StyleSheet, Image, Dimensions, Text } from 'react-native';
+import { Video, ResizeMode } from 'expo-av';
 import Reanimated, {
   useSharedValue,
   useAnimatedStyle,
@@ -13,6 +14,7 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Colors } from '../constants/colors';
 import { Ionicons } from '@expo/vector-icons';
 import { AnimatedPressable } from './AnimatedPressable';
+import { isVideoUri } from '../utils/media';
 
 const { width } = Dimensions.get('window');
 const ITEM_SIZE = 80;
@@ -56,7 +58,7 @@ export function SortablePhotoStrip({ photos, onReorder, onAddPhoto }: Props) {
           </AnimatedPressable>
         </View>
       </Reanimated.ScrollView>
-      <Text style={styles.hintText}>Drag to reorder. First photo is the cover.</Text>
+      <Text style={styles.hintText}>Drag to reorder. First media item is the cover.</Text>
     </View>
   );
 }
@@ -70,6 +72,7 @@ interface ItemProps {
 }
 
 function SortableItem({ id, index, total, photos, onReorder }: ItemProps) {
+  const isVideo = isVideoUri(id);
   const isDragging = useSharedValue(false);
   const position = useSharedValue(index * TOTAL_SIZE);
   const zIndex = useSharedValue(0);
@@ -126,7 +129,25 @@ function SortableItem({ id, index, total, photos, onReorder }: ItemProps) {
   return (
     <GestureDetector gesture={panGesture}>
       <Reanimated.View style={[styles.itemWrap, animatedStyle]}>
-        <Image source={{ uri: id }} style={styles.image} />
+        {isVideo ? (
+          <Video
+            source={{ uri: id }}
+            style={styles.image}
+            resizeMode={ResizeMode.COVER}
+            shouldPlay={false}
+            isMuted
+            isLooping={false}
+          />
+        ) : (
+          <Image source={{ uri: id }} style={styles.image} />
+        )}
+
+        {isVideo && (
+          <View style={styles.videoBadge}>
+            <Ionicons name="videocam" size={11} color="#fff" />
+          </View>
+        )}
+
         {index === 0 && (
           <View style={styles.coverBadge}>
             <Text style={styles.coverText}>COVER</Text>
@@ -165,6 +186,17 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#333',
     borderStyle: 'dashed',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  videoBadge: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: 'rgba(0,0,0,0.6)',
     alignItems: 'center',
     justifyContent: 'center',
   },

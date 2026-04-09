@@ -24,6 +24,9 @@ import { Listing } from '../data/mockData';
 import { useBackendData } from '../context/BackendDataContext';
 
 type NavT = StackNavigationProp<RootStackParamList>;
+const HEADER_BUTTON_BG = Colors.card;
+const HEADER_BUTTON_BORDER = Colors.border;
+const HEADER_LABEL_COLOR = Colors.accent;
 
 export default function FavouritesScreen() {
   const navigation = useNavigation<NavT>();
@@ -121,13 +124,13 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
-    backgroundColor: '#121212',
+    borderColor: HEADER_BUTTON_BORDER,
+    backgroundColor: HEADER_BUTTON_BG,
     alignItems: 'center',
     justifyContent: 'center',
   },
   headerLabel: {
-    color: '#d7b98f',
+    color: HEADER_LABEL_COLOR,
     fontSize: 10,
     fontFamily: 'Inter_700Bold',
     letterSpacing: 0.7,

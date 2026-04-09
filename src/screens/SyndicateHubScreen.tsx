@@ -26,6 +26,22 @@ import { useFormattedPrice } from '../hooks/useFormattedPrice';
 type NavT = StackNavigationProp<RootStackParamList>;
 
 type HubSort = 'value' | 'movers' | 'latest';
+const IS_LIGHT = ActiveTheme === 'light';
+const TRADE_ACCENT = Colors.accentGold;
+const PANEL_BG = Colors.card;
+const PANEL_BORDER = Colors.border;
+const SEARCH_BG = Colors.cardAlt;
+const METRIC_BG = IS_LIGHT ? '#f0ede7' : '#10161c';
+const METRIC_BORDER = IS_LIGHT ? '#d7d1c8' : '#24313b';
+const SORT_ACTIVE_BG = IS_LIGHT ? '#ede4d3' : '#17302b';
+const UP_PILL_BG = IS_LIGHT ? '#efe7d6' : '#142420';
+const UP_PILL_BORDER = IS_LIGHT ? '#d9c6a2' : '#2d4a45';
+const DOWN_PILL_BG = IS_LIGHT ? '#f6e6e6' : '#231616';
+const DOWN_PILL_BORDER = IS_LIGHT ? '#ddb0b0' : '#4b2c2c';
+const UP_TEXT_COLOR = IS_LIGHT ? '#7c5f1e' : '#d7b98f';
+const DOWN_TEXT_COLOR = IS_LIGHT ? '#b64242' : '#ff9d9d';
+const OUTLINE_BTN_BG = Colors.cardAlt;
+const OUTLINE_BTN_BORDER = Colors.border;
 
 export default function SyndicateHubScreen() {
   const navigation = useNavigation<NavT>();
@@ -106,7 +122,7 @@ export default function SyndicateHubScreen() {
               <Ionicons
                 name={isPositive ? 'trending-up-outline' : 'trending-down-outline'}
                 size={12}
-                color={isPositive ? '#d7b98f' : '#ff9d9d'}
+                color={isPositive ? UP_TEXT_COLOR : DOWN_TEXT_COLOR}
               />
               <Text style={[styles.moveText, isPositive ? styles.moveTextUp : styles.moveTextDown]}>
                 {isPositive ? '+' : ''}{item.marketMovePct24h.toFixed(1)}%
@@ -292,8 +308,8 @@ const styles = StyleSheet.create({
     gap: 4,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: '#2d2d2d',
-    backgroundColor: '#161616',
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
     paddingHorizontal: 10,
     paddingVertical: 7,
   },
@@ -304,7 +320,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   headerLabel: {
-    color: '#d7b98f',
+    color: TRADE_ACCENT,
     fontSize: 11,
     fontFamily: 'Inter_700Bold',
     letterSpacing: 1,
@@ -326,9 +342,9 @@ const styles = StyleSheet.create({
   searchWrap: {
     marginTop: 14,
     borderRadius: 14,
-    backgroundColor: '#111111',
+    backgroundColor: SEARCH_BG,
     borderWidth: 1,
-    borderColor: '#232323',
+    borderColor: PANEL_BORDER,
     paddingHorizontal: 12,
     paddingVertical: 10,
     flexDirection: 'row',
@@ -351,8 +367,8 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#24313b',
-    backgroundColor: '#10161c',
+    borderColor: METRIC_BORDER,
+    backgroundColor: METRIC_BG,
     paddingVertical: 10,
     paddingHorizontal: 9,
   },
@@ -397,14 +413,14 @@ const styles = StyleSheet.create({
   sortChip: {
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: '#2f2f2f',
-    backgroundColor: '#161616',
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
     paddingHorizontal: 12,
     paddingVertical: 7,
   },
   sortChipActive: {
-    borderColor: '#d7b98f',
-    backgroundColor: '#17302b',
+    borderColor: TRADE_ACCENT,
+    backgroundColor: SORT_ACTIVE_BG,
   },
   sortChipText: {
     color: Colors.textSecondary,
@@ -413,7 +429,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   sortChipTextActive: {
-    color: '#d7b98f',
+    color: TRADE_ACCENT,
   },
   issueBtn: {
     marginTop: 12,
@@ -433,8 +449,8 @@ const styles = StyleSheet.create({
   assetCard: {
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#262626',
-    backgroundColor: '#111111',
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
     overflow: 'hidden',
   },
   assetImage: {
@@ -468,22 +484,22 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   movePillUp: {
-    borderColor: '#2d4a45',
-    backgroundColor: '#142420',
+    borderColor: UP_PILL_BORDER,
+    backgroundColor: UP_PILL_BG,
   },
   movePillDown: {
-    borderColor: '#4b2c2c',
-    backgroundColor: '#231616',
+    borderColor: DOWN_PILL_BORDER,
+    backgroundColor: DOWN_PILL_BG,
   },
   moveText: {
     fontSize: 11,
     fontFamily: 'Inter_700Bold',
   },
   moveTextUp: {
-    color: '#d7b98f',
+    color: UP_TEXT_COLOR,
   },
   moveTextDown: {
-    color: '#ff9d9d',
+    color: DOWN_TEXT_COLOR,
   },
   assetMeta: {
     marginTop: 4,
@@ -527,9 +543,9 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_700Bold',
   },
   tradeBtnOutline: {
-    backgroundColor: '#151515',
+    backgroundColor: OUTLINE_BTN_BG,
     borderWidth: 1,
-    borderColor: '#2d2d2d',
+    borderColor: OUTLINE_BTN_BORDER,
   },
   tradeBtnOutlineText: {
     color: Colors.textPrimary,

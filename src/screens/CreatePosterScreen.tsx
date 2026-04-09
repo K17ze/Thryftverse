@@ -7,7 +7,6 @@ import {
   StyleSheet,
   StatusBar,
   TextInput,
-  Image,
   FlatList,
   ActivityIndicator,
   ScrollView
@@ -25,6 +24,8 @@ import { useStore } from '../store/useStore';
 import { useToast } from '../context/ToastContext';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useBackendData } from '../context/BackendDataContext';
+import { CachedImage } from '../components/CachedImage';
+import { getListingCoverUri } from '../utils/media';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 type ListingSource = 'mine' | 'marketplace';
@@ -33,6 +34,20 @@ type StoryPosition = 'top' | 'center' | 'bottom';
 const EXPIRY_OPTIONS = [6, 12, 24, 48];
 const STORY_COLORS = ['#ffffff', '#d7b98f', '#ff8fab', '#8dd3ff'];
 const STORY_POSITIONS: StoryPosition[] = ['top', 'center', 'bottom'];
+const IS_LIGHT = ActiveTheme === 'light';
+const TRADE_ACCENT = Colors.accentGold;
+const HEADER_BORDER = Colors.border;
+const HEADER_BUTTON_BG = Colors.card;
+const PANEL_BG = Colors.card;
+const PANEL_BORDER = Colors.border;
+const CHIP_BG = Colors.card;
+const CHIP_BORDER = Colors.border;
+const CHIP_ACTIVE_BG = IS_LIGHT ? '#ede4d3' : '#2f291f';
+const CHIP_ACTIVE_TEXT = TRADE_ACCENT;
+const COLOR_CHIP_BORDER = Colors.borderLight;
+const COLOR_CHIP_ACTIVE_BORDER = Colors.textEmphasis;
+const IMAGE_BTN_DISABLED_BG = IS_LIGHT ? Colors.cardAlt : '#101010';
+const IMAGE_BTN_DISABLED_BORDER = IS_LIGHT ? Colors.border : '#252525';
 
 export default function CreatePosterScreen() {
   const navigation = useNavigation<NavT>();
@@ -100,7 +115,9 @@ export default function CreatePosterScreen() {
 
   const previewUri =
     posterImageUri ??
-    selectedListing?.images[0] ??
+    (selectedListing
+      ? getListingCoverUri(selectedListing.images, 'https://picsum.photos/seed/poster-fallback/600/800')
+      : undefined) ??
     'https://picsum.photos/seed/poster-fallback/600/800';
 
   const pickFromLibrary = async () => {
@@ -206,7 +223,7 @@ export default function CreatePosterScreen() {
         activeOpacity={0.9}
         onPress={() => setSelectedListingId(item.id)}
       >
-        <Image source={{ uri: item.images[0] }} style={styles.listingImage} />
+        <CachedImage uri={getListingCoverUri(item.images, 'https://picsum.photos/seed/poster-listing-fallback/300/400')} style={styles.listingImage} contentFit="cover" />
         <View style={styles.listingMeta}>
           <Text style={styles.listingTitle} numberOfLines={1}>
             {item.title}
@@ -248,10 +265,7 @@ export default function CreatePosterScreen() {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.previewCard}>
-          <Image
-            source={{ uri: previewUri }}
-            style={styles.previewImage}
-          />
+          <CachedImage uri={previewUri} style={styles.previewImage} contentFit="cover" />
           <View style={styles.previewOverlayTop}>
             {selectedListing && selectedListing.sellerId !== uploaderId ? (
               <View style={styles.sharedListingPill}>
@@ -459,7 +473,7 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     paddingBottom: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#1c1c1c',
+    borderBottomColor: HEADER_BORDER,
   },
   backBtn: {
     width: 36,
@@ -467,7 +481,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#151515',
+    backgroundColor: HEADER_BUTTON_BG,
   },
   headerLabel: {
     color: '#d7b98f',
@@ -506,7 +520,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#2a2a2a',
+    borderColor: PANEL_BORDER,
     marginBottom: 16,
   },
   previewImage: {
@@ -603,8 +617,8 @@ const styles = StyleSheet.create({
     minHeight: 80,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
-    backgroundColor: '#121212',
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
     color: Colors.textPrimary,
     fontSize: 14,
     fontFamily: 'Inter_400Regular',
@@ -632,14 +646,14 @@ const styles = StyleSheet.create({
   sourceChip: {
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: '#343434',
-    backgroundColor: '#121212',
+    borderColor: CHIP_BORDER,
+    backgroundColor: CHIP_BG,
     paddingHorizontal: 14,
     paddingVertical: 8,
   },
   sourceChipActive: {
-    borderColor: '#d7b98f',
-    backgroundColor: '#2f291f',
+    borderColor: TRADE_ACCENT,
+    backgroundColor: CHIP_ACTIVE_BG,
   },
   sourceChipText: {
     color: Colors.textSecondary,
@@ -647,13 +661,13 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_700Bold',
   },
   sourceChipTextActive: {
-    color: '#d7b98f',
+    color: CHIP_ACTIVE_TEXT,
   },
   storyInput: {
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
-    backgroundColor: '#121212',
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
     color: Colors.textPrimary,
     fontSize: 14,
     fontFamily: 'Inter_500Medium',
@@ -682,10 +696,10 @@ const styles = StyleSheet.create({
     height: 22,
     borderRadius: 11,
     borderWidth: 1,
-    borderColor: '#4a4a4a',
+    borderColor: COLOR_CHIP_BORDER,
   },
   storyColorChipActive: {
-    borderColor: '#ffffff',
+    borderColor: COLOR_CHIP_ACTIVE_BORDER,
     borderWidth: 2,
   },
   storyPositionRow: {
@@ -695,14 +709,14 @@ const styles = StyleSheet.create({
   storyPositionChip: {
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#343434',
-    backgroundColor: '#121212',
+    borderColor: CHIP_BORDER,
+    backgroundColor: CHIP_BG,
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
   storyPositionChipActive: {
-    borderColor: '#d7b98f',
-    backgroundColor: '#2f291f',
+    borderColor: TRADE_ACCENT,
+    backgroundColor: CHIP_ACTIVE_BG,
   },
   storyPositionText: {
     color: Colors.textSecondary,
@@ -711,7 +725,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.4,
   },
   storyPositionTextActive: {
-    color: '#d7b98f',
+    color: CHIP_ACTIVE_TEXT,
   },
   expiryRow: {
     flexDirection: 'row',
@@ -720,14 +734,14 @@ const styles = StyleSheet.create({
   expiryChip: {
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: '#343434',
+    borderColor: CHIP_BORDER,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    backgroundColor: '#121212',
+    backgroundColor: CHIP_BG,
   },
   expiryChipActive: {
-    borderColor: '#d7b98f',
-    backgroundColor: '#2f291f',
+    borderColor: TRADE_ACCENT,
+    backgroundColor: CHIP_ACTIVE_BG,
   },
   expiryChipText: {
     color: Colors.textSecondary,
@@ -735,7 +749,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_600SemiBold',
   },
   expiryChipTextActive: {
-    color: '#d7b98f',
+    color: CHIP_ACTIVE_TEXT,
   },
   sectionHeaderRow: {
     flexDirection: 'row',
@@ -756,8 +770,8 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#2f2f2f',
-    backgroundColor: '#121212',
+    borderColor: CHIP_BORDER,
+    backgroundColor: CHIP_BG,
     paddingVertical: 10,
     alignItems: 'center',
     justifyContent: 'center',
@@ -765,8 +779,8 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   imagePickerBtnDisabled: {
-    borderColor: '#252525',
-    backgroundColor: '#101010',
+    borderColor: IMAGE_BTN_DISABLED_BORDER,
+    backgroundColor: IMAGE_BTN_DISABLED_BG,
   },
   imagePickerBtnText: {
     color: Colors.textPrimary,
@@ -795,12 +809,12 @@ const styles = StyleSheet.create({
     width: 118,
     borderRadius: 12,
     overflow: 'hidden',
-    backgroundColor: '#131313',
+    backgroundColor: PANEL_BG,
     borderWidth: 1,
-    borderColor: '#272727',
+    borderColor: PANEL_BORDER,
   },
   listingCardSelected: {
-    borderColor: '#d7b98f',
+    borderColor: TRADE_ACCENT,
   },
   listingImage: {
     width: '100%',
@@ -833,7 +847,7 @@ const styles = StyleSheet.create({
     width: 20,
     height: 20,
     borderRadius: 10,
-    backgroundColor: '#d7b98f',
+    backgroundColor: TRADE_ACCENT,
     alignItems: 'center',
     justifyContent: 'center',
   },

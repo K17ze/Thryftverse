@@ -51,6 +51,20 @@ interface HistoryEntry {
 const SIDE_FILTERS: SideFilter[] = ['all', 'buy', 'sell'];
 const DATE_FILTERS: DateFilter[] = ['all', '24h', '7d', '30d'];
 const PAGE_SIZE = 80;
+const IS_LIGHT = ActiveTheme === 'light';
+const TRADE_ACCENT = Colors.accentGold;
+const PANEL_BG = Colors.card;
+const PANEL_BORDER = Colors.border;
+const CHIP_ACTIVE_BG = IS_LIGHT ? '#ede4d3' : '#17302b';
+const ROW_BG = Colors.card;
+const ROW_BORDER = Colors.border;
+const POSITIVE_COLOR = IS_LIGHT ? '#7c5f1e' : '#d7b98f';
+const NEGATIVE_COLOR = IS_LIGHT ? '#b64242' : '#ff9d9d';
+const REFRESH_BG = Colors.surface;
+const ICON_BUY_BORDER = IS_LIGHT ? '#d9c6a2' : '#2f4944';
+const ICON_BUY_BG = IS_LIGHT ? '#efe7d6' : '#152520';
+const ICON_SELL_BORDER = IS_LIGHT ? '#ddb0b0' : '#4d2f2f';
+const ICON_SELL_BG = IS_LIGHT ? '#f6e6e6' : '#241717';
 
 function toHistoryEntry(order: TradeOrder): HistoryEntry {
   return {
@@ -89,28 +103,28 @@ function statusPillStyle(status: HistoryEntry['status']) {
   switch (status) {
     case 'filled':
       return {
-        borderColor: '#2f4944',
-        backgroundColor: '#152520',
-        textColor: '#d7b98f',
+        borderColor: IS_LIGHT ? '#d9c6a2' : '#2f4944',
+        backgroundColor: IS_LIGHT ? '#efe7d6' : '#152520',
+        textColor: IS_LIGHT ? '#7c5f1e' : '#d7b98f',
       };
     case 'pending':
       return {
-        borderColor: '#4a4330',
-        backgroundColor: '#232014',
-        textColor: '#ffd886',
+        borderColor: IS_LIGHT ? '#dcc7a4' : '#4a4330',
+        backgroundColor: IS_LIGHT ? '#f6ebd8' : '#232014',
+        textColor: IS_LIGHT ? '#7c5f1e' : '#ffd886',
       };
     case 'partial':
       return {
-        borderColor: '#4a3f2f',
-        backgroundColor: '#231f16',
-        textColor: '#ffcf8a',
+        borderColor: IS_LIGHT ? '#dfc9a5' : '#4a3f2f',
+        backgroundColor: IS_LIGHT ? '#f7ecdb' : '#231f16',
+        textColor: IS_LIGHT ? '#7c5f1e' : '#ffcf8a',
       };
     case 'cancelled':
     default:
       return {
-        borderColor: '#4d2f2f',
-        backgroundColor: '#241717',
-        textColor: '#ff9d9d',
+        borderColor: IS_LIGHT ? '#ddb0b0' : '#4d2f2f',
+        backgroundColor: IS_LIGHT ? '#f6e6e6' : '#241717',
+        textColor: IS_LIGHT ? '#b64242' : '#ff9d9d',
       };
   }
 }
@@ -441,9 +455,9 @@ export default function SyndicateOrderHistoryScreen() {
             onRefresh={() => {
               void syncRemoteHistory();
             }}
-            tintColor="#d7b98f"
-            colors={['#d7b98f']}
-            progressBackgroundColor="#161616"
+            tintColor={TRADE_ACCENT}
+            colors={[TRADE_ACCENT]}
+            progressBackgroundColor={REFRESH_BG}
           />
         }
         ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
@@ -484,8 +498,8 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#272727',
-    backgroundColor: '#121212',
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -524,14 +538,14 @@ const styles = StyleSheet.create({
   filterChip: {
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: '#2f2f2f',
-    backgroundColor: '#151515',
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
     paddingHorizontal: 12,
     paddingVertical: 7,
   },
   filterChipActive: {
-    borderColor: '#d7b98f',
-    backgroundColor: '#17302b',
+    borderColor: TRADE_ACCENT,
+    backgroundColor: CHIP_ACTIVE_BG,
   },
   filterText: {
     color: Colors.textSecondary,
@@ -540,19 +554,19 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   filterTextActive: {
-    color: '#d7b98f',
+    color: TRADE_ACCENT,
   },
   assetChip: {
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: '#2f2f2f',
-    backgroundColor: '#151515',
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
     paddingHorizontal: 10,
     paddingVertical: 7,
   },
   assetChipActive: {
-    borderColor: '#d7b98f',
-    backgroundColor: '#17302b',
+    borderColor: TRADE_ACCENT,
+    backgroundColor: CHIP_ACTIVE_BG,
   },
   assetChipText: {
     color: Colors.textSecondary,
@@ -561,7 +575,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.45,
   },
   assetChipTextActive: {
-    color: '#d7b98f',
+    color: TRADE_ACCENT,
   },
   content: {
     paddingHorizontal: 16,
@@ -570,8 +584,8 @@ const styles = StyleSheet.create({
   row: {
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
-    backgroundColor: '#111111',
+    borderColor: ROW_BORDER,
+    backgroundColor: ROW_BG,
     paddingHorizontal: 10,
     paddingVertical: 10,
     flexDirection: 'row',
@@ -587,13 +601,13 @@ const styles = StyleSheet.create({
   },
   iconBuy: {
     borderWidth: 1,
-    borderColor: '#2f4944',
-    backgroundColor: '#152520',
+    borderColor: ICON_BUY_BORDER,
+    backgroundColor: ICON_BUY_BG,
   },
   iconSell: {
     borderWidth: 1,
-    borderColor: '#4d2f2f',
-    backgroundColor: '#241717',
+    borderColor: ICON_SELL_BORDER,
+    backgroundColor: ICON_SELL_BG,
   },
   rowBody: {
     flex: 1,
@@ -637,10 +651,10 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_700Bold',
   },
   rowAmountBuy: {
-    color: '#ff9d9d',
+    color: NEGATIVE_COLOR,
   },
   rowAmountSell: {
-    color: '#d7b98f',
+    color: POSITIVE_COLOR,
   },
 });
 

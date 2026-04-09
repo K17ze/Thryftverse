@@ -36,7 +36,7 @@ import { parseApiError } from '../lib/apiClient';
 import { listSyndicateAssets, placeSyndicateOrder } from '../services/marketApi';
 
 type NavT = StackNavigationProp<RootStackParamList>;
-type SyndicateView = 'MARKET' | 'HOLDINGS';
+type SyndicateView = 'ISSUED' | 'HOLDINGS';
 
 const STABLE_COIN = '1ze';
 const IS_LIGHT = ActiveTheme === 'light';
@@ -122,7 +122,7 @@ export default function SyndicateScreen() {
   const actingUserId = currentUser?.id ?? 'u1';
 
   const [refreshing, setRefreshing] = React.useState(false);
-  const [activeView, setActiveView] = React.useState<SyndicateView>('MARKET');
+  const [activeView, setActiveView] = React.useState<SyndicateView>('ISSUED');
   const [unitsComposerVisible, setUnitsComposerVisible] = React.useState(false);
   const [complianceModalVisible, setComplianceModalVisible] = React.useState(false);
   const [composerMode, setComposerMode] = React.useState<ComposerMode>('buy');
@@ -136,7 +136,7 @@ export default function SyndicateScreen() {
   const syncSyndicateAssets = React.useCallback(async () => {
     setIsSyncingAssets(true);
     try {
-      const items = await listSyndicateAssets({ limit: 120 });
+      const items = await listSyndicateAssets({ limit: 120, issuerId: actingUserId });
       const mapped: SyndicateAsset[] = items.map((item) => ({
         id: item.id,
         listingId: item.listingId,
@@ -164,7 +164,7 @@ export default function SyndicateScreen() {
     } finally {
       setIsSyncingAssets(false);
     }
-  }, []);
+  }, [actingUserId]);
 
   React.useEffect(() => {
     void syncSyndicateAssets();
@@ -184,11 +184,14 @@ export default function SyndicateScreen() {
     }
 
     for (const item of customSyndicates) {
+      if (item.issuerId !== actingUserId) {
+        continue;
+      }
       merged.set(item.id, item);
     }
 
     return [...merged.values()];
-  }, [customSyndicates, remoteAssets]);
+  }, [actingUserId, customSyndicates, remoteAssets]);
 
   const baseAssets = React.useMemo(() => getSyndicateMarket(mergedAssets), [mergedAssets]);
 
@@ -391,7 +394,7 @@ export default function SyndicateScreen() {
   const renderHeader = () => (
     <View>
       <View style={styles.heroHeader}>
-        <Text style={styles.heroTitle}>Syndicate</Text>
+        <Text style={styles.heroTitle}>My Syndicate</Text>
       </View>
 
       <View style={styles.heroQuickRow}>
@@ -417,11 +420,11 @@ export default function SyndicateScreen() {
       <View style={styles.metricsRow}>
         <View style={styles.metricCard}>
           <Text style={styles.metricValue}>{marketAssets.length}</Text>
-          <Text style={styles.metricLabel}>Pools</Text>
+          <Text style={styles.metricLabel}>Issued Pools</Text>
         </View>
         <View style={styles.metricCard}>
           <Text style={styles.metricValue}>{formatFromFiat(totalMarketValue, 'GBP', { displayMode: 'fiat' })}</Text>
-          <Text style={styles.metricLabel}>Market Value</Text>
+          <Text style={styles.metricLabel}>Issued Value</Text>
         </View>
         <View style={styles.metricCard}>
           <Text style={styles.metricValue}>{formatMoney(holdingsValue)}</Text>
@@ -508,7 +511,7 @@ export default function SyndicateScreen() {
       </View>
 
       <View style={styles.switcherWrap}>
-        {(['MARKET', 'HOLDINGS'] as const).map((view) => (
+        {(['ISSUED', 'HOLDINGS'] as const).map((view) => (
           <AnimatedPressable
             key={view}
             style={[styles.switcherBtn, activeView === view && styles.switcherBtnActive]}
@@ -521,7 +524,7 @@ export default function SyndicateScreen() {
       </View>
 
       <View style={styles.sectionRow}>
-        <Text style={styles.sectionTitle}>{activeView === 'MARKET' ? 'Open Syndicates' : 'Your Holdings'}</Text>
+        <Text style={styles.sectionTitle}>{activeView === 'ISSUED' ? 'Your Issued Pools' : 'Your Holdings'}</Text>
         <SyncStatusPill tone={poolStatus.tone} label={poolStatus.label} compact />
       </View>
 
@@ -907,11 +910,11 @@ export default function SyndicateScreen() {
           ) : (
             <EmptyState
               icon="pie-chart-outline"
-              title={activeView === 'HOLDINGS' ? 'No holdings yet' : 'No open syndicates'}
-              ctaLabel={activeView === 'HOLDINGS' ? 'Browse Market' : 'Issue Syndicate'}
+              title={activeView === 'HOLDINGS' ? 'No holdings yet' : 'No issued pools yet'}
+              ctaLabel={activeView === 'HOLDINGS' ? 'View Issued Pools' : 'Issue Syndicate'}
               onCtaPress={() =>
                 activeView === 'HOLDINGS'
-                  ? setActiveView('MARKET')
+                  ? setActiveView('ISSUED')
                   : navigation.navigate('CreateSyndicate')
               }
             />

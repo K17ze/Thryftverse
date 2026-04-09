@@ -47,6 +47,7 @@ import {
 import {
   closeBackgroundQueues,
   enqueueAuctionSweepJob,
+  enqueueOnezeMintReserveJob,
   enqueueOnezeWithdrawalExecuteJob,
   enqueuePushNotificationJob,
   startBackgroundWorkers,
@@ -189,6 +190,16 @@ const AUCTION_PLATFORM_FEE_RATE = 0.03;
 const WALLET_TOPUP_PLATFORM_FEE_RATE = 0.01;
 const ONEZE_MG_PER_IZE = 1_000;
 const DEFAULT_WALLET_FIAT_CURRENCY = 'INR';
+const ONEZE_MINT_BURN_HALT_REDIS_KEY = 'oneze:mint_burn_halted';
+const ONEZE_MINT_DEFAULT_CUSTODIAN = 'MMTC-PAMP';
+
+const MINT_OPERATION_TERMINAL_STATES = new Set<string>([
+  'SETTLED',
+  'PAYMENT_FAILED',
+  'PAYMENT_REFUNDED',
+  'RESERVE_FAILED',
+  'RESERVE_UNKNOWN',
+]);
 
 const FIAT_MINOR_DIGITS: Record<string, number> = {
   BIF: 0,
@@ -565,6 +576,10 @@ function resolveAuthenticatedUserId(
 }
 
 function statusCodeForApiError(code: string): number {
+  if (code === 'ONEZE_OPERATIONS_HALTED') {
+    return 503;
+  }
+
   if (code === 'UNAUTHORIZED') {
     return 401;
   }
@@ -729,6 +744,19 @@ type PaymentIntentStatus =
   | 'cancelled';
 type PaymentIntentTerminalStatus = 'succeeded' | 'failed' | 'cancelled';
 type PaymentIntentChannel = 'commerce' | 'syndicate' | 'wallet_topup' | 'wallet_withdrawal';
+type MintOperationState =
+  | 'INITIATED'
+  | 'PAYMENT_PENDING'
+  | 'PAYMENT_CONFIRMED'
+  | 'RESERVE_PURCHASING'
+  | 'RESERVE_ALLOCATED'
+  | 'WALLET_CREDITED'
+  | 'SETTLED'
+  | 'PAYMENT_FAILED'
+  | 'PAYMENT_REFUNDED'
+  | 'RESERVE_FAILED'
+  | 'RECONCILIATION_HOLD'
+  | 'RESERVE_UNKNOWN';
 
 interface PaymentIntentRow {
   id: string;
@@ -847,6 +875,32 @@ interface WithdrawalRow {
   metadata: Record<string, unknown>;
   created_at: string;
   completed_at: string | null;
+}
+
+interface MintOperationRow {
+  id: string;
+  user_id: string;
+  state: MintOperationState;
+  fiat_amount_minor: number | string;
+  fiat_currency: string;
+  net_fiat_amount_minor: number | string;
+  platform_fee_minor: number | string;
+  ize_amount_mg: number | string;
+  rate_per_gram: number | string;
+  rate_source: string;
+  rate_locked_at: string;
+  rate_expires_at: string;
+  payment_intent_id: string | null;
+  lot_id: string | null;
+  custodian_ref: string | null;
+  escrow_ledger_tx_id: string | null;
+  wallet_credit_tx_id: string | null;
+  purchase_attempted_at: string | null;
+  settled_at: string | null;
+  last_error: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
 }
 
 interface JurisdictionPolicyRow {
@@ -1135,6 +1189,163 @@ function toWithdrawalPayload(row: WithdrawalRow) {
   };
 }
 
+function toMintOperationPayload(row: MintOperationRow) {
+  const fiatAmountMinor = Number(row.fiat_amount_minor);
+  const netFiatAmountMinor = Number(row.net_fiat_amount_minor);
+  const platformFeeMinor = Number(row.platform_fee_minor);
+  const izeAmountMg = Number(row.ize_amount_mg);
+
+  return {
+    id: row.id,
+    userId: row.user_id,
+    state: row.state,
+    fiatCurrency: row.fiat_currency,
+    fiatAmountMinor,
+    fiatAmount: fromFiatMinor(fiatAmountMinor, row.fiat_currency),
+    netFiatAmountMinor,
+    netFiatAmount: fromFiatMinor(netFiatAmountMinor, row.fiat_currency),
+    platformFeeMinor,
+    platformFeeAmount: fromFiatMinor(platformFeeMinor, row.fiat_currency),
+    izeAmountMg,
+    izeAmount: mgToOnezeAmount(izeAmountMg),
+    ratePerGram: Number(row.rate_per_gram),
+    rateSource: row.rate_source,
+    rateLockedAt: row.rate_locked_at,
+    rateExpiresAt: row.rate_expires_at,
+    paymentIntentId: row.payment_intent_id,
+    lotId: row.lot_id,
+    custodianRef: row.custodian_ref,
+    escrowLedgerTxId: row.escrow_ledger_tx_id,
+    walletCreditTxId: row.wallet_credit_tx_id,
+    purchaseAttemptedAt: row.purchase_attempted_at,
+    settledAt: row.settled_at,
+    lastError: row.last_error,
+    metadata: row.metadata,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function canTransitionMintOperationState(current: MintOperationState, next: MintOperationState): boolean {
+  if (current === next) {
+    return true;
+  }
+
+  if (MINT_OPERATION_TERMINAL_STATES.has(current)) {
+    return false;
+  }
+
+  if (current === 'INITIATED') {
+    return ['PAYMENT_PENDING', 'PAYMENT_FAILED'].includes(next);
+  }
+
+  if (current === 'PAYMENT_PENDING') {
+    return ['PAYMENT_CONFIRMED', 'PAYMENT_FAILED', 'PAYMENT_REFUNDED', 'RECONCILIATION_HOLD'].includes(next);
+  }
+
+  if (current === 'PAYMENT_CONFIRMED') {
+    return ['RESERVE_PURCHASING', 'PAYMENT_REFUNDED', 'RECONCILIATION_HOLD'].includes(next);
+  }
+
+  if (current === 'RESERVE_PURCHASING') {
+    return ['RESERVE_ALLOCATED', 'RESERVE_FAILED', 'RESERVE_UNKNOWN', 'RECONCILIATION_HOLD'].includes(next);
+  }
+
+  if (current === 'RESERVE_ALLOCATED') {
+    return ['WALLET_CREDITED', 'RECONCILIATION_HOLD'].includes(next);
+  }
+
+  if (current === 'WALLET_CREDITED') {
+    return ['SETTLED', 'RECONCILIATION_HOLD'].includes(next);
+  }
+
+  if (current === 'RECONCILIATION_HOLD') {
+    return ['PAYMENT_REFUNDED', 'RESERVE_FAILED'].includes(next);
+  }
+
+  return false;
+}
+
+async function loadMintOperationById(
+  client: DbQueryable,
+  operationId: string,
+  options?: { forUpdate?: boolean }
+): Promise<MintOperationRow | null> {
+  const baseQuery = `
+    SELECT
+      id,
+      user_id,
+      state,
+      fiat_amount_minor::text,
+      fiat_currency,
+      net_fiat_amount_minor::text,
+      platform_fee_minor::text,
+      ize_amount_mg::text,
+      rate_per_gram::text,
+      rate_source,
+      rate_locked_at::text,
+      rate_expires_at::text,
+      payment_intent_id,
+      lot_id,
+      custodian_ref,
+      escrow_ledger_tx_id,
+      wallet_credit_tx_id,
+      purchase_attempted_at::text,
+      settled_at::text,
+      last_error,
+      metadata,
+      created_at::text,
+      updated_at::text
+    FROM mint_operations
+    WHERE id = $1
+    LIMIT 1
+  `;
+
+  const queryText = options?.forUpdate ? `${baseQuery} FOR UPDATE` : baseQuery;
+  const result = await client.query<MintOperationRow>(queryText, [operationId]);
+  return result.rows[0] ?? null;
+}
+
+async function loadMintOperationByPaymentIntentId(
+  client: DbQueryable,
+  paymentIntentId: string,
+  options?: { forUpdate?: boolean }
+): Promise<MintOperationRow | null> {
+  const baseQuery = `
+    SELECT
+      id,
+      user_id,
+      state,
+      fiat_amount_minor::text,
+      fiat_currency,
+      net_fiat_amount_minor::text,
+      platform_fee_minor::text,
+      ize_amount_mg::text,
+      rate_per_gram::text,
+      rate_source,
+      rate_locked_at::text,
+      rate_expires_at::text,
+      payment_intent_id,
+      lot_id,
+      custodian_ref,
+      escrow_ledger_tx_id,
+      wallet_credit_tx_id,
+      purchase_attempted_at::text,
+      settled_at::text,
+      last_error,
+      metadata,
+      created_at::text,
+      updated_at::text
+    FROM mint_operations
+    WHERE payment_intent_id = $1
+    LIMIT 1
+  `;
+
+  const queryText = options?.forUpdate ? `${baseQuery} FOR UPDATE` : baseQuery;
+  const result = await client.query<MintOperationRow>(queryText, [paymentIntentId]);
+  return result.rows[0] ?? null;
+}
+
 async function assertSettledWalletTopupIntent(
   client: DbQueryable,
   input: {
@@ -1366,6 +1577,93 @@ async function onezeArchitectureTablesAvailable(client: DbQueryable): Promise<bo
   );
 
   return Boolean(result.rows[0]?.exists);
+}
+
+async function onezeMintFlowTablesAvailable(client: DbQueryable): Promise<boolean> {
+  const result = await client.query<{ exists: boolean }>(
+    `
+      SELECT
+        to_regclass('public.mint_operations') IS NOT NULL
+        AND to_regclass('public.payment_intents') IS NOT NULL
+        AND to_regclass('public.wallets') IS NOT NULL
+        AND to_regclass('public.wallet_ledger') IS NOT NULL
+        AND to_regclass('public.gold_reserve_lots') IS NOT NULL
+        AND to_regclass('public.reserve_movements') IS NOT NULL AS exists
+    `
+  );
+
+  return Boolean(result.rows[0]?.exists);
+}
+
+async function setOnezeMintBurnHaltState(input: {
+  halted: boolean;
+  reason: string;
+  reconciliationId?: string;
+}): Promise<void> {
+  if (!input.halted) {
+    await redis.del(ONEZE_MINT_BURN_HALT_REDIS_KEY);
+    return;
+  }
+
+  await redis.set(
+    ONEZE_MINT_BURN_HALT_REDIS_KEY,
+    toJsonString({
+      halted: true,
+      reason: input.reason,
+      reconciliationId: input.reconciliationId ?? null,
+      haltedAt: new Date().toISOString(),
+    })
+  );
+}
+
+async function getOnezeMintBurnHaltState(): Promise<{
+  halted: boolean;
+  reason?: string;
+  reconciliationId?: string | null;
+}> {
+  const raw = await redis.get(ONEZE_MINT_BURN_HALT_REDIS_KEY);
+  if (!raw) {
+    return { halted: false };
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as {
+      halted?: boolean;
+      reason?: string;
+      reconciliationId?: string | null;
+    };
+
+    if (!parsed.halted) {
+      return { halted: false };
+    }
+
+    return {
+      halted: true,
+      reason: parsed.reason,
+      reconciliationId: parsed.reconciliationId ?? null,
+    };
+  } catch {
+    return {
+      halted: true,
+      reason: 'halt_state_decode_failed',
+    };
+  }
+}
+
+async function assertOnezeMintBurnNotHalted(): Promise<void> {
+  const state = await getOnezeMintBurnHaltState();
+  if (!state.halted) {
+    return;
+  }
+
+  throw createApiError(
+    'ONEZE_OPERATIONS_HALTED',
+    '1ze mint and burn operations are temporarily halted due to reconciliation hold',
+    {
+      reason: state.reason ?? null,
+      reconciliationId: state.reconciliationId ?? null,
+    }
+  );
 }
 
 function hashWalletIdempotencyPayload(payload: unknown): string {
@@ -4602,6 +4900,526 @@ function stopAuctionSweepScheduler(): void {
 let onezeReconcileTimer: NodeJS.Timeout | null = null;
 let onezeDailyAttestationTimer: NodeJS.Timeout | null = null;
 
+async function processMintOperationPaymentWebhook(
+  client: DbQueryable,
+  input: {
+    paymentIntentId: string;
+    paymentStatus: ProviderPaymentStatus;
+    provider: string;
+    eventType: string;
+    providerEventId: string;
+  }
+): Promise<{
+  mintOperation: ReturnType<typeof toMintOperationPayload> | null;
+  enqueueReserveAllocation: boolean;
+}> {
+  const operation = await loadMintOperationByPaymentIntentId(client, input.paymentIntentId, {
+    forUpdate: true,
+  });
+
+  if (!operation) {
+    return {
+      mintOperation: null,
+      enqueueReserveAllocation: false,
+    };
+  }
+
+  const metadataPatch = {
+    paymentWebhook: {
+      provider: input.provider,
+      eventType: input.eventType,
+      providerEventId: input.providerEventId,
+      paymentStatus: input.paymentStatus,
+      processedAt: new Date().toISOString(),
+    },
+  };
+
+  if (input.paymentStatus === 'succeeded') {
+    if (operation.state === 'PAYMENT_CONFIRMED') {
+      return {
+        mintOperation: toMintOperationPayload(operation),
+        enqueueReserveAllocation: true,
+      };
+    }
+
+    if (
+      operation.state === 'RESERVE_PURCHASING'
+      || operation.state === 'RESERVE_ALLOCATED'
+      || operation.state === 'WALLET_CREDITED'
+      || operation.state === 'SETTLED'
+    ) {
+      return {
+        mintOperation: toMintOperationPayload(operation),
+        enqueueReserveAllocation: false,
+      };
+    }
+
+    if (!canTransitionMintOperationState(operation.state, 'PAYMENT_CONFIRMED')) {
+      return {
+        mintOperation: toMintOperationPayload(operation),
+        enqueueReserveAllocation: false,
+      };
+    }
+
+    const expiryAtMs = Date.parse(operation.rate_expires_at);
+    const maxAcceptedMs = Number.isFinite(expiryAtMs)
+      ? expiryAtMs + config.onezeMintPaymentGraceSeconds * 1_000
+      : Number.POSITIVE_INFINITY;
+
+    if (Date.now() > maxAcceptedMs) {
+      const refundedResult = await client.query<MintOperationRow>(
+        `
+          UPDATE mint_operations
+          SET
+            state = 'PAYMENT_REFUNDED',
+            last_error = 'mint_quote_expired_before_payment_confirmation',
+            metadata = metadata || $2::jsonb,
+            updated_at = NOW()
+          WHERE id = $1
+          RETURNING
+            id,
+            user_id,
+            state,
+            fiat_amount_minor::text,
+            fiat_currency,
+            net_fiat_amount_minor::text,
+            platform_fee_minor::text,
+            ize_amount_mg::text,
+            rate_per_gram::text,
+            rate_source,
+            rate_locked_at::text,
+            rate_expires_at::text,
+            payment_intent_id,
+            lot_id,
+            custodian_ref,
+            escrow_ledger_tx_id,
+            wallet_credit_tx_id,
+            purchase_attempted_at::text,
+            settled_at::text,
+            last_error,
+            metadata,
+            created_at::text,
+            updated_at::text
+        `,
+        [
+          operation.id,
+          toJsonString({
+            ...metadataPatch,
+            paymentRefundReason: 'rate_lock_expired',
+          }),
+        ]
+      );
+
+      return {
+        mintOperation: toMintOperationPayload(refundedResult.rows[0]),
+        enqueueReserveAllocation: false,
+      };
+    }
+
+    const confirmedResult = await client.query<MintOperationRow>(
+      `
+        UPDATE mint_operations
+        SET
+          state = 'PAYMENT_CONFIRMED',
+          metadata = metadata || $2::jsonb,
+          updated_at = NOW()
+        WHERE id = $1
+        RETURNING
+          id,
+          user_id,
+          state,
+          fiat_amount_minor::text,
+          fiat_currency,
+          net_fiat_amount_minor::text,
+          platform_fee_minor::text,
+          ize_amount_mg::text,
+          rate_per_gram::text,
+          rate_source,
+          rate_locked_at::text,
+          rate_expires_at::text,
+          payment_intent_id,
+          lot_id,
+          custodian_ref,
+          escrow_ledger_tx_id,
+          wallet_credit_tx_id,
+          purchase_attempted_at::text,
+          settled_at::text,
+          last_error,
+          metadata,
+          created_at::text,
+          updated_at::text
+      `,
+      [operation.id, toJsonString(metadataPatch)]
+    );
+
+    return {
+      mintOperation: toMintOperationPayload(confirmedResult.rows[0]),
+      enqueueReserveAllocation: true,
+    };
+  }
+
+  if (input.paymentStatus === 'failed' || input.paymentStatus === 'cancelled') {
+    if (MINT_OPERATION_TERMINAL_STATES.has(operation.state)) {
+      return {
+        mintOperation: toMintOperationPayload(operation),
+        enqueueReserveAllocation: false,
+      };
+    }
+
+    if (!canTransitionMintOperationState(operation.state, 'PAYMENT_FAILED')) {
+      return {
+        mintOperation: toMintOperationPayload(operation),
+        enqueueReserveAllocation: false,
+      };
+    }
+
+    const failedResult = await client.query<MintOperationRow>(
+      `
+        UPDATE mint_operations
+        SET
+          state = 'PAYMENT_FAILED',
+          last_error = $2,
+          metadata = metadata || $3::jsonb,
+          updated_at = NOW()
+        WHERE id = $1
+        RETURNING
+          id,
+          user_id,
+          state,
+          fiat_amount_minor::text,
+          fiat_currency,
+          net_fiat_amount_minor::text,
+          platform_fee_minor::text,
+          ize_amount_mg::text,
+          rate_per_gram::text,
+          rate_source,
+          rate_locked_at::text,
+          rate_expires_at::text,
+          payment_intent_id,
+          lot_id,
+          custodian_ref,
+          escrow_ledger_tx_id,
+          wallet_credit_tx_id,
+          purchase_attempted_at::text,
+          settled_at::text,
+          last_error,
+          metadata,
+          created_at::text,
+          updated_at::text
+      `,
+      [operation.id, `payment_${input.paymentStatus}`, toJsonString(metadataPatch)]
+    );
+
+    return {
+      mintOperation: toMintOperationPayload(failedResult.rows[0]),
+      enqueueReserveAllocation: false,
+    };
+  }
+
+  return {
+    mintOperation: toMintOperationPayload(operation),
+    enqueueReserveAllocation: false,
+  };
+}
+
+async function processQueuedOnezeMintReserveAllocation(input: {
+  mintOperationId: string;
+  initiatedBy: string;
+  reason: 'webhook_confirmed' | 'manual_retry';
+}): Promise<void> {
+  if (!(await onezeMintFlowTablesAvailable(db))) {
+    app.log.warn(
+      {
+        mintOperationId: input.mintOperationId,
+      },
+      'Skipped queued 1ze mint reserve allocation because mint flow tables are unavailable'
+    );
+    return;
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    const operation = await loadMintOperationById(client, input.mintOperationId, {
+      forUpdate: true,
+    });
+
+    if (!operation) {
+      throw createApiError('MINT_OPERATION_NOT_FOUND', 'Mint operation not found', {
+        mintOperationId: input.mintOperationId,
+      });
+    }
+
+    if (MINT_OPERATION_TERMINAL_STATES.has(operation.state) && operation.state !== 'WALLET_CREDITED') {
+      await client.query('COMMIT');
+      return;
+    }
+
+    if (
+      operation.state !== 'PAYMENT_CONFIRMED'
+      && operation.state !== 'RESERVE_PURCHASING'
+      && operation.state !== 'RESERVE_ALLOCATED'
+      && operation.state !== 'WALLET_CREDITED'
+      && operation.state !== 'SETTLED'
+    ) {
+      throw createApiError('MINT_OPERATION_STATE_INVALID', 'Mint operation is not ready for reserve allocation', {
+        mintOperationId: input.mintOperationId,
+        state: operation.state,
+      });
+    }
+
+    let mutableOperation = operation;
+    const rateInr = await resolveGoldRate(client, 'INR', { forceRefresh: false });
+
+    if (mutableOperation.state === 'PAYMENT_CONFIRMED') {
+      const purchasingResult = await client.query<MintOperationRow>(
+        `
+          UPDATE mint_operations
+          SET
+            state = 'RESERVE_PURCHASING',
+            purchase_attempted_at = NOW(),
+            metadata = metadata || $2::jsonb,
+            updated_at = NOW()
+          WHERE id = $1
+          RETURNING
+            id,
+            user_id,
+            state,
+            fiat_amount_minor::text,
+            fiat_currency,
+            net_fiat_amount_minor::text,
+            platform_fee_minor::text,
+            ize_amount_mg::text,
+            rate_per_gram::text,
+            rate_source,
+            rate_locked_at::text,
+            rate_expires_at::text,
+            payment_intent_id,
+            lot_id,
+            custodian_ref,
+            escrow_ledger_tx_id,
+            wallet_credit_tx_id,
+            purchase_attempted_at::text,
+            settled_at::text,
+            last_error,
+            metadata,
+            created_at::text,
+            updated_at::text
+        `,
+        [
+          mutableOperation.id,
+          toJsonString({
+            reserveWorker: {
+              initiatedBy: input.initiatedBy,
+              reason: input.reason,
+              startedAt: new Date().toISOString(),
+            },
+          }),
+        ]
+      );
+
+      mutableOperation = purchasingResult.rows[0];
+    }
+
+    if (!mutableOperation.lot_id) {
+      const amountMg = Number(mutableOperation.ize_amount_mg);
+      const reserveMovementTxId = mutableOperation.escrow_ledger_tx_id ?? createRuntimeId('mintres');
+      const acquisitionCostInr = Math.max(0, Math.round(mgToOnezeAmount(amountMg) * rateInr.ratePerGram));
+      const metadataRecord = mutableOperation.metadata ?? {};
+      const rawCustodian = metadataRecord.custodian;
+      const rawCustodianRef = metadataRecord.custodianRef;
+      const custodian =
+        typeof rawCustodian === 'string' && rawCustodian.trim().length > 0
+          ? rawCustodian
+          : ONEZE_MINT_DEFAULT_CUSTODIAN;
+      const custodianRef =
+        typeof rawCustodianRef === 'string' && rawCustodianRef.trim().length > 0
+          ? rawCustodianRef
+          : (mutableOperation.payment_intent_id ?? mutableOperation.id);
+
+      const lotId = await addReserveLotForMint(client, {
+        linkedTxId: reserveMovementTxId,
+        weightMg: amountMg,
+        custodian,
+        custodianRef,
+        purity: 0.9999,
+        acquisitionCostInr,
+        metadata: {
+          mintOperationId: mutableOperation.id,
+          userId: mutableOperation.user_id,
+          source: 'mint_reserve_worker',
+        },
+      });
+
+      const allocatedResult = await client.query<MintOperationRow>(
+        `
+          UPDATE mint_operations
+          SET
+            state = 'RESERVE_ALLOCATED',
+            lot_id = $2,
+            custodian_ref = $3,
+            escrow_ledger_tx_id = $4,
+            metadata = metadata || $5::jsonb,
+            updated_at = NOW()
+          WHERE id = $1
+          RETURNING
+            id,
+            user_id,
+            state,
+            fiat_amount_minor::text,
+            fiat_currency,
+            net_fiat_amount_minor::text,
+            platform_fee_minor::text,
+            ize_amount_mg::text,
+            rate_per_gram::text,
+            rate_source,
+            rate_locked_at::text,
+            rate_expires_at::text,
+            payment_intent_id,
+            lot_id,
+            custodian_ref,
+            escrow_ledger_tx_id,
+            wallet_credit_tx_id,
+            purchase_attempted_at::text,
+            settled_at::text,
+            last_error,
+            metadata,
+            created_at::text,
+            updated_at::text
+        `,
+        [
+          mutableOperation.id,
+          lotId,
+          custodianRef,
+          reserveMovementTxId,
+          toJsonString({
+            reserveAllocatedAt: new Date().toISOString(),
+            reserveLotId: lotId,
+            reserveMovementTxId,
+          }),
+        ]
+      );
+
+      mutableOperation = allocatedResult.rows[0];
+    }
+
+    if (!mutableOperation.wallet_credit_tx_id) {
+      const wallet = await ensureWallet(client, mutableOperation.user_id, mutableOperation.fiat_currency);
+      const walletCreditTxId = createRuntimeId('mintcred');
+      const amountMg = Number(mutableOperation.ize_amount_mg);
+
+      await applyWalletLedgerDelta(client, {
+        walletId: wallet.id,
+        txId: walletCreditTxId,
+        asset: '1ZE',
+        amount: amountMg,
+        kind: 'MINT',
+        refType: 'mint_operation',
+        refId: mutableOperation.id,
+        goldRateInrPerG: rateInr.ratePerGram,
+        metadata: {
+          mintOperationId: mutableOperation.id,
+          paymentIntentId: mutableOperation.payment_intent_id,
+          lotId: mutableOperation.lot_id,
+          initiatedBy: input.initiatedBy,
+        },
+      });
+
+      const creditedResult = await client.query<MintOperationRow>(
+        `
+          UPDATE mint_operations
+          SET
+            state = 'WALLET_CREDITED',
+            wallet_credit_tx_id = $2,
+            metadata = metadata || $3::jsonb,
+            updated_at = NOW()
+          WHERE id = $1
+          RETURNING
+            id,
+            user_id,
+            state,
+            fiat_amount_minor::text,
+            fiat_currency,
+            net_fiat_amount_minor::text,
+            platform_fee_minor::text,
+            ize_amount_mg::text,
+            rate_per_gram::text,
+            rate_source,
+            rate_locked_at::text,
+            rate_expires_at::text,
+            payment_intent_id,
+            lot_id,
+            custodian_ref,
+            escrow_ledger_tx_id,
+            wallet_credit_tx_id,
+            purchase_attempted_at::text,
+            settled_at::text,
+            last_error,
+            metadata,
+            created_at::text,
+            updated_at::text
+        `,
+        [
+          mutableOperation.id,
+          walletCreditTxId,
+          toJsonString({
+            walletCreditedAt: new Date().toISOString(),
+            walletCreditTxId,
+          }),
+        ]
+      );
+
+      mutableOperation = creditedResult.rows[0];
+    }
+
+    if (mutableOperation.state !== 'SETTLED') {
+      await client.query(
+        `
+          UPDATE mint_operations
+          SET
+            state = 'SETTLED',
+            settled_at = NOW(),
+            metadata = metadata || $2::jsonb,
+            updated_at = NOW()
+          WHERE id = $1
+        `,
+        [
+          mutableOperation.id,
+          toJsonString({
+            settledAt: new Date().toISOString(),
+            settlementMode: 'escrow_sweep_pending_reconciliation',
+          }),
+        ]
+      );
+    }
+
+    await client.query('COMMIT');
+
+    app.log.info(
+      {
+        mintOperationId: input.mintOperationId,
+        initiatedBy: input.initiatedBy,
+        reason: input.reason,
+      },
+      'Processed queued 1ze mint reserve allocation'
+    );
+  } catch (error) {
+    await client.query('ROLLBACK');
+    app.log.error(
+      {
+        err: error,
+        mintOperationId: input.mintOperationId,
+        reason: input.reason,
+      },
+      'Failed queued 1ze mint reserve allocation'
+    );
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 async function processQueuedOnezeWithdrawalExecution(input: {
   withdrawalId: string;
   initiatedBy: string;
@@ -4673,6 +5491,33 @@ async function runOnezeReconciliation(reason: 'startup' | 'interval' | 'manual')
   });
 
   if (!snapshot.withinInvariant) {
+    await setOnezeMintBurnHaltState({
+      halted: true,
+      reason: 'reconciliation_invariant_failed',
+      reconciliationId: snapshot.id,
+    });
+
+    if (await onezeMintFlowTablesAvailable(db)) {
+      await db.query(
+        `
+          UPDATE mint_operations
+          SET
+            state = 'RECONCILIATION_HOLD',
+            last_error = 'reconciliation_invariant_failed',
+            metadata = metadata || $1::jsonb,
+            updated_at = NOW()
+          WHERE state IN ('PAYMENT_PENDING', 'PAYMENT_CONFIRMED', 'RESERVE_PURCHASING', 'RESERVE_ALLOCATED')
+        `,
+        [
+          toJsonString({
+            reconciliationHoldAt: new Date().toISOString(),
+            reconciliationId: snapshot.id,
+            reason,
+          }),
+        ]
+      );
+    }
+
     app.log.error(
       {
         reconciliationId: snapshot.id,
@@ -4681,6 +5526,12 @@ async function runOnezeReconciliation(reason: 'startup' | 'interval' | 'manual')
       },
       '1ze reconciliation invariant failed: circulating supply exceeds active reserve'
     );
+  } else {
+    await setOnezeMintBurnHaltState({
+      halted: false,
+      reason: 'reconciliation_invariant_restored',
+      reconciliationId: snapshot.id,
+    });
   }
 
   return snapshot;
@@ -10517,6 +11368,22 @@ app.post('/oracle/gold/override', async (request, reply) => {
     };
   }
 
+  try {
+    await assertOnezeMintBurnNotHalted();
+  } catch (error) {
+    const apiError = getApiError(error);
+    if (apiError) {
+      reply.code(statusCodeForApiError(apiError.code));
+      return {
+        ok: false,
+        error: apiError.message,
+        details: apiError.details,
+      };
+    }
+
+    throw error;
+  }
+
   const client = await db.connect();
   try {
     await client.query('BEGIN');
@@ -10552,6 +11419,525 @@ app.post('/oracle/gold/override', async (request, reply) => {
   }
 });
 
+app.post('/wallet/1ze/mint/quote', async (request, reply) => {
+  const bodySchema = z.object({
+    userId: z.string().min(2).optional(),
+    fiatAmount: z.number().positive(),
+    fiatCurrency: z.string().length(3).default('INR'),
+    gatewayId: z.string().min(2).max(80).optional(),
+    instrumentId: z.coerce.number().int().positive().optional(),
+    returnUrl: z.string().url().optional(),
+    webhookUrl: z.string().url().optional(),
+    forceRefresh: z.coerce.boolean().default(false),
+    idempotencyKey: z.string().min(8).max(140).optional(),
+    metadata: z.record(z.unknown()).optional(),
+  });
+
+  const payload = bodySchema.parse(request.body ?? {});
+  const actorUserId = resolveAuthenticatedUserId(request, payload.userId);
+
+  if (!(await onezeMintFlowTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze mint flow tables are unavailable. Run migrations first.',
+    };
+  }
+
+  if (!(await paymentTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: 'Payment settlement tables are unavailable. Run migrations first.',
+    };
+  }
+
+  try {
+    await assertOnezeMintBurnNotHalted();
+  } catch (error) {
+    const apiError = getApiError(error);
+    if (apiError) {
+      reply.code(statusCodeForApiError(apiError.code));
+      return {
+        ok: false,
+        error: apiError.message,
+        details: apiError.details,
+      };
+    }
+
+    throw error;
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    await ensureUserExists(actorUserId);
+
+    const fiatCurrency = payload.fiatCurrency.toUpperCase();
+    const feeBreakdown = calculateWalletTopupFeeBreakdown(payload.fiatAmount);
+    if (feeBreakdown.netFiatAmount <= 0) {
+      throw createApiError('IZE_MINT_INVALID', 'Top-up amount is too low after platform fee');
+    }
+
+    const idempotencyRequestHash = payload.idempotencyKey
+      ? hashWalletIdempotencyPayload({
+          userId: actorUserId,
+          fiatAmount: Number(payload.fiatAmount.toFixed(6)),
+          fiatCurrency,
+          gatewayId: payload.gatewayId ?? null,
+          instrumentId: payload.instrumentId ?? null,
+          metadata: payload.metadata ?? {},
+        })
+      : null;
+
+    if (payload.idempotencyKey && idempotencyRequestHash) {
+      const idempotentResponse = await getWalletIdempotentResponse(client, {
+        userId: actorUserId,
+        operation: 'mint_quote',
+        idempotencyKey: payload.idempotencyKey,
+        requestHash: idempotencyRequestHash,
+      });
+
+      if (idempotentResponse) {
+        await client.query('COMMIT');
+        return idempotentResponse;
+      }
+    }
+
+    const goldRate = await resolveGoldRate(client, fiatCurrency, {
+      forceRefresh: payload.forceRefresh,
+    });
+
+    const amountMg = onezeAmountToMg(
+      Number((feeBreakdown.netFiatAmount / goldRate.ratePerGram).toFixed(6))
+    );
+
+    const gatewayId = payload.gatewayId ?? resolveDefaultGatewayForChannel('wallet_topup');
+    const gateway = await client.query<{ id: string }>(
+      'SELECT id FROM payment_gateways WHERE id = $1 AND is_active = TRUE LIMIT 1',
+      [gatewayId]
+    );
+
+    if (!gateway.rowCount) {
+      throw createApiError('PAYMENT_GATEWAY_INVALID', 'Gateway is not available for wallet top-up minting', {
+        gatewayId,
+      });
+    }
+
+    if (payload.instrumentId) {
+      const instrument = await client.query<{ id: number }>(
+        `
+          SELECT id
+          FROM payment_instruments
+          WHERE id = $1 AND user_id = $2
+          LIMIT 1
+        `,
+        [payload.instrumentId, actorUserId]
+      );
+
+      if (!instrument.rowCount) {
+        throw createApiError('PAYMENT_INSTRUMENT_INVALID', 'Instrument does not belong to this user');
+      }
+    }
+
+    const mintOperationId = createRuntimeId('mintop');
+    const rateLockedAt = new Date();
+    const rateExpiresAt = new Date(rateLockedAt.getTime() + config.onezeMintQuoteTtlSeconds * 1_000);
+
+    await client.query(
+      `
+        INSERT INTO mint_operations (
+          id,
+          user_id,
+          state,
+          fiat_amount_minor,
+          fiat_currency,
+          net_fiat_amount_minor,
+          platform_fee_minor,
+          ize_amount_mg,
+          rate_per_gram,
+          rate_source,
+          rate_locked_at,
+          rate_expires_at,
+          payment_intent_id,
+          metadata
+        )
+        VALUES (
+          $1,
+          $2,
+          'INITIATED',
+          $3,
+          $4,
+          $5,
+          $6,
+          $7,
+          $8,
+          $9,
+          $10,
+          $11,
+          NULL,
+          $12::jsonb
+        )
+      `,
+      [
+        mintOperationId,
+        actorUserId,
+        toFiatMinor(feeBreakdown.grossFiatAmount, fiatCurrency),
+        fiatCurrency,
+        toFiatMinor(feeBreakdown.netFiatAmount, fiatCurrency),
+        toFiatMinor(feeBreakdown.platformFeeAmount, fiatCurrency),
+        amountMg,
+        goldRate.ratePerGram,
+        goldRate.source,
+        rateLockedAt.toISOString(),
+        rateExpiresAt.toISOString(),
+        toJsonString({
+          quoteRequestedAt: rateLockedAt.toISOString(),
+          quoteValidForSeconds: config.onezeMintQuoteTtlSeconds,
+          feeBreakdown,
+          ...(payload.metadata ?? {}),
+        }),
+      ]
+    );
+
+    const paymentIntentId = createRuntimeId('pi');
+    const gatewayIntent = await createGatewayPaymentIntent({
+      gatewayId,
+      intentId: paymentIntentId,
+      channel: 'wallet_topup',
+      amountGbp: roundTo(feeBreakdown.grossFiatAmount, 2),
+      amountCurrency: fiatCurrency,
+      returnUrl: payload.returnUrl,
+      webhookUrl: payload.webhookUrl,
+      metadata: {
+        userId: actorUserId,
+        mintOperationId,
+        ...(payload.metadata ?? {}),
+      },
+    });
+
+    const paymentIntentResult = await client.query<PaymentIntentRow>(
+      `
+        INSERT INTO payment_intents (
+          id,
+          user_id,
+          gateway_id,
+          channel,
+          order_id,
+          syndicate_order_id,
+          instrument_id,
+          amount_gbp,
+          amount_currency,
+          status,
+          provider_intent_ref,
+          client_secret,
+          provider_status,
+          next_action_url,
+          sca_expires_at,
+          idempotency_key,
+          metadata
+        )
+        VALUES ($1, $2, $3, 'wallet_topup', NULL, NULL, $4, $5, $6, $7, $8, $9, $10, $11, $12, NULL, $13::jsonb)
+        RETURNING
+          id,
+          user_id,
+          gateway_id,
+          channel,
+          order_id,
+          syndicate_order_id,
+          instrument_id,
+          amount_gbp,
+          amount_currency,
+          status,
+          provider_intent_ref,
+          client_secret,
+          provider_status,
+          next_action_url,
+          sca_expires_at,
+          settled_at,
+          failure_code,
+          failure_message,
+          created_at,
+          updated_at
+      `,
+      [
+        paymentIntentId,
+        actorUserId,
+        gatewayId,
+        payload.instrumentId ?? null,
+        roundTo(feeBreakdown.grossFiatAmount, 2),
+        fiatCurrency,
+        gatewayIntent.initialStatus,
+        gatewayIntent.providerIntentRef,
+        gatewayIntent.clientSecret,
+        gatewayIntent.providerStatus ?? null,
+        gatewayIntent.nextActionUrl ?? null,
+        gatewayIntent.scaExpiresAt ?? null,
+        toJsonString({
+          mintOperationId,
+          quoteRateSource: goldRate.source,
+          ...(payload.metadata ?? {}),
+        }),
+      ]
+    );
+
+    const operationResult = await client.query<MintOperationRow>(
+      `
+        UPDATE mint_operations
+        SET
+          state = 'PAYMENT_PENDING',
+          payment_intent_id = $2,
+          metadata = metadata || $3::jsonb,
+          updated_at = NOW()
+        WHERE id = $1
+        RETURNING
+          id,
+          user_id,
+          state,
+          fiat_amount_minor::text,
+          fiat_currency,
+          net_fiat_amount_minor::text,
+          platform_fee_minor::text,
+          ize_amount_mg::text,
+          rate_per_gram::text,
+          rate_source,
+          rate_locked_at::text,
+          rate_expires_at::text,
+          payment_intent_id,
+          lot_id,
+          custodian_ref,
+          escrow_ledger_tx_id,
+          wallet_credit_tx_id,
+          purchase_attempted_at::text,
+          settled_at::text,
+          last_error,
+          metadata,
+          created_at::text,
+          updated_at::text
+      `,
+      [
+        mintOperationId,
+        paymentIntentId,
+        toJsonString({
+          paymentIntentCreatedAt: new Date().toISOString(),
+          paymentIntentId,
+          gatewayId,
+        }),
+      ]
+    );
+
+    const operation = toMintOperationPayload(operationResult.rows[0]);
+    const intent = toPaymentIntentPayload(paymentIntentResult.rows[0]);
+    const responsePayload: Record<string, unknown> = {
+      ok: true,
+      operation,
+      intent,
+      quote: {
+        validForSeconds: config.onezeMintQuoteTtlSeconds,
+        expiresAt: operation.rateExpiresAt,
+      },
+    };
+
+    if (payload.idempotencyKey && idempotencyRequestHash) {
+      await saveWalletIdempotentResponse(client, {
+        userId: actorUserId,
+        operation: 'mint_quote',
+        idempotencyKey: payload.idempotencyKey,
+        requestHash: idempotencyRequestHash,
+        responsePayload,
+      });
+    }
+
+    await client.query('COMMIT');
+    reply.code(201);
+    return responsePayload;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    const apiError = getApiError(error);
+    if (apiError) {
+      reply.code(statusCodeForApiError(apiError.code));
+      return {
+        ok: false,
+        error: apiError.message,
+        details: apiError.details,
+      };
+    }
+
+    request.log.error({ err: error, userId: actorUserId }, 'Failed to create 1ze mint quote operation');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to create 1ze mint quote operation',
+    };
+  } finally {
+    client.release();
+  }
+});
+
+app.get('/wallet/1ze/mint/:operationId', async (request, reply) => {
+  const paramsSchema = z.object({
+    operationId: z.string().min(3),
+  });
+
+  const { operationId } = paramsSchema.parse(request.params);
+
+  if (!(await onezeMintFlowTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze mint flow tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const operationResult = await db.query<MintOperationRow>(
+    `
+      SELECT
+        id,
+        user_id,
+        state,
+        fiat_amount_minor::text,
+        fiat_currency,
+        net_fiat_amount_minor::text,
+        platform_fee_minor::text,
+        ize_amount_mg::text,
+        rate_per_gram::text,
+        rate_source,
+        rate_locked_at::text,
+        rate_expires_at::text,
+        payment_intent_id,
+        lot_id,
+        custodian_ref,
+        escrow_ledger_tx_id,
+        wallet_credit_tx_id,
+        purchase_attempted_at::text,
+        settled_at::text,
+        last_error,
+        metadata,
+        created_at::text,
+        updated_at::text
+      FROM mint_operations
+      WHERE id = $1
+      LIMIT 1
+    `,
+    [operationId]
+  );
+
+  const row = operationResult.rows[0];
+  if (!row) {
+    reply.code(404);
+    return {
+      ok: false,
+      error: 'Mint operation not found',
+    };
+  }
+
+  if (!request.authUser || (request.authUser.role !== 'admin' && request.authUser.userId !== row.user_id)) {
+    reply.code(403);
+    return {
+      ok: false,
+      error: 'Forbidden: mint operation access denied',
+    };
+  }
+
+  let intent: ReturnType<typeof toPaymentIntentPayload> | null = null;
+  if (row.payment_intent_id) {
+    const intentResult = await db.query<PaymentIntentRow>(
+      `
+        SELECT
+          id,
+          user_id,
+          gateway_id,
+          channel,
+          order_id,
+          syndicate_order_id,
+          instrument_id,
+          amount_gbp,
+          amount_currency,
+          status,
+          provider_intent_ref,
+          client_secret,
+          provider_status,
+          next_action_url,
+          sca_expires_at,
+          settled_at,
+          failure_code,
+          failure_message,
+          created_at,
+          updated_at
+        FROM payment_intents
+        WHERE id = $1
+        LIMIT 1
+      `,
+      [row.payment_intent_id]
+    );
+
+    if (intentResult.rowCount) {
+      intent = toPaymentIntentPayload(intentResult.rows[0]);
+    }
+  }
+
+  const operation = toMintOperationPayload(row);
+  const expiresAtMs = Date.parse(operation.rateExpiresAt);
+  const remainingSeconds = Number.isFinite(expiresAtMs)
+    ? Math.max(0, Math.ceil((expiresAtMs - Date.now()) / 1_000))
+    : null;
+
+  return {
+    ok: true,
+    operation,
+    intent,
+    quote: {
+      expiresInSeconds: remainingSeconds,
+      expired: remainingSeconds !== null ? remainingSeconds <= 0 : null,
+    },
+  };
+});
+
+app.post('/ops/oneze/mint/:operationId/retry', async (request, reply) => {
+  const securityAdminError = ensureSecurityAdminAccess(request, reply);
+  if (securityAdminError) {
+    return securityAdminError;
+  }
+
+  const paramsSchema = z.object({
+    operationId: z.string().min(3),
+  });
+
+  const { operationId } = paramsSchema.parse(request.params);
+
+  if (!(await onezeMintFlowTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze mint flow tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const operation = await loadMintOperationById(db, operationId, {
+    forUpdate: false,
+  });
+
+  if (!operation) {
+    reply.code(404);
+    return {
+      ok: false,
+      error: 'Mint operation not found',
+    };
+  }
+
+  await enqueueOnezeMintReserveJob({
+    mintOperationId: operation.id,
+    initiatedBy: request.authUser?.userId ?? 'security_admin',
+    reason: 'manual_retry',
+  });
+
+  return {
+    ok: true,
+    enqueued: true,
+    operation: toMintOperationPayload(operation),
+  };
+});
+
 app.post('/wallet/1ze/mint', async (request, reply) => {
   const bodySchema = z.object({
     userId: z.string().min(2).optional(),
@@ -10572,6 +11958,22 @@ app.post('/wallet/1ze/mint', async (request, reply) => {
       ok: false,
       error: '1ze money-layer tables are unavailable. Run migrations first.',
     };
+  }
+
+  try {
+    await assertOnezeMintBurnNotHalted();
+  } catch (error) {
+    const apiError = getApiError(error);
+    if (apiError) {
+      reply.code(statusCodeForApiError(apiError.code));
+      return {
+        ok: false,
+        error: apiError.message,
+        details: apiError.details,
+      };
+    }
+
+    throw error;
   }
 
   const client = await db.connect();
@@ -11413,6 +12815,22 @@ app.post('/wallet/1ze/withdrawals/quote', async (request, reply) => {
     };
   }
 
+  try {
+    await assertOnezeMintBurnNotHalted();
+  } catch (error) {
+    const apiError = getApiError(error);
+    if (apiError) {
+      reply.code(statusCodeForApiError(apiError.code));
+      return {
+        ok: false,
+        error: apiError.message,
+        details: apiError.details,
+      };
+    }
+
+    throw error;
+  }
+
   const client = await db.connect();
   try {
     await client.query('BEGIN');
@@ -11653,6 +13071,22 @@ app.post('/wallet/1ze/withdrawals/:withdrawalId/accept', async (request, reply) 
       ok: false,
       error: '1ze wallet architecture tables are unavailable. Run migrations first.',
     };
+  }
+
+  try {
+    await assertOnezeMintBurnNotHalted();
+  } catch (error) {
+    const apiError = getApiError(error);
+    if (apiError) {
+      reply.code(statusCodeForApiError(apiError.code));
+      return {
+        ok: false,
+        error: apiError.message,
+        details: apiError.details,
+      };
+    }
+
+    throw error;
   }
 
   const client = await db.connect();
@@ -15047,6 +16481,8 @@ app.post('/webhooks/:provider', async (request, reply) => {
 
     let settledIntent: ReturnType<typeof toPaymentIntentPayload> | undefined;
     let settledPayout: ReturnType<typeof toPayoutRequestPayload> | undefined;
+    let mintOperation: ReturnType<typeof toMintOperationPayload> | undefined;
+    let mintReserveEnqueueOperationId: string | null = null;
 
     if (event.paymentStatus && intentRow) {
       if (['succeeded', 'failed', 'cancelled'].includes(event.paymentStatus)) {
@@ -15077,6 +16513,24 @@ app.post('/webhooks/:provider', async (request, reply) => {
           },
         });
         settledIntent = transitioned.intent;
+      }
+
+      if (intentRow.channel === 'wallet_topup') {
+        const mintTransition = await processMintOperationPaymentWebhook(client, {
+          paymentIntentId: intentRow.id,
+          paymentStatus: event.paymentStatus,
+          provider,
+          eventType: event.eventType,
+          providerEventId: event.providerEventId,
+        });
+
+        if (mintTransition.mintOperation) {
+          mintOperation = mintTransition.mintOperation;
+        }
+
+        if (mintTransition.enqueueReserveAllocation && mintTransition.mintOperation?.id) {
+          mintReserveEnqueueOperationId = mintTransition.mintOperation.id;
+        }
       }
     }
 
@@ -15140,11 +16594,31 @@ app.post('/webhooks/:provider', async (request, reply) => {
     ]);
 
     await client.query('COMMIT');
+
+    if (mintReserveEnqueueOperationId) {
+      try {
+        await enqueueOnezeMintReserveJob({
+          mintOperationId: mintReserveEnqueueOperationId,
+          initiatedBy: 'provider_webhook',
+          reason: 'webhook_confirmed',
+        });
+      } catch (queueError) {
+        request.log.error(
+          {
+            err: queueError,
+            mintOperationId: mintReserveEnqueueOperationId,
+          },
+          'Failed to enqueue mint reserve allocation after payment webhook confirmation'
+        );
+      }
+    }
+
     return {
       ok: true,
       duplicate: false,
       unresolved: !intentRow && !event.payoutRequestId,
       intent: settledIntent,
+      mintOperation,
       payoutRequest: settledPayout,
       refundRecorded: Boolean(event.refund),
       disputeRecorded: Boolean(event.dispute),
@@ -15754,9 +17228,22 @@ app.get('/users/:userId/market-history', async (request, reply) => {
 app.get('/auctions', async (request) => {
   const querySchema = z.object({
     status: z.enum(['upcoming', 'live', 'ended']).optional(),
+    sellerId: z.string().min(2).max(128).optional(),
     limit: z.coerce.number().int().min(1).max(200).default(60),
   });
-  const { status, limit } = querySchema.parse(request.query);
+  const { status, sellerId, limit } = querySchema.parse(request.query);
+
+  const whereConditions: string[] = [];
+  const whereParams: Array<string | number> = [];
+
+  if (sellerId) {
+    whereParams.push(sellerId);
+    whereConditions.push(`a.seller_id = $${whereParams.length}`);
+  }
+
+  whereParams.push(limit);
+  const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+  const limitPlaceholder = `$${whereParams.length}`;
 
   const result = await db.query<{
     id: string;
@@ -15788,10 +17275,11 @@ app.get('/auctions', async (request) => {
         l.image_url
       FROM auctions a
       INNER JOIN listings l ON l.id = a.listing_id
+      ${whereClause}
       ORDER BY a.starts_at DESC
-      LIMIT $1
+      LIMIT ${limitPlaceholder}
     `,
-    [limit]
+    whereParams
   );
 
   const now = Date.now();
@@ -16253,13 +17741,29 @@ app.post('/auctions/:auctionId/bids', async (request, reply) => {
 app.get('/syndicate/assets', async (request) => {
   const querySchema = z.object({
     openOnly: z.union([z.string(), z.boolean()]).optional(),
+    issuerId: z.string().min(2).max(128).optional(),
     limit: z.coerce.number().int().min(1).max(200).default(80),
   });
   const parsedQuery = querySchema.parse(request.query);
   const openOnly = parseQueryBoolean(parsedQuery.openOnly, false);
-  const { limit } = parsedQuery;
+  const { limit, issuerId } = parsedQuery;
 
-  const whereClause = openOnly ? 'WHERE sa.is_open = TRUE' : '';
+  const whereConditions: string[] = [];
+  const whereParams: Array<string | number> = [];
+
+  if (openOnly) {
+    whereConditions.push('sa.is_open = TRUE');
+  }
+
+  if (issuerId) {
+    whereParams.push(issuerId);
+    whereConditions.push(`sa.issuer_id = $${whereParams.length}`);
+  }
+
+  whereParams.push(limit);
+  const whereClause = whereConditions.length > 0 ? `WHERE ${whereConditions.join(' AND ')}` : '';
+  const limitPlaceholder = `$${whereParams.length}`;
+
   const result = await db.query<{
     id: string;
     listing_id: string;
@@ -16301,9 +17805,9 @@ app.get('/syndicate/assets', async (request) => {
       FROM syndicate_assets sa
       ${whereClause}
       ORDER BY sa.volume_24h_gbp DESC, sa.created_at DESC
-      LIMIT $1
+      LIMIT ${limitPlaceholder}
     `,
-    [limit]
+    whereParams
   );
 
   return {
@@ -18175,6 +19679,13 @@ const start = async () => {
       handlePushJob: processPushQueueJob,
       handleAuctionSweepJob: async ({ reason }) => {
         await sweepExpiredAuctions(reason);
+      },
+      handleOnezeMintReserveJob: async ({ mintOperationId, initiatedBy, reason }) => {
+        await processQueuedOnezeMintReserveAllocation({
+          mintOperationId,
+          initiatedBy,
+          reason,
+        });
       },
       handleOnezeWithdrawalExecuteJob: async ({ withdrawalId, initiatedBy, reason }) => {
         await processQueuedOnezeWithdrawalExecution({

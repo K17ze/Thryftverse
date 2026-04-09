@@ -76,6 +76,7 @@ $env:EXPO_PUBLIC_API_BASE_URL="http://192.168.1.10:4000"; npx expo start
 - `POST /ops/auctions/sweep` (admin maintenance trigger for auction settlement job)
 - `POST /ops/oneze/reconcile` (admin maintenance trigger for 1ze reserve invariant snapshot)
 - `POST /ops/oneze/attest` (admin maintenance trigger for signed daily 1ze attestation artifact export)
+- `POST /ops/oneze/mint/:operationId/retry` (admin maintenance trigger for mint reserve-worker retry)
 
 Payments and treasury:
 
@@ -106,6 +107,8 @@ Payout operations:
 - `POST /oracle/gold/override` (gold operator token required)
 - `GET /wallet/1ze/quote`
 - `GET /wallet/1ze/fx-quote`
+- `POST /wallet/1ze/mint/quote`
+- `GET /wallet/1ze/mint/:operationId`
 - `POST /wallet/1ze/mint`
 - `POST /wallet/1ze/burn`
 - `POST /wallet/1ze/transfer`
@@ -177,6 +180,10 @@ Market history pagination:
 
 Money-layer request notes:
 
+- `POST /wallet/1ze/mint/quote` creates a stateful mint operation (`INITIATED` -> `PAYMENT_PENDING`) with a locked gold quote (`ONEZE_MINT_QUOTE_TTL_SECONDS`) and a wallet-topup payment intent.
+- `POST /webhooks/:provider` now advances mint operations to `PAYMENT_CONFIRMED` on settled wallet-topup payment events and enqueues reserve allocation.
+- Mint reserve worker flow is queue-driven and follows `PAYMENT_CONFIRMED` -> `RESERVE_PURCHASING` -> `RESERVE_ALLOCATED` -> `WALLET_CREDITED` -> `SETTLED`.
+- `GET /wallet/1ze/mint/:operationId` returns the full mint operation state for frontend polling/progress UX.
 - `POST /wallet/1ze/mint` accepts `fiatAmount` + `fiatCurrency` and optional `paymentIntentId`.
 - `POST /wallet/1ze/burn` accepts `izeAmount` + `fiatCurrency` and optional `payoutRequestId`.
 - `POST /wallet/1ze/transfer` accepts `recipientUserId` + `izeAmount`, with optional `senderUserId` (admin context), `fiatCurrency`, `note`, and metadata.
@@ -187,6 +194,7 @@ Money-layer request notes:
 - `GET /wallet/1ze/:userId/balance` and `GET /wallet/1ze/:userId/ledger` read from the new `wallets` and append-only `wallet_ledger` architecture tables.
 - `GET /wallet/1ze/:userId/transfers` supports `direction=all|inbound|outbound` and `limit`.
 - `POST /wallet/1ze/mint` and `POST /wallet/1ze/burn` support optional `idempotencyKey` for safe retries.
+- Reconciliation safety guard: if reserve invariant fails, mint/burn/withdraw-accept entry points return a halt error until reconciliation is healthy again.
 - In production, `paymentIntentId` is required for mint and `payoutRequestId` is required for burn.
 - `POST /users/:userId/payout-requests` accepts exactly one of:
 	- `amountGbp` (explicit internal settlement amount), or

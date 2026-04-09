@@ -7,7 +7,6 @@ import { View,
   ScrollView,
   StatusBar,
   Dimensions,
-  Image
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ActiveTheme, Colors } from '../constants/colors';
@@ -16,6 +15,8 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { MOCK_CATEGORIES } from '../data/mockData';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useBackendData } from '../context/BackendDataContext';
+import { CachedImage } from '../components/CachedImage';
+import { getListingCoverUri } from '../utils/media';
 
 const { width } = Dimensions.get('window');
 const GRID_SPACING = 2;
@@ -66,7 +67,7 @@ export default function CategoryDetailScreen() {
               activeOpacity={0.9}
               onPress={() => navigation.navigate('ItemDetail', { itemId: item.id })}
             >
-              <Image source={{ uri: item.images[0] }} style={styles.gridImage} resizeMode="cover" />
+              <CachedImage uri={getListingCoverUri(item.images, 'https://picsum.photos/seed/category-grid-fallback/400/500')} style={styles.gridImage} contentFit="cover" />
               <View style={styles.pricePill}>
                 <Text style={styles.priceText}>{formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}</Text>
               </View>

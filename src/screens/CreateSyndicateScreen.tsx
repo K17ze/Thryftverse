@@ -7,7 +7,6 @@ import {
   StyleSheet,
   StatusBar,
   TextInput,
-  Image,
   FlatList,
   ScrollView
 } from 'react-native';
@@ -27,6 +26,8 @@ import { toFiat, toIze } from '../utils/currency';
 import { sanitizeDecimalInput, sanitizeIntegerInput } from '../utils/currencyAuthoringFlows';
 import { getCreateSyndicateInitialState } from '../utils/syndicatePrefill';
 import { useBackendData } from '../context/BackendDataContext';
+import { CachedImage } from '../components/CachedImage';
+import { getListingCoverUri } from '../utils/media';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 type RouteT = RouteProp<RootStackParamList, 'CreateSyndicate'>;
@@ -160,7 +161,7 @@ export default function CreateSyndicateScreen() {
       listingId: selectedListing.id,
       issuerId,
       title: `${selectedListing.title} Split`,
-      image: selectedListing.images[0] ?? 'https://picsum.photos/seed/new-syndicate/500/700',
+      image: getListingCoverUri(selectedListing.images, 'https://picsum.photos/seed/new-syndicate/500/700'),
       totalUnits,
       availableUnits: totalUnits,
       unitPriceGBP,
@@ -201,7 +202,7 @@ export default function CreateSyndicateScreen() {
         onPress={() => setSelectedListingId(item.id)}
         activeOpacity={0.9}
       >
-        <Image source={{ uri: item.images[0] }} style={styles.listingImage} />
+        <CachedImage uri={getListingCoverUri(item.images, 'https://picsum.photos/seed/listing-syndicate-fallback/300/400')} style={styles.listingImage} contentFit="cover" />
         <View style={styles.listingMeta}>
           <Text style={styles.listingTitle} numberOfLines={1}>{item.title}</Text>
           <Text style={styles.listingPrice}>{formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}</Text>
@@ -215,7 +216,9 @@ export default function CreateSyndicateScreen() {
     );
   };
 
-  const previewImage = selectedListing?.images[0] ?? 'https://picsum.photos/seed/syndicate-preview/500/700';
+  const previewImage = selectedListing
+    ? getListingCoverUri(selectedListing.images, 'https://picsum.photos/seed/syndicate-preview/500/700')
+    : 'https://picsum.photos/seed/syndicate-preview/500/700';
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -238,7 +241,7 @@ export default function CreateSyndicateScreen() {
 
       <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
         <View style={styles.previewCard}>
-          <Image source={{ uri: previewImage }} style={styles.previewImage} />
+          <CachedImage uri={previewImage} style={styles.previewImage} contentFit="cover" />
           <View style={styles.previewOverlay}>
             <Text style={styles.previewTitle} numberOfLines={1}>{selectedListing?.title ?? 'Select listing'}</Text>
             <Text style={styles.previewMeta}>

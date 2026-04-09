@@ -38,6 +38,22 @@ type LedgerEntry = {
 };
 
 const PAGE_SIZE = 80;
+const IS_LIGHT = ActiveTheme === 'light';
+const TRADE_ACCENT = Colors.accentGold;
+const HEADER_BUTTON_BG = Colors.card;
+const HEADER_BUTTON_BORDER = Colors.border;
+const METRICS_CARD_BG = IS_LIGHT ? '#f0ede7' : '#0f151b';
+const METRICS_CARD_BORDER = IS_LIGHT ? '#d7d1c8' : '#22303a';
+const CHIP_BG = Colors.card;
+const CHIP_BORDER = Colors.border;
+const CHIP_ACTIVE_BG = IS_LIGHT ? '#ede4d3' : '#15201f';
+const ROW_BG = Colors.card;
+const ROW_BORDER = Colors.border;
+const ROW_ICON_BG = Colors.cardAlt;
+const EMPTY_ICON_BG = Colors.card;
+const POSITIVE_COLOR = IS_LIGHT ? '#7c5f1e' : '#d7b98f';
+const NEGATIVE_COLOR = IS_LIGHT ? '#b64242' : '#ff9797';
+const REFRESH_BG = Colors.surface;
 
 function getEntryCashflow(entry: {
   action: 'bid' | 'win' | 'buy-units' | 'sell-units';
@@ -335,9 +351,9 @@ export default function MarketLedgerScreen() {
             onRefresh={() => {
               void refreshRemoteLedger();
             }}
-            tintColor="#d7b98f"
-            colors={['#d7b98f']}
-            progressBackgroundColor="#161616"
+            tintColor={TRADE_ACCENT}
+            colors={[TRADE_ACCENT]}
+            progressBackgroundColor={REFRESH_BG}
           />
         }
         contentContainerStyle={styles.listContent}
@@ -380,10 +396,10 @@ const styles = StyleSheet.create({
     borderRadius: 19,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#111111',
+    backgroundColor: HEADER_BUTTON_BG,
   },
   headerLabel: {
-    color: '#d7b98f',
+    color: TRADE_ACCENT,
     fontSize: 10,
     fontFamily: 'Inter_700Bold',
     letterSpacing: 1,
@@ -402,7 +418,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: '#2c2c2c',
+    borderColor: HEADER_BUTTON_BORDER,
   },
   headerRightText: {
     color: Colors.textSecondary,
@@ -414,13 +430,13 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#22303a',
-    backgroundColor: '#0f151b',
+    borderColor: METRICS_CARD_BORDER,
+    backgroundColor: METRICS_CARD_BG,
     paddingHorizontal: 12,
     paddingVertical: 10,
   },
   metricsTitle: {
-    color: '#d7b98f',
+    color: TRADE_ACCENT,
     fontSize: 11,
     fontFamily: 'Inter_700Bold',
     letterSpacing: 0.6,
@@ -465,14 +481,14 @@ const styles = StyleSheet.create({
   filterChip: {
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#2f2f2f',
-    backgroundColor: '#111111',
+    borderColor: CHIP_BORDER,
+    backgroundColor: CHIP_BG,
     paddingHorizontal: 12,
     paddingVertical: 7,
   },
   filterChipActive: {
-    borderColor: '#d7b98f',
-    backgroundColor: '#15201f',
+    borderColor: TRADE_ACCENT,
+    backgroundColor: CHIP_ACTIVE_BG,
   },
   filterChipText: {
     color: Colors.textSecondary,
@@ -480,7 +496,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_700Bold',
   },
   filterChipTextActive: {
-    color: '#d7b98f',
+    color: TRADE_ACCENT,
   },
   listContent: {
     paddingHorizontal: 16,
@@ -492,8 +508,8 @@ const styles = StyleSheet.create({
   rowCard: {
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#242424',
-    backgroundColor: '#111111',
+    borderColor: ROW_BORDER,
+    backgroundColor: ROW_BG,
     paddingHorizontal: 10,
     paddingVertical: 10,
     flexDirection: 'row',
@@ -504,7 +520,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: '#1a1a1a',
+    backgroundColor: ROW_ICON_BG,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -537,10 +553,10 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_700Bold',
   },
   rowAmountNegative: {
-    color: '#ff9797',
+    color: NEGATIVE_COLOR,
   },
   rowAmountPositive: {
-    color: '#d7b98f',
+    color: POSITIVE_COLOR,
   },
   rowUnits: {
     marginTop: 2,
@@ -566,7 +582,7 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: '#111111',
+    backgroundColor: EMPTY_ICON_BG,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 14,

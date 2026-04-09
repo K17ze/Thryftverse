@@ -117,10 +117,12 @@ export default function UserProfileScreen({ navigation, route }: Props) {
     ? currentUser?.username ?? MY_USER.username
     : profileUser.username;
   const displayHandle = `@${displayUsername}`;
-  const displayAvatar = mediaOverride?.avatar
-    || (isSelfProfile ? userAvatar || MY_USER.avatar : profileUser.avatar);
-  const displayCover = mediaOverride?.cover
-    || (isSelfProfile ? userCover || MY_USER.coverPhoto || COVER_IMAGE : profileUser.coverPhoto || COVER_IMAGE);
+  const displayAvatar = isSelfProfile
+    ? userAvatar || mediaOverride?.avatar || MY_USER.avatar
+    : mediaOverride?.avatar || profileUser.avatar;
+  const displayCover = isSelfProfile
+    ? userCover || mediaOverride?.cover || MY_USER.coverPhoto || COVER_IMAGE
+    : mediaOverride?.cover || profileUser.coverPhoto || COVER_IMAGE;
 
   const handleShare = React.useCallback(async () => {
     try {

@@ -27,6 +27,7 @@ import { CURRENCIES } from '../constants/currencies';
 import { useCurrencyPref } from '../hooks/useCurrencyPref';
 import { sanitizeDecimalInput, sanitizeIntegerInput } from '../utils/currencyAuthoringFlows';
 import { buildCreateSyndicatePrefillFromSell } from '../utils/syndicatePrefill';
+import { filterImageUris } from '../utils/media';
 
 const CONDITIONS = ['New with tags', 'Very good', 'Good', 'Satisfactory'];
 const SIZES = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', 'One size'];
@@ -112,7 +113,7 @@ export default function SellScreen() {
     setPhotos((prev) => {
       const next = [...prev, uri].slice(0, 10);
       if (syndicateEnabled && authPhotos.length === 0) {
-        setAuthPhotos(next.slice(0, 2));
+        setAuthPhotos(filterImageUris(next, 2));
       }
       return next;
     });
@@ -121,17 +122,15 @@ export default function SellScreen() {
   const handlePickFromLibrary = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
-      setErrorMsg('Allow gallery access to upload photos.');
+      setErrorMsg('Allow gallery access to upload media.');
       shake();
       return;
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
+      mediaTypes: ['images', 'videos'],
       allowsMultipleSelection: false,
       quality: 0.9,
-      allowsEditing: true,
-      aspect: [1, 1],
     });
 
     if (!result.canceled && result.assets?.[0]?.uri) {
@@ -143,16 +142,15 @@ export default function SellScreen() {
   const handlePickFromCamera = async () => {
     const permission = await ImagePicker.requestCameraPermissionsAsync();
     if (!permission.granted) {
-      setErrorMsg('Allow camera access to take listing photos.');
+      setErrorMsg('Allow camera access to capture listing media.');
       shake();
       return;
     }
 
     const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ['images'],
-      allowsEditing: true,
-      aspect: [1, 1],
+      mediaTypes: ['images', 'videos'],
       quality: 0.9,
+      videoMaxDuration: 60,
     });
 
     if (!result.canceled && result.assets?.[0]?.uri) {
@@ -167,7 +165,7 @@ export default function SellScreen() {
     const numericPrice = Number(sanitizeDecimalInput(price));
 
     if (photos.length === 0) {
-      setErrorMsg('Add at least one photo before publishing.');
+      setErrorMsg('Add at least one photo or video before publishing.');
       shake();
       return;
     }
@@ -242,7 +240,7 @@ export default function SellScreen() {
   const syndicateAuthReady = !syndicateEnabled || authPhotos.length > 0;
 
   const readinessItems = [
-    { key: 'photos', label: 'Photos', done: hasBasePhotos },
+    { key: 'photos', label: 'Media', done: hasBasePhotos },
     { key: 'details', label: 'Details', done: hasRequiredDetails },
     { key: 'description', label: 'Description', done: hasDescription },
     { key: 'price', label: 'Price', done: hasValidPrice },
@@ -321,8 +319,8 @@ export default function SellScreen() {
             <View style={styles.cameraCircle}>
               <Ionicons name="camera" size={40} color={Colors.background} />
             </View>
-            <Text style={styles.cameraText}>Add listing photos</Text>
-            <Text style={styles.cameraSubtext}>Take a photo or upload from your gallery</Text>
+            <Text style={styles.cameraText}>Add listing media</Text>
+            <Text style={styles.cameraSubtext}>Take a photo or video, or upload from your gallery</Text>
 
             <View style={styles.uploadActionRow}>
               <AnimatedPressable style={styles.uploadActionBtn} activeOpacity={0.88} onPress={handlePickFromCamera}>
@@ -480,7 +478,7 @@ export default function SellScreen() {
                   onPress={() => {
                     setSyndicateEnabled(true);
                     if (authPhotos.length === 0 && photos.length > 0) {
-                      setAuthPhotos(photos.slice(0, 2));
+                      setAuthPhotos(filterImageUris(photos, 2));
                     }
                   }}
                 >
@@ -540,11 +538,19 @@ export default function SellScreen() {
                       activeOpacity={0.85}
                       onPress={() => {
                         if (photos.length === 0) {
-                          setErrorMsg('Add listing photos first, then attach auth photos.');
+                          setErrorMsg('Add listing media first, then attach auth photos.');
                           shake();
                           return;
                         }
-                        setAuthPhotos(photos.slice(0, Math.min(photos.length, 3)));
+
+                        const nextAuthPhotos = filterImageUris(photos, 3);
+                        if (nextAuthPhotos.length === 0) {
+                          setErrorMsg('Authentication requires at least one image. Add a photo to continue.');
+                          shake();
+                          return;
+                        }
+
+                        setAuthPhotos(nextAuthPhotos);
                       }}
                     >
                       <Text style={styles.authBtnText}>Use listing</Text>

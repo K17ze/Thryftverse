@@ -15,6 +15,10 @@ import { ActiveTheme, Colors } from '../constants/colors';
 import { RootStackParamList } from '../navigation/types';
 
 type RouteT = RouteProp<RootStackParamList, 'CategoryTree'>;
+const HEADER_BORDER = Colors.border;
+const BANNER_BG = Colors.cardAlt;
+const PILL_BG = Colors.card;
+const PILL_BORDER = Colors.border;
 
 // Premium imagery for category headers
 const CAT_IMAGES: Record<string, string> = {
@@ -133,7 +137,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16, 
     height: 56, 
     borderBottomWidth: 1, 
-    borderBottomColor: '#1A1A1A' 
+    borderBottomColor: HEADER_BORDER 
   },
   backBtn: { width: 44, height: 44, justifyContent: 'center', alignItems: 'flex-start' },
   headerTitle: { fontSize: 17, fontFamily: 'Inter_700Bold', color: Colors.textPrimary, textTransform: 'uppercase', letterSpacing: 1 },
@@ -156,7 +160,7 @@ const styles = StyleSheet.create({
   categoryBanner: {
     height: 140,
     justifyContent: 'flex-end',
-    backgroundColor: '#111',
+    backgroundColor: BANNER_BG,
     marginHorizontal: 16,
     borderRadius: 16,
     overflow: 'hidden',
@@ -180,12 +184,12 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   subPill: {
-    backgroundColor: '#111',
+    backgroundColor: PILL_BG,
     paddingHorizontal: 18,
     paddingVertical: 12,
     borderRadius: 24,
     borderWidth: 1,
-    borderColor: '#222',
+    borderColor: PILL_BORDER,
   },
   subPillText: {
     color: Colors.textPrimary,

@@ -22,7 +22,7 @@ import Reanimated, {
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors } from '../constants/colors';
+import { ActiveTheme, Colors } from '../constants/colors';
 import { Typography } from '../constants/typography';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { RootStackParamList } from '../navigation/types';
@@ -36,6 +36,17 @@ import { getBackendSyncStatus } from '../utils/syncStatus';
 const { height, width } = Dimensions.get('window');
 const SNAP_HALF = height * 0.5;
 const SNAP_FULL = height * 0.1;
+const IS_LIGHT = ActiveTheme === 'light';
+const OVERLAY_BG = IS_LIGHT ? 'rgba(14, 12, 10, 0.34)' : 'rgba(0,0,0,0.6)';
+const SHEET_BG = Colors.surface;
+const HANDLE_BG = Colors.borderLight;
+const CHIP_BG = Colors.card;
+const CHIP_BORDER = Colors.border;
+const DIVIDER_COLOR = Colors.border;
+const RETRY_BANNER_BG = IS_LIGHT ? 'rgba(255,255,255,0.95)' : 'rgba(26,26,26,0.95)';
+const RETRY_BUTTON_BG = IS_LIGHT ? Colors.cardAlt : '#111';
+const FOOTER_BG = IS_LIGHT ? 'rgba(247, 245, 241, 0.96)' : 'rgba(10, 10, 10, 0.95)';
+const APPLY_DISABLED_BG = IS_LIGHT ? Colors.borderLight : '#333';
 
 type SortOption = 'Recommended' | 'Newest' | 'Price: Low to High' | 'Price: High to Low';
 type ConditionOption = 'Any' | 'New with tags' | 'Very good' | 'Good' | 'Satisfactory';
@@ -282,7 +293,7 @@ export default function FilterScreen() {
 
   return (
     <View style={styles.container}>
-      <Reanimated.View style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }, overlayStyle]}>
+      <Reanimated.View style={[StyleSheet.absoluteFill, { backgroundColor: OVERLAY_BG }, overlayStyle]}>
         <Pressable style={StyleSheet.absoluteFill} onPress={closeBottomSheet} />
       </Reanimated.View>
 
@@ -422,7 +433,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     width: width,
     height: height, // allow scroll but cut off below screen
-    backgroundColor: Colors.background,
+    backgroundColor: SHEET_BG,
     borderTopLeftRadius: 36,
     borderTopRightRadius: 36,
     shadowColor: '#000',
@@ -439,7 +450,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 5,
     borderRadius: 3,
-    backgroundColor: '#333',
+    backgroundColor: HANDLE_BG,
   },
   
   header: {
@@ -467,10 +478,10 @@ const styles = StyleSheet.create({
   syncRetryBanner: {
     marginHorizontal: 24,
     marginBottom: 10,
-    backgroundColor: 'rgba(26,26,26,0.95)',
+    backgroundColor: RETRY_BANNER_BG,
   },
   syncRetryBtn: {
-    backgroundColor: '#111',
+    backgroundColor: RETRY_BUTTON_BG,
   },
 
   scrollContent: { paddingTop: 10, paddingBottom: 40 },
@@ -521,9 +532,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 12,
     borderRadius: 24,
-    backgroundColor: '#111',
+    backgroundColor: CHIP_BG,
     borderWidth: 1,
-    borderColor: '#222',
+    borderColor: CHIP_BORDER,
   },
   sizeChip: { minWidth: 64, alignItems: 'center' },
   chipActive: { backgroundColor: Colors.textPrimary, borderColor: Colors.textPrimary },
@@ -533,7 +544,7 @@ const styles = StyleSheet.create({
 
   sectionDivider: {
     height: 1,
-    backgroundColor: '#1A1A1A',
+    backgroundColor: DIVIDER_COLOR,
     marginVertical: 24,
     marginHorizontal: 20,
   },
@@ -544,9 +555,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 16,
     paddingBottom: Platform.OS === 'ios' ? 34 : 24,
-    backgroundColor: 'rgba(10, 10, 10, 0.95)',
+    backgroundColor: FOOTER_BG,
     borderTopWidth: 1,
-    borderTopColor: '#1A1A1A',
+    borderTopColor: DIVIDER_COLOR,
   },
   applyBtn: {
     backgroundColor: Colors.textPrimary,
@@ -556,7 +567,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   applyBtnDisabled: {
-    backgroundColor: '#333',
+    backgroundColor: APPLY_DISABLED_BG,
   },
   applyBtnText: {
     color: Colors.background,

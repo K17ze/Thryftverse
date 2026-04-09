@@ -6,7 +6,6 @@ import { View,
   StyleSheet,
   ScrollView,
   StatusBar,
-  Image,
   Alert
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
@@ -18,8 +17,15 @@ import { RootStackParamList } from '../navigation/types';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useBackendData } from '../context/BackendDataContext';
 import { useToast } from '../context/ToastContext';
+import { CachedImage } from '../components/CachedImage';
+import { getListingCoverUri } from '../utils/media';
 
 type RouteT = RouteProp<RootStackParamList, 'ManageListing'>;
+const HEADER_BORDER = Colors.border;
+const PREVIEW_BG = Colors.card;
+const STATUS_BG = Colors.cardAlt;
+const ACTION_BORDER = Colors.border;
+const EDIT_ICON_BG = Colors.cardAlt;
 
 export default function ManageListingScreen() {
   const navigation = useNavigation<any>();
@@ -92,7 +98,7 @@ export default function ManageListingScreen() {
         
         {/* Item Preview */}
         <View style={styles.previewCard}>
-          <Image source={{ uri: item.images[0] }} style={styles.previewImg} />
+          <CachedImage uri={getListingCoverUri(item.images, 'https://picsum.photos/seed/manage-listing-fallback/300/400')} style={styles.previewImg} contentFit="cover" />
           <View style={styles.previewInfo}>
             <Text style={styles.itemTitle} numberOfLines={2}>{item.title}</Text>
             <Text style={styles.itemPrice}>{formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}</Text>
@@ -128,7 +134,7 @@ export default function ManageListingScreen() {
           onPress={() => navigation.navigate('MainTabs', { screen: 'Sell' })}
         >
           <View style={styles.blockLeft}>
-            <View style={[styles.iconBox, { backgroundColor: '#111' }]}>
+            <View style={[styles.iconBox, { backgroundColor: EDIT_ICON_BG }]}>
               <Ionicons name="create-outline" size={22} color={Colors.textPrimary} />
             </View>
             <Text style={styles.blockTitle}>Edit details</Text>
@@ -170,23 +176,23 @@ export default function ManageListingScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, height: 56, borderBottomWidth: 1, borderBottomColor: '#1A1A1A' },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, height: 56, borderBottomWidth: 1, borderBottomColor: HEADER_BORDER },
   backBtn: { width: 44, height: 44, justifyContent: 'center', alignItems: 'flex-start' },
   headerTitle: { fontSize: 17, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary },
 
   content: { paddingHorizontal: 20, paddingTop: 20 },
 
-  previewCard: { flexDirection: 'row', backgroundColor: '#111', padding: 16, borderRadius: 20, marginBottom: 32, gap: 16 },
+  previewCard: { flexDirection: 'row', backgroundColor: PREVIEW_BG, padding: 16, borderRadius: 20, marginBottom: 32, gap: 16 },
   previewImg: { width: 80, height: 80, borderRadius: 12 },
   previewInfo: { flex: 1, justifyContent: 'center' },
   itemTitle: { fontSize: 16, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary, marginBottom: 4 },
   itemPrice: { fontSize: 16, fontFamily: 'Inter_700Bold', color: Colors.textPrimary, marginBottom: 8 },
-  statusBadge: { alignSelf: 'flex-start', backgroundColor: '#222', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
+  statusBadge: { alignSelf: 'flex-start', backgroundColor: STATUS_BG, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8 },
   statusText: { fontSize: 11, fontFamily: 'Inter_700Bold', color: Colors.textPrimary, letterSpacing: 0.5 },
 
   sectionTitle: { fontSize: 13, fontFamily: 'Inter_600SemiBold', color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 12 },
 
-  actionBlock: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: '#111' },
+  actionBlock: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: ACTION_BORDER },
   blockLeft: { flexDirection: 'row', alignItems: 'center', gap: 16 },
   iconBox: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   blockTextCol: { justifyContent: 'center' },

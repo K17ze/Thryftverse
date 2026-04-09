@@ -191,6 +191,7 @@ interface ListUserMarketHistoryResponse {
 
 interface ListAuctionsOptions {
   status?: AuctionStatus;
+  sellerId?: string;
   limit?: number;
 }
 
@@ -200,6 +201,7 @@ interface ListAuctionBidsOptions {
 
 interface ListSyndicateAssetsOptions {
   openOnly?: boolean;
+  issuerId?: string;
   limit?: number;
 }
 
@@ -253,6 +255,7 @@ function toQuery(params: Record<string, string | number | boolean | undefined>) 
 export async function listAuctions(options: ListAuctionsOptions = {}): Promise<MarketAuction[]> {
   const query = toQuery({
     status: options.status,
+    sellerId: options.sellerId,
     limit: options.limit,
   });
   const payload = await fetchJson<ListAuctionsResponse>(`/auctions${query}`);
@@ -299,6 +302,7 @@ export async function listSyndicateAssets(
 ): Promise<MarketSyndicateAsset[]> {
   const query = toQuery({
     openOnly: options.openOnly,
+    issuerId: options.issuerId,
     limit: options.limit,
   });
   const payload = await fetchJson<ListSyndicateAssetsResponse>(`/syndicate/assets${query}`);

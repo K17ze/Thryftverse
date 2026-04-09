@@ -47,6 +47,7 @@ import { SyncRetryBanner } from '../components/SyncRetryBanner';
 import { SkeletonLoader } from '../components/SkeletonLoader';
 import { ThryftCartIcon } from '../components/icons/ThryftCartIcon';
 import { getBackendSyncStatus } from '../utils/syncStatus';
+import { isVideoUri } from '../utils/media';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 
@@ -58,13 +59,8 @@ const SCREEN_WIDTH = Dimensions.get('window').width;
 const IS_LIGHT = ActiveTheme === 'light';
 const PANEL_BG = Colors.card;
 const SOCIAL_RING = Colors.accent;
-const VIDEO_EXT_RE = /\.(mp4|mov|m4v|webm)(\?.*)?$/i;
 
 const TILE_RATIO_SEQUENCE = [1.28, 0.94, 1.16, 0.86, 1.06, 1.22] as const;
-
-function isVideoUri(uri: string) {
-  return VIDEO_EXT_RE.test(uri);
-}
 
 function resolveTileAspectRatio(seed: string) {
   let hash = 0;
@@ -343,17 +339,23 @@ export default function HomeScreen() {
   );
 
   const exploreData = React.useMemo<ExploreTile[]>(() => {
-    return listings.map((item): ExploreTile => ({
-      id: `item_${item.id}`,
-      type: 'listing',
-      mediaType: 'image',
-      mediaUri: item.images[0],
-      likes: item.likes,
-      price: item.price,
-      routeId: item.id,
-      caption: item.title,
-      aspectRatio: resolveTileAspectRatio(item.id),
-    }));
+    return listings.map((item): ExploreTile => {
+      const primaryMediaUri = item.images[0] ?? 'https://picsum.photos/seed/listing-fallback-home/600/800';
+      const posterUri = item.images.find((uri) => !isVideoUri(uri));
+
+      return {
+        id: `item_${item.id}`,
+        type: 'listing',
+        mediaType: isVideoUri(primaryMediaUri) ? 'video' : 'image',
+        mediaUri: primaryMediaUri,
+        posterUri: isVideoUri(primaryMediaUri) ? posterUri : undefined,
+        likes: item.likes,
+        price: item.price,
+        routeId: item.id,
+        caption: item.title,
+        aspectRatio: resolveTileAspectRatio(item.id),
+      };
+    });
   }, [listings]);
 
   const feedGridData = showFeedLoadingSkeleton ? [] : exploreData;

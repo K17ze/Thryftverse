@@ -23,6 +23,16 @@ import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { EmptyState } from '../components/EmptyState';
 
 type NavT = StackNavigationProp<RootStackParamList>;
+const IS_LIGHT = ActiveTheme === 'light';
+const TRADE_ACCENT = Colors.accentGold;
+const HEADER_BTN_BG = Colors.card;
+const HEADER_BTN_BORDER = Colors.border;
+const HERO_BG = IS_LIGHT ? '#f0ede7' : '#10161c';
+const HERO_BORDER = IS_LIGHT ? '#d7d1c8' : '#24313b';
+const CARD_BG = Colors.card;
+const CARD_BORDER = Colors.border;
+const POSITIVE_COLOR = IS_LIGHT ? '#7c5f1e' : '#d7b98f';
+const NEGATIVE_COLOR = IS_LIGHT ? '#b64242' : '#ff9d9d';
 
 export default function PortfolioScreen() {
   const navigation = useNavigation<NavT>();
@@ -194,8 +204,8 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#272727',
-    backgroundColor: '#121212',
+    borderColor: HEADER_BTN_BORDER,
+    backgroundColor: HEADER_BTN_BG,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -204,8 +214,8 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#272727',
-    backgroundColor: '#121212',
+    borderColor: HEADER_BTN_BORDER,
+    backgroundColor: HEADER_BTN_BG,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -221,8 +231,8 @@ const styles = StyleSheet.create({
   heroCard: {
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: '#24313b',
-    backgroundColor: '#10161c',
+    borderColor: HERO_BORDER,
+    backgroundColor: HERO_BG,
     paddingHorizontal: 12,
     paddingVertical: 12,
   },
@@ -250,17 +260,17 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_700Bold',
   },
   pnlUp: {
-    color: '#d7b98f',
+    color: POSITIVE_COLOR,
   },
   pnlDown: {
-    color: '#ff9d9d',
+    color: NEGATIVE_COLOR,
   },
   mixCard: {
     marginTop: 10,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
-    backgroundColor: '#111111',
+    borderColor: CARD_BORDER,
+    backgroundColor: CARD_BG,
     paddingHorizontal: 10,
     paddingVertical: 10,
   },
@@ -290,15 +300,15 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_700Bold',
   },
   sectionLink: {
-    color: '#d7b98f',
+    color: TRADE_ACCENT,
     fontSize: 12,
     fontFamily: 'Inter_600SemiBold',
   },
   holdingRow: {
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
-    backgroundColor: '#111111',
+    borderColor: CARD_BORDER,
+    backgroundColor: CARD_BG,
     paddingHorizontal: 10,
     paddingVertical: 10,
     flexDirection: 'row',

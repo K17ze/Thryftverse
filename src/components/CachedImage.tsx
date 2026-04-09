@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { View, StyleSheet, ViewStyle, StyleProp, ImageStyle, Image as NativeImage } from 'react-native';
 import { Image as ExpoImage, ImageContentFit } from 'expo-image';
+import { Video, ResizeMode } from 'expo-av';
 import Reanimated, {
   cancelAnimation,
   useSharedValue,
@@ -13,6 +14,7 @@ import Reanimated, {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Colors } from '../constants/colors';
 import { useReducedMotion } from '../hooks/useReducedMotion';
+import { isVideoUri } from '../utils/media';
 
 interface CachedImageProps {
   uri: string;
@@ -83,7 +85,8 @@ export function CachedImage({
 
   const effectivePriority = isVisible ? priority : 'low';
   const effectiveTransition = reducedMotionEnabled ? 0 : transition;
-  const useNativeImage = /^content:\/\//i.test(uri);
+  const isVideoSource = isVideoUri(uri);
+  const useNativeImage = !isVideoSource && /^content:\/\//i.test(uri);
 
   const nativeResizeMode = React.useMemo(() => {
     switch (contentFit) {
@@ -142,7 +145,21 @@ export function CachedImage({
       )}
 
       <Reanimated.View style={[StyleSheet.absoluteFill, imageStyle]}>
-        {useNativeImage ? (
+        {isVideoSource ? (
+          <Video
+            source={{ uri }}
+            style={[styles.image, style as StyleProp<ViewStyle>]}
+            resizeMode={ResizeMode.COVER}
+            shouldPlay={false}
+            isMuted
+            isLooping={false}
+            usePoster={!!previewUri}
+            posterSource={previewUri ? { uri: previewUri } : undefined}
+            onLoad={handleLoad}
+            onReadyForDisplay={handleLoad}
+            onError={handleError}
+          />
+        ) : useNativeImage ? (
           <NativeImage
             source={{ uri }}
             style={[styles.image, style]}

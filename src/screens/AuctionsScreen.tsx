@@ -80,7 +80,7 @@ export default function AuctionsScreen() {
   const syncAuctions = React.useCallback(async () => {
     setIsSyncingAuctions(true);
     try {
-      const items = await listAuctions({ limit: 120 });
+      const items = await listAuctions({ limit: 120, sellerId: actingUserId });
       const mapped: AuctionMarketItem[] = items.map((item) => ({
         id: item.id,
         listingId: item.listingId,
@@ -102,7 +102,7 @@ export default function AuctionsScreen() {
     } finally {
       setIsSyncingAuctions(false);
     }
-  }, []);
+  }, [actingUserId]);
 
   React.useEffect(() => {
     const intervalId = setInterval(() => setNowTs(Date.now()), 1000);
@@ -128,11 +128,14 @@ export default function AuctionsScreen() {
     }
 
     for (const item of customAuctions) {
+      if (item.sellerId !== actingUserId) {
+        continue;
+      }
       merged.set(item.id, item);
     }
 
     return [...merged.values()];
-  }, [customAuctions, remoteAuctions]);
+  }, [actingUserId, customAuctions, remoteAuctions]);
 
   const marketAuctions = React.useMemo(() => getAuctionMarket(nowTs, baseAuctions), [baseAuctions, nowTs]);
 
@@ -429,7 +432,7 @@ export default function AuctionsScreen() {
       <View style={styles.heroCard}>
         <View style={styles.heroTitleRow}>
           <Ionicons name="flash-outline" size={16} color={BRAND} />
-          <Text style={styles.heroTitle}>Auctions</Text>
+          <Text style={styles.heroTitle}>My Auctions</Text>
         </View>
       </View>
 
@@ -478,7 +481,7 @@ export default function AuctionsScreen() {
       {renderUpcomingStrip()}
 
       <View style={styles.sectionTitleRow}>
-        <Text style={styles.sectionTitle}>Auctions</Text>
+        <Text style={styles.sectionTitle}>My Auctions</Text>
         <SyncStatusPill tone={marketStatus.tone} label={marketStatus.label} compact />
       </View>
     </View>
@@ -654,7 +657,7 @@ export default function AuctionsScreen() {
           ) : (
             <EmptyState
               icon="hourglass-outline"
-              title="No auctions right now"
+              title="No active auctions yet"
             />
           )
         }

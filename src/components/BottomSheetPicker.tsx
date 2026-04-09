@@ -7,11 +7,18 @@ import Reanimated, {
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors } from '../constants/colors';
+import { ActiveTheme, Colors } from '../constants/colors';
 import { Typography } from '../constants/typography';
 import { AnimatedPressable } from './AnimatedPressable';
 
 const { height, width } = Dimensions.get('window');
+const IS_LIGHT = ActiveTheme === 'light';
+const OVERLAY_BG = IS_LIGHT ? 'rgba(14, 12, 10, 0.34)' : 'rgba(0,0,0,0.6)';
+const SHEET_BG = Colors.surface;
+const HANDLE_BG = Colors.borderLight;
+const SEARCH_BG = Colors.cardAlt;
+const SEARCH_BORDER = Colors.border;
+const OPTION_BORDER = Colors.border;
 
 interface Props {
   visible: boolean;
@@ -87,7 +94,7 @@ export function BottomSheetPicker({ visible, onClose, title, options, selectedVa
 
   return (
     <View style={[StyleSheet.absoluteFill, { zIndex: 9999 }]} pointerEvents="box-none">
-      <Reanimated.View style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }, overlayStyle]}>
+      <Reanimated.View style={[StyleSheet.absoluteFill, { backgroundColor: OVERLAY_BG }, overlayStyle]}>
         <AnimatedPressable
           style={StyleSheet.absoluteFill}
           activeOpacity={1}
@@ -148,7 +155,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     width: width,
     height: height,
-    backgroundColor: '#111',
+    backgroundColor: SHEET_BG,
     borderTopLeftRadius: 36,
     borderTopRightRadius: 36,
     shadowColor: '#000',
@@ -158,14 +165,16 @@ const styles = StyleSheet.create({
     elevation: 20,
   },
   handleContainer: { alignItems: 'center', paddingVertical: 14 },
-  handle: { width: 44, height: 5, borderRadius: 3, backgroundColor: '#333' },
+  handle: { width: 44, height: 5, borderRadius: 3, backgroundColor: HANDLE_BG },
   header: { alignItems: 'center', marginBottom: 12 },
   headerTitle: { fontSize: 20, fontFamily: Typography.family.semibold, color: Colors.textPrimary, letterSpacing: 0.08 },
   
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#222',
+    backgroundColor: SEARCH_BG,
+    borderWidth: 1,
+    borderColor: SEARCH_BORDER,
     marginHorizontal: 20,
     paddingHorizontal: 16,
     height: 50,
@@ -183,7 +192,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#222',
+    borderBottomColor: OPTION_BORDER,
   },
   optionText: { fontSize: 16, fontFamily: Typography.family.medium, color: Colors.textPrimary, letterSpacing: 0.08 },
   optionTextActive: { fontFamily: Typography.family.semibold, color: Colors.accent },

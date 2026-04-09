@@ -21,12 +21,19 @@ export interface OnezeWithdrawalExecuteJobData {
   reason: 'threshold_queue' | 'manual_queue';
 }
 
-type InfraJobData = AuctionSweepJobData | OnezeWithdrawalExecuteJobData;
+export interface OnezeMintReserveJobData {
+  mintOperationId: string;
+  initiatedBy: string;
+  reason: 'webhook_confirmed' | 'manual_retry';
+}
+
+type InfraJobData = AuctionSweepJobData | OnezeWithdrawalExecuteJobData | OnezeMintReserveJobData;
 
 interface QueueHandlers {
   handlePushJob: (job: PushJobData) => Promise<void>;
   handleAuctionSweepJob: (job: AuctionSweepJobData) => Promise<void>;
   handleOnezeWithdrawalExecuteJob: (job: OnezeWithdrawalExecuteJobData) => Promise<void>;
+  handleOnezeMintReserveJob: (job: OnezeMintReserveJobData) => Promise<void>;
 }
 
 const queueConnection = new IORedis(config.redisUrl, {
@@ -90,6 +97,8 @@ export function startBackgroundWorkers(handlers: QueueHandlers): void {
             await handlers.handleAuctionSweepJob(job.data as AuctionSweepJobData);
           } else if (job.name === 'oneze_withdraw_execute') {
             await handlers.handleOnezeWithdrawalExecuteJob(job.data as OnezeWithdrawalExecuteJobData);
+          } else if (job.name === 'oneze_mint_reserve_allocate') {
+            await handlers.handleOnezeMintReserveJob(job.data as OnezeMintReserveJobData);
           }
 
           recordBackgroundJob({
@@ -147,6 +156,23 @@ export async function enqueueOnezeWithdrawalExecuteJob(input: OnezeWithdrawalExe
     {
       jobId: `oneze_withdraw_execute_${input.withdrawalId}`,
       attempts: 3,
+      backoff: {
+        type: 'exponential',
+        delay: 2_000,
+      },
+      removeOnComplete: true,
+      removeOnFail: 200,
+    }
+  );
+}
+
+export async function enqueueOnezeMintReserveJob(input: OnezeMintReserveJobData): Promise<void> {
+  await infraQueue.add(
+    'oneze_mint_reserve_allocate',
+    input,
+    {
+      jobId: `oneze_mint_reserve_allocate_${input.mintOperationId}`,
+      attempts: 6,
       backoff: {
         type: 'exponential',
         delay: 2_000,

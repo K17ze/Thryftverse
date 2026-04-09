@@ -6,7 +6,6 @@ import { View,
   StyleSheet,
   ScrollView,
   StatusBar,
-  Image,
   Platform
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
@@ -30,6 +29,8 @@ import {
   listUserPaymentMethods,
   payOrder,
 } from '../services/commerceApi';
+import { CachedImage } from '../components/CachedImage';
+import { getListingCoverUri } from '../utils/media';
 
 type RouteT = RouteProp<RootStackParamList, 'Checkout'>;
 const IS_LIGHT = ActiveTheme === 'light';
@@ -195,7 +196,7 @@ export default function CheckoutScreen() {
         
         {/* Item Summary Card */}
         <View style={styles.itemCard}>
-          <Image source={{ uri: item.images[0] }} style={styles.itemThumb} />
+          <CachedImage uri={getListingCoverUri(item.images, 'https://picsum.photos/seed/checkout-item-fallback/300/400')} style={styles.itemThumb} contentFit="cover" />
           <View style={styles.itemInfo}>
             <Text style={styles.itemTitle} numberOfLines={1}>{item.title}</Text>
             <Text style={styles.itemSeller}>from {seller.username}</Text>

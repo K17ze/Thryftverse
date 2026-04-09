@@ -7,7 +7,6 @@ import {
   StyleSheet,
   ScrollView,
   StatusBar,
-  Image
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -20,6 +19,8 @@ import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useBackendData } from '../context/BackendDataContext';
 import { getOrder } from '../services/commerceApi';
 import { calculatePlatformChargeGbp } from '../utils/currencyAuthoringFlows';
+import { CachedImage } from '../components/CachedImage';
+import { getListingCoverUri } from '../utils/media';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 type RouteT = RouteProp<RootStackParamList, 'OrderDetail'>;
@@ -247,7 +248,7 @@ export default function OrderDetailScreen() {
           onPress={() => navigation.navigate('ItemDetail', { itemId: listing.id })}
           activeOpacity={0.88}
         >
-          <Image source={{ uri: listing.images[0] }} style={styles.itemThumb} />
+          <CachedImage uri={getListingCoverUri(listing.images, 'https://picsum.photos/seed/order-detail-fallback/300/400')} style={styles.itemThumb} contentFit="cover" />
           <View style={styles.itemInfo}>
             <Text style={styles.itemTitle} numberOfLines={2}>{listing.title}</Text>
             <Text style={styles.itemMeta}>{listing.size} · {listing.condition}</Text>
@@ -305,7 +306,7 @@ export default function OrderDetailScreen() {
           onPress={() => navigation.navigate('UserProfile', { userId: seller.id })}
           activeOpacity={0.88}
         >
-          <Image source={{ uri: seller.avatar }} style={styles.sellerAvatar} />
+          <CachedImage uri={seller.avatar} style={styles.sellerAvatar} contentFit="cover" />
           <View style={styles.sellerInfo}>
             <Text style={styles.sellerName}>{seller.username}</Text>
             <View style={styles.sellerMeta}>

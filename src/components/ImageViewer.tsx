@@ -1,5 +1,6 @@
 import React, { useCallback, useRef } from 'react';
 import { View, Dimensions, StyleSheet } from 'react-native';
+import { Video, ResizeMode } from 'expo-av';
 import Reanimated, {
   useSharedValue,
   useAnimatedStyle,
@@ -13,6 +14,7 @@ import {
 } from 'react-native-gesture-handler';
 import { SharedTransitionImage } from './SharedTransitionImage';
 import { useReducedMotion } from '../hooks/useReducedMotion';
+import { isVideoUri } from '../utils/media';
 
 const { width: W } = Dimensions.get('window');
 const MAX_ZOOM = 4;
@@ -153,6 +155,22 @@ function ImagePage({ uri, onDoubleTap, sharedTransitionTag }: ImagePageProps) {
   );
 }
 
+function VideoPage({ uri }: { uri: string }) {
+  return (
+    <View style={styles.page}>
+      <Video
+        source={{ uri }}
+        style={styles.image}
+        resizeMode={ResizeMode.COVER}
+        shouldPlay
+        isMuted
+        isLooping
+        useNativeControls
+      />
+    </View>
+  );
+}
+
 // ── Dot Indicator ─────────────────────────────────────────────
 interface DotProps {
   index: number;
@@ -205,11 +223,15 @@ export function ImageViewer({ images, height = W, onDoubleTap, itemId }: Props) 
         onViewableItemsChanged={onViewableItemsChanged}
         viewabilityConfig={viewabilityConfig.current}
         renderItem={({ item, index }) => (
-          <ImagePage 
-            uri={item} 
-            onDoubleTap={onDoubleTap}
-            sharedTransitionTag={index === 0 && itemId ? `image-${itemId}-0` : undefined} 
-          />
+          isVideoUri(item) ? (
+            <VideoPage uri={item} />
+          ) : (
+            <ImagePage
+              uri={item}
+              onDoubleTap={onDoubleTap}
+              sharedTransitionTag={index === 0 && itemId ? `image-${itemId}-0` : undefined}
+            />
+          )
         )}
       />
       {images.length > 1 && (

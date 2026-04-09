@@ -7,7 +7,6 @@ import {
   StyleSheet,
   StatusBar,
   TextInput,
-  Image,
   FlatList
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -24,6 +23,8 @@ import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useCurrencyContext } from '../context/CurrencyContext';
 import { toFiat, toIze } from '../utils/currency';
 import { useBackendData } from '../context/BackendDataContext';
+import { CachedImage } from '../components/CachedImage';
+import { getListingCoverUri } from '../utils/media';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 
@@ -151,7 +152,7 @@ export default function CreateAuctionScreen() {
       listingId: selectedListing.id,
       sellerId,
       title: selectedListing.title,
-      image: selectedListing.images[0] ?? 'https://picsum.photos/seed/new-auction/500/700',
+      image: getListingCoverUri(selectedListing.images, 'https://picsum.photos/seed/new-auction/500/700'),
       startsAt: new Date(startsAtMs).toISOString(),
       endsAt: new Date(endsAtMs).toISOString(),
       startingBid,
@@ -174,7 +175,7 @@ export default function CreateAuctionScreen() {
         onPress={() => setSelectedListingId(item.id)}
         activeOpacity={0.9}
       >
-        <Image source={{ uri: item.images[0] }} style={styles.listingImage} />
+        <CachedImage uri={getListingCoverUri(item.images, 'https://picsum.photos/seed/listing-auction-fallback/300/400')} style={styles.listingImage} contentFit="cover" />
         <View style={styles.listingMeta}>
           <Text style={styles.listingTitle} numberOfLines={1}>{item.title}</Text>
           <Text style={styles.listingPrice}>{formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}</Text>
@@ -188,7 +189,9 @@ export default function CreateAuctionScreen() {
     );
   };
 
-  const previewImage = selectedListing?.images[0] ?? 'https://picsum.photos/seed/auction-preview/500/700';
+  const previewImage = selectedListing
+    ? getListingCoverUri(selectedListing.images, 'https://picsum.photos/seed/auction-preview/500/700')
+    : 'https://picsum.photos/seed/auction-preview/500/700';
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -210,7 +213,7 @@ export default function CreateAuctionScreen() {
 
       <View style={styles.content}>
         <View style={styles.previewCard}>
-          <Image source={{ uri: previewImage }} style={styles.previewImage} />
+          <CachedImage uri={previewImage} style={styles.previewImage} contentFit="cover" />
           <View style={styles.previewOverlay}>
             <Text style={styles.previewTitle} numberOfLines={1}>{selectedListing?.title ?? 'Select listing'}</Text>
             <Text style={styles.previewMeta}>Window: {AUCTION_WINDOW_HOURS}h</Text>

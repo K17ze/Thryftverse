@@ -16,6 +16,13 @@ import { ActiveTheme, Colors } from '../constants/colors';
 import { RootStackParamList } from '../navigation/types';
 
 type NavT = StackNavigationProp<RootStackParamList>;
+const IS_LIGHT = ActiveTheme === 'light';
+const TRADE_ACCENT = Colors.accentGold;
+const HEADER_BUTTON_BG = Colors.card;
+const HEADER_BUTTON_BORDER = Colors.border;
+const ICON_RING_BG = IS_LIGHT ? '#efe7d6' : '#0f1918';
+const ICON_RING_BORDER = IS_LIGHT ? '#d9c6a2' : '#23413d';
+const DOT_BG = Colors.borderLight;
 
 const SLIDES = [
   {
@@ -77,7 +84,7 @@ export default function SyndicateOnboardingScreen() {
           style={styles.heroSlide}
         >
           <View style={styles.iconRing}>
-            <Ionicons name={slide.icon} size={64} color="#d7b98f" />
+            <Ionicons name={slide.icon} size={64} color={TRADE_ACCENT} />
           </View>
           <Text style={styles.title}>{slide.title}</Text>
           <Text style={styles.body}>{slide.body}</Text>
@@ -117,8 +124,8 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#2a2a2a',
-    backgroundColor: '#121212',
+    borderColor: HEADER_BUTTON_BORDER,
+    backgroundColor: HEADER_BUTTON_BG,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -141,8 +148,8 @@ const styles = StyleSheet.create({
     height: 170,
     borderRadius: 85,
     borderWidth: 1,
-    borderColor: '#23413d',
-    backgroundColor: '#0f1918',
+    borderColor: ICON_RING_BORDER,
+    backgroundColor: ICON_RING_BG,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -176,11 +183,11 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#333',
+    backgroundColor: DOT_BG,
   },
   dotActive: {
     width: 24,
-    backgroundColor: '#d7b98f',
+    backgroundColor: TRADE_ACCENT,
   },
   primaryBtn: {
     borderRadius: 14,

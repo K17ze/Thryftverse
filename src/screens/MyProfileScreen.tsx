@@ -66,13 +66,10 @@ interface QuickAccessItem {
   color: string;
 }
 
-type ProfileMediaTab = 'All' | 'Media' | 'Tags';
-
 export default function MyProfileScreen() {
   const navigation = useNavigation<NavT>();
   const insets = useSafeAreaInsets();
   const { show } = useToast();
-  const [heroMediaTab, setHeroMediaTab] = React.useState<ProfileMediaTab>('All');
   const { formatFromFiat } = useFormattedPrice();
   const { listings } = useBackendData();
   const customSyndicates = useStore((state) => state.customSyndicates);
@@ -81,6 +78,7 @@ export default function MyProfileScreen() {
   const userAvatar = useStore((state) => state.userAvatar);
   const userCover = useStore((state) => state.userCover);
   const currentUser = useStore((state) => state.currentUser);
+  const profileMediaOverrides = useStore((state) => state.profileMediaOverrides);
   const updateUserAvatar = useStore((state) => state.updateUserAvatar);
   const updateUserCover = useStore((state) => state.updateUserCover);
 
@@ -194,20 +192,25 @@ export default function MyProfileScreen() {
     }
   };
 
-  const myListings = React.useMemo(() => listings.slice(0, 6), [listings]);
+  const profileUserId = currentUser?.id ?? MY_USER.id;
+  const profileMediaOverride =
+    profileMediaOverrides[profileUserId] ?? profileMediaOverrides[MY_USER.id] ?? null;
+  const displayCover = userCover || profileMediaOverride?.cover || MY_USER.coverPhoto || COVER_IMAGE;
+  const displayAvatar = userAvatar || profileMediaOverride?.avatar || MY_USER.avatar;
 
-  const heroMediaListings = React.useMemo(() => {
-    if (heroMediaTab === 'All') {
-      return myListings;
+  const myListings = React.useMemo(() => {
+    const owned = listings.filter((item) => item.sellerId === profileUserId);
+    if (owned.length > 0) {
+      return owned.slice(0, 6);
     }
 
-    if (heroMediaTab === 'Media') {
-      return myListings.filter((item) => item.images.length > 0);
-    }
+    return listings.slice(0, 6);
+  }, [listings, profileUserId]);
 
-    const tagged = myListings.filter((item, index) => item.isBumped || item.isSold || index % 2 === 0);
-    return tagged.length > 0 ? tagged : myListings;
-  }, [heroMediaTab, myListings]);
+  const heroMediaListings = React.useMemo(
+    () => myListings.filter((item) => item.images.length > 0),
+    [myListings]
+  );
 
   const syndicateHoldings = React.useMemo(() => {
     const marketAssets = getSyndicateMarket(customSyndicates).map((asset) =>
@@ -292,7 +295,7 @@ export default function MyProfileScreen() {
 
       {/* Cover photo with parallax */}
       <Reanimated.View style={[styles.coverWrap, coverStyle]}>
-        <CachedImage uri={userCover || MY_USER.coverPhoto || COVER_IMAGE} style={styles.coverImage} contentFit="cover" priority="high" />
+        <CachedImage key={displayCover} uri={displayCover} style={styles.coverImage} contentFit="cover" priority="high" />
         <View style={styles.coverGradient} />
       </Reanimated.View>
 
@@ -316,14 +319,6 @@ export default function MyProfileScreen() {
               <Ionicons name="camera" size={16} color="#fff" />
               <Text style={styles.topUtilityPillText}>Cover</Text>
             </AnimatedPressable>
-
-            <AnimatedPressable
-              style={styles.topUtilityPillBtn}
-              activeOpacity={0.9}
-              onPress={() => navigation.navigate('EditProfile')}
-            >
-              <Text style={styles.topUtilityPillText}>Edit</Text>
-            </AnimatedPressable>
           </View>
         </Reanimated.View>
       </View>
@@ -339,7 +334,7 @@ export default function MyProfileScreen() {
           <View style={styles.heroTop}>
             <AnimatedPressable style={styles.avatarWrap} onPress={pickAvatar} activeOpacity={0.85}>
               <CachedImage
-                uri={userAvatar || MY_USER.avatar}
+                uri={displayAvatar}
                 style={styles.heroAvatar}
                 containerStyle={styles.heroAvatarContainer}
                 contentFit="cover"
@@ -428,19 +423,6 @@ export default function MyProfileScreen() {
                 </AnimatedPressable>
               ))}
             </View>
-          </View>
-
-          <View style={styles.mediaTabsRow}>
-            {(['All', 'Media', 'Tags'] as ProfileMediaTab[]).map((tab) => (
-              <AnimatedPressable
-                key={tab}
-                style={[styles.mediaTabBtn, heroMediaTab === tab && styles.mediaTabBtnActive]}
-                activeOpacity={0.85}
-                onPress={() => setHeroMediaTab(tab)}
-              >
-                <Text style={[styles.mediaTabText, heroMediaTab === tab && styles.mediaTabTextActive]}>{tab}</Text>
-              </AnimatedPressable>
-            ))}
           </View>
 
           <View style={styles.mediaGrid}>
@@ -654,7 +636,7 @@ const styles = StyleSheet.create({
   },
   heroTop: {
     alignItems: 'center',
-    marginTop: -(AVATAR_SIZE / 2),
+    marginTop: -(AVATAR_SIZE + 8),
     marginBottom: 12,
   },
   avatarWrap: { position: 'relative' },
@@ -766,37 +748,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  mediaTabsRow: {
-    marginTop: 16,
-    width: '100%',
-    flexDirection: 'row',
-    gap: 8,
-  },
-  mediaTabBtn: {
-    flex: 1,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: PANEL_BORDER,
-    backgroundColor: PANEL_BG,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 8,
-  },
-  mediaTabBtnActive: {
-    backgroundColor: Colors.accent,
-    borderColor: Colors.accent,
-  },
-  mediaTabText: {
-    color: Colors.textSecondary,
-    fontSize: 11,
-    fontFamily: Typography.family.semibold,
-    letterSpacing: 0.16,
-  },
-  mediaTabTextActive: {
-    color: Colors.background,
-  },
   mediaGrid: {
-    marginTop: 8,
+    marginTop: 16,
     width: '100%',
     flexDirection: 'row',
     flexWrap: 'wrap',

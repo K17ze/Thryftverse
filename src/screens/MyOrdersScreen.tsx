@@ -6,7 +6,6 @@ import { View,
   StyleSheet,
   ScrollView,
   StatusBar,
-  Image,
   Dimensions,
   RefreshControl
 } from 'react-native';
@@ -22,6 +21,8 @@ import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useBackendData } from '../context/BackendDataContext';
 import { useStore } from '../store/useStore';
 import { listUserOrders } from '../services/commerceApi';
+import { CachedImage } from '../components/CachedImage';
+import { getListingCoverUri } from '../utils/media';
 
 const { width } = Dimensions.get('window');
 
@@ -276,7 +277,7 @@ export default function MyOrdersScreen() {
                   activeOpacity={0.9}
                 >
                   <View style={styles.orderRow}>
-                    <Image source={{ uri: order.item.images[0] }} style={styles.orderThumb} />
+                    <CachedImage uri={getListingCoverUri(order.item.images, 'https://picsum.photos/seed/order-thumb-fallback/300/400')} style={styles.orderThumb} contentFit="cover" />
                     <View style={styles.orderInfo}>
                       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                         <Text style={[styles.orderStatus, order.isDone && styles.orderStatusDone]}>{order.status}</Text>

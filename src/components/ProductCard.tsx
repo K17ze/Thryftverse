@@ -15,6 +15,7 @@ import { CachedImage } from './CachedImage';
 import { useToast } from '../context/ToastContext';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { Ionicons } from '@expo/vector-icons';
+import { isVideoUri } from '../utils/media';
 
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = (width - 48) / 2;
@@ -34,6 +35,8 @@ export function ProductCard({ item, onPress, compact }: Props) {
   const { show } = useToast();
   const { formatFromFiat } = useFormattedPrice();
   const seller = MOCK_USERS.find((u) => u.id === item.sellerId) || MOCK_USERS[0];
+  const hasVideoMedia = item.images.some((uri) => isVideoUri(uri));
+  const hasMultipleMedia = item.images.length > 1;
 
   const handleToggle = () => {
     toggleFav(item.id);
@@ -72,9 +75,9 @@ export function ProductCard({ item, onPress, compact }: Props) {
         )}
 
         {/* Multi-image indicator - top right */}
-        {item.images.length > 1 && (
+        {(hasMultipleMedia || hasVideoMedia) && (
           <View style={styles.multiImageBadge}>
-            <Ionicons name="images-outline" size={11} color="#fff" />
+            <Ionicons name={hasVideoMedia ? 'videocam-outline' : 'images-outline'} size={11} color="#fff" />
           </View>
         )}
 

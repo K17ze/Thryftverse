@@ -125,6 +125,8 @@ export const config = {
     process.env.OTEL_EXPORTER_OTLP_HTTP_URL ?? 'http://localhost:4318/v1/traces',
   auctionSweepIntervalMs: asNumber(process.env.AUCTION_SWEEP_INTERVAL_MS, 30_000),
   onezeReconcileIntervalMs: asNumber(process.env.ONEZE_RECONCILE_INTERVAL_MS, 60 * 60 * 1000),
+  onezeMintQuoteTtlSeconds: asNumber(process.env.ONEZE_MINT_QUOTE_TTL_SECONDS, 60),
+  onezeMintPaymentGraceSeconds: asNumber(process.env.ONEZE_MINT_PAYMENT_GRACE_SECONDS, 5 * 60),
   onezeWithdrawalQuoteTtlSeconds: asNumber(process.env.ONEZE_WITHDRAWAL_QUOTE_TTL_SECONDS, 60),
   onezeWithdrawalInstantLimitMg: asNumber(process.env.ONEZE_WITHDRAWAL_INSTANT_LIMIT_MG, 20_000),
   onezeTravelRuleThresholdMg: asNumber(process.env.ONEZE_TRAVEL_RULE_THRESHOLD_MG, 11_000),
