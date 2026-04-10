@@ -104,7 +104,7 @@ Payout operations:
 1ze money layer:
 
 - `GET /oracle/gold/latest`
-- `POST /oracle/gold/override` (gold operator token required)
+- `POST /oracle/gold/override` (platform operator token required)
 - `GET /wallet/1ze/quote`
 - `GET /wallet/1ze/fx-quote`
 - `POST /wallet/1ze/mint/quote`
@@ -121,7 +121,7 @@ Payout operations:
 - `GET /wallet/1ze/:userId/ledger`
 - `GET /wallet/1ze/:userId/transfers`
 - `GET /wallet/1ze/:userId/position`
-- `POST /wallet/1ze/reconcile` (gold operator token required; reserve override is deprecated in closed-loop mode)
+- `POST /wallet/1ze/reconcile` (platform operator token required)
 
 Compliance and regulatory:
 
@@ -185,9 +185,9 @@ Money-layer request notes:
 - Mint allocation worker flow is queue-driven and follows `PAYMENT_CONFIRMED` -> `RESERVE_PURCHASING` -> `RESERVE_ALLOCATED` -> `WALLET_CREDITED` -> `SETTLED`.
 - `GET /wallet/1ze/mint/:operationId` returns the full mint operation state for frontend polling/progress UX.
 - `POST /wallet/1ze/mint` accepts `fiatAmount` + `fiatCurrency` and optional `paymentIntentId`.
-- `POST /wallet/1ze/burn` is disabled in closed-loop mode (`ONEZE_BURN_DISABLED`).
-- `POST /wallet/1ze/transfer` accepts `recipientUserId` + `izeAmount`, with optional `senderUserId` (admin context), `fiatCurrency`, `note`, and metadata.
-- Legacy `wallet/1ze/withdrawals/*` routes are disabled in closed-loop mode (`ONEZE_WITHDRAWAL_DISABLED`).
+- `POST /wallet/1ze/burn` is permanently unavailable in closed-loop mode (`ONEZE_BURN_DISABLED`).
+- `POST /wallet/1ze/transfer` accepts `recipientUserId` + `izeAmount` + required `contextType` (`marketplace_sale|coOwn_trade|platform_reward`) + required `contextId`, with optional `senderUserId` (admin context), `fiatCurrency`, `note`, and metadata.
+- Legacy `wallet/1ze/withdrawals/*` routes are permanently unavailable in closed-loop mode (`ONEZE_WITHDRAWAL_DISABLED`).
 - Sale-proceeds withdrawals are created with `POST /users/:userId/payout-requests` and settled through payout rails.
 - `GET /wallet/1ze/:userId/balance` and `GET /wallet/1ze/:userId/ledger` read from the new `wallets` and append-only `wallet_ledger` architecture tables.
 - `GET /wallet/1ze/:userId/transfers` supports `direction=all|inbound|outbound` and `limit`.
@@ -226,6 +226,7 @@ npm run docker:check
 
 Admin headers:
 - API maintenance routes: `x-security-admin-token`
+- 1ze operator routes: `x-platform-operator-token`
 - API -> key-service runtime calls use `x-service-token` with `KEY_SERVICE_CLIENT_TOKEN`.
 - API -> key-service admin actions use `KEY_SERVICE_ADMIN_TOKEN` from API env.
 - `API_SECURITY_ADMIN_TOKEN` is required in production for API maintenance routes.

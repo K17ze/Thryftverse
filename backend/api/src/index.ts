@@ -26,8 +26,8 @@ import {
 } from './lib/auth.js';
 import { sendAuthEmail } from './lib/authEmail.js';
 import {
-  assertGoldOperatorToken,
-  createGoldReserveAttestation,
+  assertOperatorToken,
+  createIzeReconciliationAttestation,
   resolveGoldRate,
   setGoldRateOverride,
 } from './lib/goldOracle.js';
@@ -788,7 +788,7 @@ type LedgerAccountCode =
   | 'ize_wallet'
   | 'ize_pending_redemption'
   | 'ize_outstanding'
-  | 'gold_reserve_grams';
+  | 'ize_fiat_received';
 type PaymentIntentStatus =
   | 'requires_payment_method'
   | 'requires_confirmation'
@@ -981,6 +981,10 @@ interface OnezeReconciliationRow {
 
 function createRuntimeId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.floor(Math.random() * 1_000_000)}`;
+}
+
+function directOnezeWithdrawalRoutesDisabled(): boolean {
+  return true;
 }
 
 type ChatConversationType = 'dm' | 'group';
@@ -1655,7 +1659,7 @@ async function onezeTablesAvailable(client: DbQueryable): Promise<boolean> {
         AND to_regclass('public.wallet_ize_operations') IS NOT NULL
         AND to_regclass('public.gold_rate_quotes') IS NOT NULL
         AND to_regclass('public.gold_rate_overrides') IS NOT NULL
-        AND to_regclass('public.gold_reserve_attestations') IS NOT NULL AS exists
+        AND to_regclass('public.ize_reconciliation_snapshots') IS NOT NULL AS exists
     `
   );
 
@@ -2170,11 +2174,10 @@ async function evaluateP2pPolicyEligibility(
     });
   }
 
-  const requiresContext = senderPolicy.requires_context || recipientPolicy.requires_context;
-  if (requiresContext && (!input.contextType || !input.contextId)) {
+  if (!input.contextType || !input.contextId) {
     throw createApiError(
       'P2P_TRANSFER_CONTEXT_REQUIRED',
-      'This transfer requires marketplace or co-own context in one of the jurisdictions'
+      'P2P transfer context is required for all jurisdictions in closed-loop mode'
     );
   }
 
@@ -2914,14 +2917,13 @@ async function getTotalUserLedgerIzeBalance(client: DbQueryable): Promise<number
 
 async function getPlatformIzeReserveSnapshot(client: DbQueryable): Promise<{
   outstandingIze: number;
-  reserveGrams: number;
+  liquidityBufferIze: null;
   circulatingIze: number;
   supplyDeltaIze: number;
   supplyParityRatio: number | null;
 }> {
-  const [outstandingIze, reserveGrams, circulatingIze] = await Promise.all([
+  const [outstandingIze, circulatingIze] = await Promise.all([
     getLedgerAccountBalance(client, 'platform', 'platform', 'ize_outstanding', 'IZE'),
-    getLedgerAccountBalance(client, 'platform', 'platform', 'gold_reserve_grams', 'XAU'),
     getTotalUserLedgerIzeBalance(client),
   ]);
 
@@ -2933,7 +2935,7 @@ async function getPlatformIzeReserveSnapshot(client: DbQueryable): Promise<{
 
   return {
     outstandingIze,
-    reserveGrams,
+    liquidityBufferIze: null,
     circulatingIze,
     supplyDeltaIze,
     supplyParityRatio,
@@ -5616,14 +5618,53 @@ async function processQueuedOnezeWithdrawalExecution(input: {
   initiatedBy: string;
   reason: 'threshold_queue' | 'manual_queue';
 }): Promise<void> {
-  app.log.warn(
-    {
+  if (!(await onezeArchitectureTablesAvailable(db))) {
+    app.log.warn(
+      {
+        withdrawalId: input.withdrawalId,
+      },
+      'Skipped queued 1ze withdrawal execution because architecture tables are unavailable'
+    );
+    return;
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    const execution = await executeReservedWithdrawal(client, {
       withdrawalId: input.withdrawalId,
-      initiatedBy: input.initiatedBy,
-      queueReason: input.reason,
-    },
-    'Skipped queued 1ze withdrawal execution because direct 1ze withdrawals are disabled in closed-loop mode'
-  );
+      metadata: {
+        source: 'queue_worker',
+        initiatedBy: input.initiatedBy,
+        queueReason: input.reason,
+      },
+    });
+
+    await client.query('COMMIT');
+
+    app.log.info(
+      {
+        withdrawalId: input.withdrawalId,
+        alreadySettled: execution.alreadySettled,
+        queueReason: input.reason,
+      },
+      'Processed queued 1ze withdrawal execution'
+    );
+  } catch (error) {
+    await client.query('ROLLBACK');
+    app.log.error(
+      {
+        err: error,
+        withdrawalId: input.withdrawalId,
+        queueReason: input.reason,
+      },
+      'Failed queued 1ze withdrawal execution'
+    );
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 async function runOnezeReconciliation(reason: 'startup' | 'interval' | 'manual'): Promise<{
@@ -12025,12 +12066,13 @@ app.post('/oracle/gold/override', async (request, reply) => {
   });
 
   try {
-    assertGoldOperatorToken(request.headers['x-gold-operator-token'] as string | undefined);
+    const operatorToken = request.headers['x-platform-operator-token'] as string | undefined;
+    assertOperatorToken(operatorToken);
   } catch {
     reply.code(401);
     return {
       ok: false,
-      error: 'Missing or invalid gold operator token',
+      error: 'Missing or invalid operator token',
     };
   }
 
@@ -12687,8 +12729,8 @@ app.post('/wallet/1ze/mint', async (request, reply) => {
 
     if (config.nodeEnv === 'production' && !payload.paymentIntentId) {
       throw createApiError(
-        'IZE_MINT_BACKING_REQUIRED',
-        'A settled wallet_topup paymentIntentId is required to mint 1ze in production'
+        'IZE_MINT_PAYMENT_REQUIRED',
+        'A settled wallet_topup paymentIntentId is required to credit 1ze in production'
       );
     }
 
@@ -12797,8 +12839,7 @@ app.post('/wallet/1ze/mint', async (request, reply) => {
         circulatingIze: reserveSnapshot.circulatingIze,
         supplyDeltaIze: reserveSnapshot.supplyDeltaIze,
         supplyParityRatio: reserveSnapshot.supplyParityRatio,
-        liquidityBufferGrams: reserveSnapshot.reserveGrams,
-        reserveGrams: reserveSnapshot.reserveGrams,
+        liquidityBufferIze: reserveSnapshot.liquidityBufferIze,
       },
       architecture: architectureEnabled
         ? {
@@ -12861,17 +12902,244 @@ app.post('/wallet/1ze/burn', async (request, reply) => {
   const payload = bodySchema.parse(request.body ?? {});
   const actorUserId = resolveAuthenticatedUserId(request, payload.userId);
 
-  reply.code(410);
-  return {
-    ok: false,
-    error:
-      'Direct 1ze burn withdrawals are disabled in closed-loop mode. Use payout requests funded by completed sale proceeds.',
-    code: 'ONEZE_BURN_DISABLED',
-    details: {
-      actorUserId,
+  if (directOnezeWithdrawalRoutesDisabled()) {
+    reply.code(410);
+    return {
+      ok: false,
+      error:
+        'Direct 1ze burn withdrawals are permanently unavailable in closed-loop mode. Use payout requests funded by completed sale proceeds.',
+      code: 'ONEZE_BURN_DISABLED',
+      details: {
+        actorUserId,
+        fiatCurrency: payload.fiatCurrency.toUpperCase(),
+      },
+    };
+  }
+
+  if (!(await onezeTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze money-layer tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    await ensureUserExists(actorUserId);
+
+    const idempotencyRequestHash = payload.idempotencyKey
+      ? hashWalletIdempotencyPayload({
+          userId: actorUserId,
+          izeAmount: Number(payload.izeAmount.toFixed(6)),
+          fiatCurrency: payload.fiatCurrency.toUpperCase(),
+          payoutRequestId: payload.payoutRequestId ?? null,
+          metadata: payload.metadata ?? {},
+        })
+      : null;
+
+    if (payload.idempotencyKey && idempotencyRequestHash) {
+      const idempotentResponse = await getWalletIdempotentResponse(client, {
+        userId: actorUserId,
+        operation: 'burn',
+        idempotencyKey: payload.idempotencyKey,
+        requestHash: idempotencyRequestHash,
+      });
+
+      if (idempotentResponse) {
+        await client.query('COMMIT');
+        return idempotentResponse;
+      }
+    }
+
+    if (config.nodeEnv === 'production' && !payload.payoutRequestId) {
+      throw createApiError(
+        'IZE_WITHDRAWAL_PAYOUT_REQUIRED',
+        'A requested/processing/paid payoutRequestId is required to settle a sale-proceeds withdrawal in production'
+      );
+    }
+
+    let payoutGatewayId: string | null = null;
+    let payoutStatus: PayoutRequestStatus | null = null;
+    let payoutAmountCurrency: string | null = null;
+    let payoutAmountGbp: number | null = null;
+    if (payload.payoutRequestId) {
+      const payout = await assertRedeemablePayoutRequest(client, {
+        payoutRequestId: payload.payoutRequestId,
+        userId: actorUserId,
+      });
+
+      payoutGatewayId = payout.gatewayId;
+      payoutStatus = payout.status;
+      payoutAmountCurrency = payout.amountCurrency.toUpperCase();
+      payoutAmountGbp = payout.amountGbp;
+    }
+
+    const quote = await resolveGoldRate(client, payload.fiatCurrency, {
+      forceRefresh: false,
+    });
+    const fiatAmount = Number((payload.izeAmount * quote.ratePerGram).toFixed(6));
+
+    if (payoutAmountCurrency && payoutAmountCurrency !== payload.fiatCurrency.toUpperCase()) {
+      throw createApiError(
+        'PAYOUT_REQUEST_CURRENCY_MISMATCH',
+        'Payout request currency does not match requested 1ze burn currency',
+        {
+          payoutRequestId: payload.payoutRequestId,
+          payoutAmountCurrency,
+          burnCurrency: payload.fiatCurrency.toUpperCase(),
+        }
+      );
+    }
+
+    if (payoutAmountGbp !== null) {
+      let redemptionAmountGbp = fiatAmount;
+      if (payload.fiatCurrency.toUpperCase() !== 'GBP') {
+        const gbpQuote = await resolveGoldRate(client, 'GBP', {
+          forceRefresh: false,
+        });
+        redemptionAmountGbp = Number((payload.izeAmount * gbpQuote.ratePerGram).toFixed(6));
+      }
+
+      const tolerance = Math.max(0.5, payoutAmountGbp * 0.03);
+      if (Math.abs(redemptionAmountGbp - payoutAmountGbp) > tolerance) {
+        throw createApiError(
+          'PAYOUT_REQUEST_AMOUNT_MISMATCH',
+          'Computed redemption value does not match payout request amount',
+          {
+            payoutRequestId: payload.payoutRequestId,
+            payoutAmountGbp,
+            redemptionAmountGbp,
+            tolerance,
+          }
+        );
+      }
+    }
+
+    const operationId = createRuntimeId('ize_burn');
+    await recordIzeBurn(client, {
+      operationId,
+      userId: actorUserId,
+      fiatAmount,
       fiatCurrency: payload.fiatCurrency.toUpperCase(),
-    },
-  };
+      izeAmount: Number(payload.izeAmount.toFixed(6)),
+      ratePerGram: quote.ratePerGram,
+      payoutRequestId: payload.payoutRequestId,
+      metadata: payload.metadata,
+    });
+
+    const architectureEnabled = await onezeArchitectureTablesAvailable(client);
+    let architectureWalletId: string | null = null;
+    let architectureWalletBalanceMg: number | null = null;
+
+    if (architectureEnabled) {
+      const amountMg = onezeAmountToMg(Number(payload.izeAmount.toFixed(6)));
+      const inrRate = await resolveGoldRate(client, 'INR', {
+        forceRefresh: false,
+      });
+      const wallet = await ensureWallet(client, actorUserId, payload.fiatCurrency.toUpperCase());
+      const walletTxId = createRuntimeId('wtx');
+
+      architectureWalletId = wallet.id;
+      architectureWalletBalanceMg = await applyWalletLedgerDelta(client, {
+        walletId: wallet.id,
+        txId: walletTxId,
+        asset: '1ZE',
+        amount: -amountMg,
+        kind: 'BURN',
+        refType: 'wallet_ize_operation',
+        refId: operationId,
+        goldRateInrPerG: inrRate.ratePerGram,
+        metadata: {
+          operationId,
+          userId: actorUserId,
+          payoutRequestId: payload.payoutRequestId ?? null,
+          fiatAmount,
+          fiatCurrency: payload.fiatCurrency.toUpperCase(),
+          pricingReferenceSource: quote.source,
+          ...(payload.metadata ?? {}),
+        },
+      });
+
+      await appendGoldPriceTick(client, `wallet_burn_reference:${quote.source}`, inrRate.ratePerGram);
+    }
+
+    const [walletBalanceIze, reserveSnapshot] = await Promise.all([
+      getLedgerAccountBalance(client, 'user', actorUserId, 'ize_wallet', 'IZE'),
+      getPlatformIzeReserveSnapshot(client),
+    ]);
+
+    const responsePayload: Record<string, unknown> = {
+      ok: true,
+      operation: {
+        id: operationId,
+        type: 'burn',
+        userId: actorUserId,
+        fiatAmount,
+        fiatCurrency: payload.fiatCurrency.toUpperCase(),
+        izeAmount: Number(payload.izeAmount.toFixed(6)),
+        ratePerGram: quote.ratePerGram,
+        rateSource: quote.source,
+        payoutGatewayId,
+        payoutStatus,
+        payoutAmountCurrency,
+        payoutAmountGbp,
+      },
+      balances: {
+        userIze: walletBalanceIze,
+        outstandingIze: reserveSnapshot.outstandingIze,
+        circulatingIze: reserveSnapshot.circulatingIze,
+        supplyDeltaIze: reserveSnapshot.supplyDeltaIze,
+        supplyParityRatio: reserveSnapshot.supplyParityRatio,
+        liquidityBufferIze: reserveSnapshot.liquidityBufferIze,
+      },
+      architecture: architectureEnabled
+        ? {
+            walletId: architectureWalletId,
+            walletBalanceMg: architectureWalletBalanceMg,
+            walletBalanceOneze:
+              architectureWalletBalanceMg === null
+                ? null
+                : mgToOnezeAmount(architectureWalletBalanceMg),
+          }
+        : null,
+    };
+
+    if (payload.idempotencyKey && idempotencyRequestHash) {
+      await saveWalletIdempotentResponse(client, {
+        userId: actorUserId,
+        operation: 'burn',
+        idempotencyKey: payload.idempotencyKey,
+        requestHash: idempotencyRequestHash,
+        responsePayload,
+      });
+    }
+
+    await client.query('COMMIT');
+    reply.code(201);
+    return responsePayload;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    const apiError = getApiError(error);
+    if (apiError) {
+      reply.code(statusCodeForApiError(apiError.code));
+      return {
+        ok: false,
+        error: apiError.message,
+        details: apiError.details,
+      };
+    }
+
+    request.log.error({ err: error, userId: actorUserId }, 'Failed to burn 1ze');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to burn 1ze',
+    };
+  } finally {
+    client.release();
+  }
 });
 
 app.post('/wallet/1ze/transfer', async (request, reply) => {
@@ -12880,8 +13148,8 @@ app.post('/wallet/1ze/transfer', async (request, reply) => {
     recipientUserId: z.string().min(2),
     izeAmount: z.number().positive(),
     fiatCurrency: z.string().length(3).default('GBP'),
-    contextType: z.enum(['order', 'coOwn_trade', 'gift', 'manual']).optional(),
-    contextId: z.string().min(2).max(140).optional(),
+    contextType: z.enum(['marketplace_sale', 'coOwn_trade', 'platform_reward']),
+    contextId: z.string().min(2).max(140),
     note: z.string().max(280).optional(),
     idempotencyKey: z.string().min(8).max(140).optional(),
     metadata: z.record(z.unknown()).optional(),
@@ -13232,17 +13500,269 @@ app.post('/wallet/1ze/withdrawals/quote', async (request, reply) => {
   const payload = bodySchema.parse(request.body ?? {});
   const actorUserId = resolveAuthenticatedUserId(request, payload.userId);
 
-  reply.code(410);
-  return {
-    ok: false,
-    error:
-      'Direct 1ze withdrawal quotes are disabled in closed-loop mode. Withdrawals must be created from completed sale proceeds via payout requests.',
-    code: 'ONEZE_WITHDRAWAL_DISABLED',
-    details: {
-      actorUserId,
-      targetCurrency: payload.targetCurrency.toUpperCase(),
-    },
-  };
+  if (directOnezeWithdrawalRoutesDisabled()) {
+    reply.code(410);
+    return {
+      ok: false,
+      error:
+        'Direct 1ze withdrawal quotes are permanently unavailable in closed-loop mode. Withdrawals must be created from completed sale proceeds via payout requests.',
+      code: 'ONEZE_WITHDRAWAL_DISABLED',
+      details: {
+        actorUserId,
+      },
+    };
+  }
+
+  const providedAmountCount = Number(payload.amountMg !== undefined) + Number(payload.amountOneze !== undefined);
+  if (providedAmountCount !== 1) {
+    reply.code(400);
+    return {
+      ok: false,
+      error: 'Provide exactly one of amountMg or amountOneze',
+    };
+  }
+
+  if (!(await onezeArchitectureTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze wallet architecture tables are unavailable. Run migrations first.',
+    };
+  }
+
+  try {
+    await assertOnezeMintBurnNotHalted();
+  } catch (error) {
+    const apiError = getApiError(error);
+    if (apiError) {
+      reply.code(statusCodeForApiError(apiError.code));
+      return {
+        ok: false,
+        error: apiError.message,
+        details: apiError.details,
+      };
+    }
+
+    throw error;
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    await ensureUserExists(actorUserId);
+
+    const amountMg = payload.amountMg ?? onezeAmountToMg(Number((payload.amountOneze ?? 0).toFixed(6)));
+    if (!Number.isSafeInteger(amountMg) || amountMg <= 0) {
+      throw createApiError('WITHDRAWAL_AMOUNT_INVALID', 'Withdrawal amount cannot be represented safely in mg');
+    }
+
+    const targetCurrency = payload.targetCurrency.toUpperCase();
+    const idempotencyRequestHash = payload.idempotencyKey
+      ? hashWalletIdempotencyPayload({
+          userId: actorUserId,
+          amountMg,
+          targetCurrency,
+          payoutDestination: payload.payoutDestination ?? {},
+        })
+      : null;
+
+    if (payload.idempotencyKey && idempotencyRequestHash) {
+      const idempotentResponse = await getWalletIdempotentResponse(client, {
+        userId: actorUserId,
+        operation: 'withdraw_quote',
+        idempotencyKey: payload.idempotencyKey,
+        requestHash: idempotencyRequestHash,
+      });
+
+      if (idempotentResponse) {
+        await client.query('COMMIT');
+        return idempotentResponse;
+      }
+    }
+
+    const corridor = await resolvePayoutCorridor(client, targetCurrency);
+    if (!corridor || !corridor.enabled) {
+      throw createApiError('WITHDRAWAL_CORRIDOR_UNAVAILABLE', 'Target payout corridor is unavailable', {
+        targetCurrency,
+      });
+    }
+
+    const fxRate = await resolveXauFxRate(client, targetCurrency, {
+      forceRefresh: payload.forceRefresh,
+    });
+
+    const amountOneze = mgToOnezeAmount(amountMg);
+    const grossMinor = toFiatMinor(amountOneze * fxRate.rate, targetCurrency);
+    const spreadMinor = Math.round((grossMinor * Number(corridor.spread_bps)) / 10_000);
+    const networkFeeMinor = Number(corridor.network_fee_minor);
+    const netMinor = grossMinor - spreadMinor - networkFeeMinor;
+    const minAmountMinor = Number(corridor.min_amount_minor);
+    const maxAmountMinor = Number(corridor.max_amount_minor);
+
+    if (grossMinor < minAmountMinor || grossMinor > maxAmountMinor) {
+      throw createApiError(
+        'WITHDRAWAL_AMOUNT_OUT_OF_RANGE',
+        'Withdrawal amount is outside corridor limits',
+        {
+          targetCurrency,
+          minAmountMinor,
+          maxAmountMinor,
+          requestedGrossMinor: grossMinor,
+        }
+      );
+    }
+
+    if (netMinor <= 0) {
+      throw createApiError('WITHDRAWAL_NET_AMOUNT_INVALID', 'Withdrawal net payout must be positive', {
+        targetCurrency,
+        grossMinor,
+        spreadMinor,
+        networkFeeMinor,
+        netMinor,
+      });
+    }
+
+    const withdrawalId = createRuntimeId('wdq');
+    const rateExpiresAt = new Date(Date.now() + config.onezeWithdrawalQuoteTtlSeconds * 1_000).toISOString();
+    const withdrawalResult = await client.query<WithdrawalRow>(
+      `
+        INSERT INTO withdrawals (
+          id,
+          user_id,
+          burn_tx_id,
+          amount_mg,
+          target_currency,
+          gross_minor,
+          spread_minor,
+          network_fee_minor,
+          net_minor,
+          rate_locked,
+          rate_expires_at,
+          rail,
+          rail_ref,
+          status,
+          payout_destination,
+          metadata
+        )
+        VALUES (
+          $1,
+          $2,
+          NULL,
+          $3,
+          $4,
+          $5,
+          $6,
+          $7,
+          $8,
+          $9,
+          $10,
+          $11,
+          NULL,
+          'QUOTED',
+          $12::jsonb,
+          $13::jsonb
+        )
+        RETURNING
+          id,
+          user_id,
+          burn_tx_id,
+          amount_mg::text,
+          target_currency,
+          gross_minor::text,
+          spread_minor::text,
+          network_fee_minor::text,
+          net_minor::text,
+          rate_locked::text,
+          rate_expires_at::text,
+          rail,
+          rail_ref,
+          status,
+          payout_destination,
+          metadata,
+          created_at::text,
+          completed_at::text
+      `,
+      [
+        withdrawalId,
+        actorUserId,
+        amountMg,
+        targetCurrency,
+        grossMinor,
+        spreadMinor,
+        networkFeeMinor,
+        netMinor,
+        fxRate.rate,
+        rateExpiresAt,
+        corridor.rail,
+        toJsonString(payload.payoutDestination ?? {}),
+        toJsonString({
+          quoteSource: fxRate.source,
+          quoteObservedAt: fxRate.observedAt,
+          quoteValidForSeconds: config.onezeWithdrawalQuoteTtlSeconds,
+          corridor: {
+            currency: targetCurrency,
+            rail: corridor.rail,
+            spreadBps: corridor.spread_bps,
+            settlementSlaHours: corridor.settlement_sla_hours,
+          },
+          ...(payload.metadata ?? {}),
+        }),
+      ]
+    );
+
+    const withdrawal = toWithdrawalPayload(withdrawalResult.rows[0]);
+    const responsePayload: Record<string, unknown> = {
+      ok: true,
+      withdrawal,
+      quote: {
+        validForSeconds: config.onezeWithdrawalQuoteTtlSeconds,
+        expiresAt: withdrawal.rateExpiresAt,
+        source: fxRate.source,
+      },
+      corridor: {
+        currency: targetCurrency,
+        rail: corridor.rail,
+        spreadBps: corridor.spread_bps,
+        networkFeeMinor,
+        minAmountMinor,
+        maxAmountMinor,
+      },
+    };
+
+    if (payload.idempotencyKey && idempotencyRequestHash) {
+      await saveWalletIdempotentResponse(client, {
+        userId: actorUserId,
+        operation: 'withdraw_quote',
+        idempotencyKey: payload.idempotencyKey,
+        requestHash: idempotencyRequestHash,
+        responsePayload,
+      });
+    }
+
+    await client.query('COMMIT');
+    reply.code(201);
+    return responsePayload;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    const apiError = getApiError(error);
+    if (apiError) {
+      reply.code(statusCodeForApiError(apiError.code));
+      return {
+        ok: false,
+        error: apiError.message,
+        details: apiError.details,
+      };
+    }
+
+    request.log.error({ err: error, userId: actorUserId }, 'Failed to quote 1ze withdrawal');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to quote 1ze withdrawal',
+    };
+  } finally {
+    client.release();
+  }
 });
 
 app.post('/wallet/1ze/withdrawals/:withdrawalId/accept', async (request, reply) => {
@@ -13260,17 +13780,252 @@ app.post('/wallet/1ze/withdrawals/:withdrawalId/accept', async (request, reply) 
   const payload = bodySchema.parse(request.body ?? {});
   const actorUserId = resolveAuthenticatedUserId(request, payload.userId);
 
-  reply.code(410);
-  return {
-    ok: false,
-    error:
-      'Direct 1ze withdrawal accepts are disabled in closed-loop mode. Withdrawals must be created from completed sale proceeds via payout requests.',
-    code: 'ONEZE_WITHDRAWAL_DISABLED',
-    details: {
-      actorUserId,
-      withdrawalId,
-    },
-  };
+  if (directOnezeWithdrawalRoutesDisabled()) {
+    reply.code(410);
+    return {
+      ok: false,
+      error:
+        'Direct 1ze withdrawal accepts are permanently unavailable in closed-loop mode. Withdrawals must be created from completed sale proceeds via payout requests.',
+      code: 'ONEZE_WITHDRAWAL_DISABLED',
+      details: {
+        actorUserId,
+        withdrawalId,
+      },
+    };
+  }
+
+  if (!(await onezeArchitectureTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze wallet architecture tables are unavailable. Run migrations first.',
+    };
+  }
+
+  try {
+    await assertOnezeMintBurnNotHalted();
+  } catch (error) {
+    const apiError = getApiError(error);
+    if (apiError) {
+      reply.code(statusCodeForApiError(apiError.code));
+      return {
+        ok: false,
+        error: apiError.message,
+        details: apiError.details,
+      };
+    }
+
+    throw error;
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    const idempotencyRequestHash = payload.idempotencyKey
+      ? hashWalletIdempotencyPayload({
+          actorUserId,
+          withdrawalId,
+        })
+      : null;
+
+    if (payload.idempotencyKey && idempotencyRequestHash) {
+      const idempotentResponse = await getWalletIdempotentResponse(client, {
+        userId: actorUserId,
+        operation: 'withdraw_accept',
+        idempotencyKey: payload.idempotencyKey,
+        requestHash: idempotencyRequestHash,
+      });
+
+      if (idempotentResponse) {
+        await client.query('COMMIT');
+        return idempotentResponse;
+      }
+    }
+
+    const withdrawal = await loadWithdrawalById(client, withdrawalId, { forUpdate: true });
+    if (!withdrawal) {
+      throw createApiError('WITHDRAWAL_NOT_FOUND', 'Withdrawal quote not found', { withdrawalId });
+    }
+
+    if (request.authUser?.role !== 'admin' && withdrawal.user_id !== actorUserId) {
+      throw createApiError('FORBIDDEN_USER_CONTEXT', 'Forbidden: withdrawal does not belong to user context', {
+        authUserId: actorUserId,
+        withdrawalUserId: withdrawal.user_id,
+      });
+    }
+
+    if (withdrawal.status === 'RESERVED' || withdrawal.status === 'PAID_OUT') {
+      const wallet = await ensureWallet(client, withdrawal.user_id, withdrawal.target_currency);
+      const responsePayload: Record<string, unknown> = {
+        ok: true,
+        alreadyReserved: true,
+        withdrawal: toWithdrawalPayload(withdrawal),
+        wallet: toWalletPayload(wallet),
+      };
+
+      if (payload.idempotencyKey && idempotencyRequestHash) {
+        await saveWalletIdempotentResponse(client, {
+          userId: actorUserId,
+          operation: 'withdraw_accept',
+          idempotencyKey: payload.idempotencyKey,
+          requestHash: idempotencyRequestHash,
+          responsePayload,
+        });
+      }
+
+      await client.query('COMMIT');
+      return responsePayload;
+    }
+
+    if (!canTransitionWithdrawalStatus(withdrawal.status, 'RESERVED')) {
+      throw createApiError('WITHDRAWAL_STATE_INVALID', 'Withdrawal cannot be reserved from current status', {
+        withdrawalId,
+        status: withdrawal.status,
+      });
+    }
+
+    const expiresAtMs = Date.parse(withdrawal.rate_expires_at);
+    if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
+      throw createApiError('WITHDRAWAL_QUOTE_EXPIRED', 'Withdrawal quote has expired', {
+        withdrawalId,
+        rateExpiresAt: withdrawal.rate_expires_at,
+      });
+    }
+
+    const amountMg = Number(withdrawal.amount_mg);
+    const requiresQueuedExecution = amountMg > config.onezeWithdrawalInstantLimitMg;
+    const wallet = await ensureWallet(client, withdrawal.user_id, withdrawal.target_currency);
+    const inrRate = await resolveGoldRate(client, 'INR', {
+      forceRefresh: false,
+    });
+    const burnTxId = withdrawal.burn_tx_id ?? createRuntimeId('wdburn');
+
+    const walletBalanceAfterMg = await applyWalletLedgerDelta(client, {
+      walletId: wallet.id,
+      txId: burnTxId,
+      asset: '1ZE',
+      amount: -amountMg,
+      kind: 'WITHDRAWAL_RESERVED',
+      refType: 'withdrawal',
+      refId: withdrawal.id,
+      goldRateInrPerG: inrRate.ratePerGram,
+      metadata: {
+        withdrawalId: withdrawal.id,
+        actorUserId,
+        targetCurrency: withdrawal.target_currency,
+        ...(payload.metadata ?? {}),
+      },
+    });
+
+    const updatedResult = await client.query<WithdrawalRow>(
+      `
+        UPDATE withdrawals
+        SET
+          burn_tx_id = $2,
+          status = 'RESERVED',
+          metadata = metadata || $3::jsonb
+        WHERE id = $1
+        RETURNING
+          id,
+          user_id,
+          burn_tx_id,
+          amount_mg::text,
+          target_currency,
+          gross_minor::text,
+          spread_minor::text,
+          network_fee_minor::text,
+          net_minor::text,
+          rate_locked::text,
+          rate_expires_at::text,
+          rail,
+          rail_ref,
+          status,
+          payout_destination,
+          metadata,
+          created_at::text,
+          completed_at::text
+      `,
+      [
+        withdrawal.id,
+        burnTxId,
+        toJsonString({
+          acceptedAt: new Date().toISOString(),
+          acceptedBy: actorUserId,
+          ...(payload.metadata ?? {}),
+        }),
+      ]
+    );
+
+    const updatedWithdrawal = updatedResult.rows[0];
+    const responsePayload: Record<string, unknown> = {
+      ok: true,
+      withdrawal: toWithdrawalPayload(updatedWithdrawal),
+      wallet: {
+        walletId: wallet.id,
+        onezeBalanceMg: walletBalanceAfterMg,
+        onezeBalance: mgToOnezeAmount(walletBalanceAfterMg),
+      },
+      execution: {
+        mode: requiresQueuedExecution ? 'queued' : 'manual',
+        queued: requiresQueuedExecution,
+        instantLimitMg: config.onezeWithdrawalInstantLimitMg,
+      },
+    };
+
+    await client.query('COMMIT');
+
+    if (requiresQueuedExecution) {
+      try {
+        await enqueueOnezeWithdrawalExecuteJob({
+          withdrawalId: updatedWithdrawal.id,
+          initiatedBy: actorUserId,
+          reason: 'threshold_queue',
+        });
+      } catch (queueError) {
+        request.log.error(
+          { err: queueError, withdrawalId: updatedWithdrawal.id },
+          'Failed to enqueue threshold-based 1ze withdrawal execution'
+        );
+
+        const execution = responsePayload.execution as Record<string, unknown>;
+        execution.queued = false;
+        execution.queueError = 'queue_enqueue_failed';
+      }
+    }
+
+    if (payload.idempotencyKey && idempotencyRequestHash) {
+      await saveWalletIdempotentResponse(client, {
+        userId: actorUserId,
+        operation: 'withdraw_accept',
+        idempotencyKey: payload.idempotencyKey,
+        requestHash: idempotencyRequestHash,
+        responsePayload,
+      });
+    }
+
+    return responsePayload;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    const apiError = getApiError(error);
+    if (apiError) {
+      reply.code(statusCodeForApiError(apiError.code));
+      return {
+        ok: false,
+        error: apiError.message,
+        details: apiError.details,
+      };
+    }
+
+    request.log.error({ err: error, withdrawalId, userId: actorUserId }, 'Failed to accept 1ze withdrawal');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to accept 1ze withdrawal',
+    };
+  } finally {
+    client.release();
+  }
 });
 
 app.post('/wallet/1ze/withdrawals/:withdrawalId/execute', async (request, reply) => {
@@ -13291,17 +14046,78 @@ app.post('/wallet/1ze/withdrawals/:withdrawalId/execute', async (request, reply)
   const { withdrawalId } = paramsSchema.parse(request.params);
   const payload = bodySchema.parse(request.body ?? {});
 
-  reply.code(410);
-  return {
-    ok: false,
-    error:
-      'Direct 1ze withdrawal execution is disabled in closed-loop mode. Withdrawals must be created from completed sale proceeds via payout requests.',
-    code: 'ONEZE_WITHDRAWAL_DISABLED',
-    details: {
+  if (directOnezeWithdrawalRoutesDisabled()) {
+    reply.code(410);
+    return {
+      ok: false,
+      error:
+        'Direct 1ze withdrawal execution is permanently unavailable in closed-loop mode. Withdrawals must be created from completed sale proceeds via payout requests.',
+      code: 'ONEZE_WITHDRAWAL_DISABLED',
+      details: {
+        withdrawalId,
+        railRef: payload.railRef ?? null,
+      },
+    };
+  }
+
+  if (!(await onezeArchitectureTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze wallet architecture tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    const execution = await executeReservedWithdrawal(client, {
       withdrawalId,
-      railRef: payload.railRef ?? null,
-    },
-  };
+      railRef: payload.railRef,
+      metadata: {
+        ...(payload.metadata ?? {}),
+        source: 'admin_execute_endpoint',
+      },
+    });
+
+    await client.query('COMMIT');
+
+    if (execution.alreadySettled) {
+      return {
+        ok: true,
+        alreadySettled: true,
+        withdrawal: execution.withdrawal,
+      };
+    }
+
+    return {
+      ok: true,
+      withdrawal: execution.withdrawal,
+      settlement: execution.settlement,
+      wallet: execution.wallet,
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    const apiError = getApiError(error);
+    if (apiError) {
+      reply.code(statusCodeForApiError(apiError.code));
+      return {
+        ok: false,
+        error: apiError.message,
+        details: apiError.details,
+      };
+    }
+
+    request.log.error({ err: error, withdrawalId }, 'Failed to execute 1ze withdrawal');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to execute 1ze withdrawal',
+    };
+  } finally {
+    client.release();
+  }
 });
 
 app.post('/wallet/1ze/withdrawals/:withdrawalId/fail', async (request, reply) => {
@@ -13322,17 +14138,150 @@ app.post('/wallet/1ze/withdrawals/:withdrawalId/fail', async (request, reply) =>
   const { withdrawalId } = paramsSchema.parse(request.params);
   const payload = bodySchema.parse(request.body ?? {});
 
-  reply.code(410);
-  return {
-    ok: false,
-    error:
-      'Direct 1ze withdrawal failure/reversal is disabled in closed-loop mode. Withdrawals must be created from completed sale proceeds via payout requests.',
-    code: 'ONEZE_WITHDRAWAL_DISABLED',
-    details: {
-      withdrawalId,
-      reason: payload.reason ?? null,
-    },
-  };
+  if (directOnezeWithdrawalRoutesDisabled()) {
+    reply.code(410);
+    return {
+      ok: false,
+      error:
+        'Direct 1ze withdrawal failure/reversal is permanently unavailable in closed-loop mode. Withdrawals must be created from completed sale proceeds via payout requests.',
+      code: 'ONEZE_WITHDRAWAL_DISABLED',
+      details: {
+        withdrawalId,
+        reason: payload.reason ?? null,
+      },
+    };
+  }
+
+  if (!(await onezeArchitectureTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze wallet architecture tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    const withdrawal = await loadWithdrawalById(client, withdrawalId, { forUpdate: true });
+    if (!withdrawal) {
+      throw createApiError('WITHDRAWAL_NOT_FOUND', 'Withdrawal not found', { withdrawalId });
+    }
+
+    if (withdrawal.status === 'FAILED' || withdrawal.status === 'REVERSED') {
+      await client.query('COMMIT');
+      return {
+        ok: true,
+        alreadyFailed: true,
+        withdrawal: toWithdrawalPayload(withdrawal),
+      };
+    }
+
+    if (!canTransitionWithdrawalStatus(withdrawal.status, 'FAILED')) {
+      throw createApiError('WITHDRAWAL_STATE_INVALID', 'Withdrawal cannot be failed from current status', {
+        withdrawalId,
+        status: withdrawal.status,
+      });
+    }
+
+    const amountMg = Number(withdrawal.amount_mg);
+    let walletInfo: { walletId: string; onezeBalanceMg: number; onezeBalance: number } | null = null;
+
+    if (withdrawal.status === 'RESERVED') {
+      const inrRate = await resolveGoldRate(client, 'INR', {
+        forceRefresh: false,
+      });
+
+      const wallet = await ensureWallet(client, withdrawal.user_id, withdrawal.target_currency);
+      const walletBalanceAfterMg = await applyWalletLedgerDelta(client, {
+        walletId: wallet.id,
+        txId: withdrawal.burn_tx_id ?? createRuntimeId('wdburn'),
+        asset: '1ZE',
+        amount: amountMg,
+        kind: 'WITHDRAWAL_REVERSED',
+        refType: 'withdrawal',
+        refId: withdrawal.id,
+        goldRateInrPerG: inrRate.ratePerGram,
+        metadata: {
+          withdrawalId,
+          reason: payload.reason ?? 'execution_failed',
+          ...(payload.metadata ?? {}),
+        },
+      });
+
+      walletInfo = {
+        walletId: wallet.id,
+        onezeBalanceMg: walletBalanceAfterMg,
+        onezeBalance: mgToOnezeAmount(walletBalanceAfterMg),
+      };
+    }
+
+    const updatedResult = await client.query<WithdrawalRow>(
+      `
+        UPDATE withdrawals
+        SET
+          status = 'FAILED',
+          completed_at = NOW(),
+          metadata = metadata || $2::jsonb
+        WHERE id = $1
+        RETURNING
+          id,
+          user_id,
+          burn_tx_id,
+          amount_mg::text,
+          target_currency,
+          gross_minor::text,
+          spread_minor::text,
+          network_fee_minor::text,
+          net_minor::text,
+          rate_locked::text,
+          rate_expires_at::text,
+          rail,
+          rail_ref,
+          status,
+          payout_destination,
+          metadata,
+          created_at::text,
+          completed_at::text
+      `,
+      [
+        withdrawal.id,
+        toJsonString({
+          failedAt: new Date().toISOString(),
+          reason: payload.reason ?? 'execution_failed',
+          ...(payload.metadata ?? {}),
+        }),
+      ]
+    );
+
+    await client.query('COMMIT');
+    return {
+      ok: true,
+      withdrawal: toWithdrawalPayload(updatedResult.rows[0]),
+      wallet: walletInfo,
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    const apiError = getApiError(error);
+    if (apiError) {
+      reply.code(statusCodeForApiError(apiError.code));
+      return {
+        ok: false,
+        error: apiError.message,
+        details: apiError.details,
+      };
+    }
+
+    request.log.error({ err: error, withdrawalId }, 'Failed to fail/reverse 1ze withdrawal');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to fail/reverse 1ze withdrawal',
+    };
+  } finally {
+    client.release();
+  }
 });
 
 app.get('/wallet/1ze/:userId/withdrawals', async (request, reply) => {
@@ -13351,17 +14300,62 @@ app.get('/wallet/1ze/:userId/withdrawals', async (request, reply) => {
   const { status, limit } = querySchema.parse(request.query);
   resolveAuthenticatedUserId(request, userId);
 
-  reply.code(410);
+  if (directOnezeWithdrawalRoutesDisabled()) {
+    reply.code(410);
+    return {
+      ok: false,
+      error:
+        'Direct 1ze withdrawal history is permanently unavailable in closed-loop mode. Use payout request history for sale-proceeds withdrawals.',
+      code: 'ONEZE_WITHDRAWAL_DISABLED',
+      details: {
+        userId,
+        status,
+        limit,
+      },
+    };
+  }
+
+  if (!(await onezeArchitectureTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze wallet architecture tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const result = await db.query<WithdrawalRow>(
+    `
+      SELECT
+        id,
+        user_id,
+        burn_tx_id,
+        amount_mg::text,
+        target_currency,
+        gross_minor::text,
+        spread_minor::text,
+        network_fee_minor::text,
+        net_minor::text,
+        rate_locked::text,
+        rate_expires_at::text,
+        rail,
+        rail_ref,
+        status,
+        payout_destination,
+        metadata,
+        created_at::text,
+        completed_at::text
+      FROM withdrawals
+      WHERE user_id = $1
+        AND ($2 = 'all' OR status = $2)
+      ORDER BY created_at DESC
+      LIMIT $3
+    `,
+    [userId, status, limit]
+  );
+
   return {
-    ok: false,
-    error:
-      'Direct 1ze withdrawal history is disabled in closed-loop mode. Use payout request history for sale-proceeds withdrawals.',
-    code: 'ONEZE_WITHDRAWAL_DISABLED',
-    details: {
-      userId,
-      status,
-      limit,
-    },
+    ok: true,
+    items: result.rows.map((row) => toWithdrawalPayload(row)),
   };
 });
 
@@ -13646,26 +14640,24 @@ app.get('/wallet/1ze/:userId/position', async (request, reply) => {
       circulatingIze: reserveSnapshot.circulatingIze,
       supplyDeltaIze: reserveSnapshot.supplyDeltaIze,
       supplyParityRatio: reserveSnapshot.supplyParityRatio,
-      liquidityBufferGrams: reserveSnapshot.reserveGrams,
-      reserveGrams: reserveSnapshot.reserveGrams,
-      reserveCoverageRatio: reserveSnapshot.supplyParityRatio,
+      liquidityBufferIze: reserveSnapshot.liquidityBufferIze,
     },
   };
 });
 
 app.post('/wallet/1ze/reconcile', async (request, reply) => {
   const bodySchema = z.object({
-    reserveGramsOverride: z.number().nonnegative().optional(),
     metadata: z.record(z.unknown()).optional(),
   });
 
   try {
-    assertGoldOperatorToken(request.headers['x-gold-operator-token'] as string | undefined);
+    const operatorToken = request.headers['x-platform-operator-token'] as string | undefined;
+    assertOperatorToken(operatorToken);
   } catch {
     reply.code(401);
     return {
       ok: false,
-      error: 'Missing or invalid gold operator token',
+      error: 'Missing or invalid operator token',
     };
   }
 
@@ -13684,19 +14676,17 @@ app.post('/wallet/1ze/reconcile', async (request, reply) => {
 
     const snapshot = await captureOnezeReconciliationSnapshot(client, 'operator_manual', {
       source: 'wallet_reconcile_endpoint',
-      reserveGramsOverrideIgnored: payload.reserveGramsOverride ?? null,
       ...(payload.metadata ?? {}),
     });
 
-    const attestation = await createGoldReserveAttestation(client, {
+    const attestation = await createIzeReconciliationAttestation(client, {
       attestedBy: 'operator',
       metadata: {
         source: 'wallet_reconcile_endpoint',
         snapshotId: snapshot.id,
-        reserveGramsOverrideIgnored: payload.reserveGramsOverride ?? null,
         ...(payload.metadata ?? {}),
       },
-      thresholdGrams: config.goldReserveDriftThresholdGrams,
+      thresholdIze: config.goldReserveDriftThresholdGrams,
     });
 
     await client.query('COMMIT');
@@ -13704,10 +14694,7 @@ app.post('/wallet/1ze/reconcile', async (request, reply) => {
       ok: true,
       snapshot,
       attestation,
-      warnings:
-        payload.reserveGramsOverride === undefined
-          ? []
-          : ['reserveGramsOverride is deprecated and ignored in closed-loop mode'],
+      warnings: [],
     };
   } catch (error) {
     await client.query('ROLLBACK');
@@ -13739,9 +14726,9 @@ app.get('/wallet/1ze/attestations', async (request, reply) => {
 
   const result = await db.query<{
     id: string;
-    reserve_grams: string;
+    liquidity_buffer_ize: string;
     outstanding_ize: string;
-    drift_grams: string;
+    supply_delta_ize: string;
     within_threshold: boolean;
     attested_by: string | null;
     metadata: Record<string, unknown>;
@@ -13750,14 +14737,14 @@ app.get('/wallet/1ze/attestations', async (request, reply) => {
     `
       SELECT
         id,
-        reserve_grams::text,
+        liquidity_buffer_ize::text,
         outstanding_ize::text,
-        drift_grams::text,
+        supply_delta_ize::text,
         within_threshold,
         attested_by,
         metadata,
         created_at::text
-      FROM gold_reserve_attestations
+      FROM ize_reconciliation_snapshots
       ORDER BY created_at DESC
       LIMIT $1
     `,
@@ -13768,15 +14755,14 @@ app.get('/wallet/1ze/attestations', async (request, reply) => {
     ok: true,
     items: result.rows.map((row) => {
       const metadata = asObject(row.metadata);
-      const supplyDeltaIze = asFiniteNumber(metadata.supplyDeltaIze) ?? Number(row.drift_grams);
+      const supplyDeltaIze = asFiniteNumber(metadata.supplyDeltaIze) ?? Number(row.supply_delta_ize);
 
       return {
         id: row.id,
-        reserveGrams: Number(row.reserve_grams),
-        liquidityBufferGrams: Number(row.reserve_grams),
+        liquidityBufferIze: Number(row.liquidity_buffer_ize),
         outstandingIze: Number(row.outstanding_ize),
         supplyDeltaIze,
-        driftGrams: Number(row.drift_grams),
+        driftIze: Number(row.supply_delta_ize),
         withinSupplyTolerance: row.within_threshold,
         withinThreshold: row.within_threshold,
         attestedBy: row.attested_by,

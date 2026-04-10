@@ -71,7 +71,7 @@ ALTER TABLE ledger_accounts
       'ize_wallet',
       'ize_pending_redemption',
       'ize_outstanding',
-      'gold_reserve_grams'
+      'ize_fiat_received'
     )
   );
 
@@ -121,7 +121,7 @@ ALTER TABLE ledger_entries
 INSERT INTO ledger_accounts (owner_type, owner_id, account_code, currency)
 VALUES
   ('platform', 'platform', 'ize_outstanding', 'IZE'),
-  ('platform', 'platform', 'gold_reserve_grams', 'XAU')
+  ('platform', 'platform', 'ize_fiat_received', 'GBP')
 ON CONFLICT (owner_type, owner_id, account_code, currency) DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS wallet_ize_operations (
@@ -172,19 +172,19 @@ CREATE TABLE IF NOT EXISTS gold_rate_overrides (
 CREATE INDEX IF NOT EXISTS gold_rate_overrides_active_idx
   ON gold_rate_overrides (currency, is_active, created_at DESC);
 
-CREATE TABLE IF NOT EXISTS gold_reserve_attestations (
+CREATE TABLE IF NOT EXISTS ize_reconciliation_snapshots (
   id TEXT PRIMARY KEY,
-  reserve_grams NUMERIC(18, 6) NOT NULL CHECK (reserve_grams >= 0),
+  liquidity_buffer_ize NUMERIC(18, 6) NOT NULL CHECK (liquidity_buffer_ize >= 0),
   outstanding_ize NUMERIC(18, 6) NOT NULL CHECK (outstanding_ize >= 0),
-  drift_grams NUMERIC(18, 6) NOT NULL,
+  supply_delta_ize NUMERIC(18, 6) NOT NULL,
   within_threshold BOOLEAN NOT NULL,
   attested_by TEXT,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS gold_reserve_attestations_created_idx
-  ON gold_reserve_attestations (created_at DESC);
+CREATE INDEX IF NOT EXISTS ize_reconciliation_snapshots_created_idx
+  ON ize_reconciliation_snapshots (created_at DESC);
 
 -- Co-Own matching and holdings
 ALTER TABLE coOwn_orders

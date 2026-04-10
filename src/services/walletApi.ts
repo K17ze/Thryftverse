@@ -184,8 +184,7 @@ interface MintIzeResponse {
     circulatingIze?: number;
     supplyDeltaIze?: number;
     supplyParityRatio?: number | null;
-    liquidityBufferGrams?: number;
-    reserveGrams: number;
+    liquidityBufferIze?: number | null;
   };
 }
 
@@ -207,8 +206,7 @@ interface BurnIzeResponse {
     circulatingIze?: number;
     supplyDeltaIze?: number;
     supplyParityRatio?: number | null;
-    liquidityBufferGrams?: number;
-    reserveGrams: number;
+    liquidityBufferIze?: number | null;
   };
 }
 
@@ -231,9 +229,7 @@ interface WalletIzePositionResponse {
     circulatingIze?: number;
     supplyDeltaIze?: number;
     supplyParityRatio?: number | null;
-    liquidityBufferGrams?: number;
-    reserveGrams: number;
-    reserveCoverageRatio: number | null;
+    liquidityBufferIze?: number | null;
   };
 }
 

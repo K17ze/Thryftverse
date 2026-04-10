@@ -226,12 +226,12 @@ INSERT INTO jurisdiction_policies (
 VALUES
   ('GLOBAL', FALSE, FALSE, NULL, NULL, NULL, TRUE, 'Default deny policy'),
   ('IN', FALSE, TRUE, NULL, NULL, NULL, TRUE, 'India stays closed-loop for sending'),
-  ('DE', TRUE, TRUE, 50000, 500000, 10000, FALSE, 'Open P2P market'),
-  ('FR', TRUE, TRUE, 50000, 500000, 10000, FALSE, 'Open P2P market'),
-  ('GB', TRUE, TRUE, 50000, 500000, 10000, FALSE, 'Open P2P market'),
-  ('AE', TRUE, TRUE, 100000, 1000000, 20000, FALSE, 'Open P2P market'),
-  ('NG', TRUE, TRUE, 30000, 300000, 5000, FALSE, 'Open P2P market'),
-  ('KE', TRUE, TRUE, 30000, 300000, 5000, FALSE, 'Open P2P market')
+  ('DE', TRUE, TRUE, 50000, 500000, 10000, TRUE, 'Context-required P2P market'),
+  ('FR', TRUE, TRUE, 50000, 500000, 10000, TRUE, 'Context-required P2P market'),
+  ('GB', TRUE, TRUE, 50000, 500000, 10000, TRUE, 'Context-required P2P market'),
+  ('AE', TRUE, TRUE, 100000, 1000000, 20000, TRUE, 'Context-required P2P market'),
+  ('NG', TRUE, TRUE, 30000, 300000, 5000, TRUE, 'Context-required P2P market'),
+  ('KE', TRUE, TRUE, 30000, 300000, 5000, TRUE, 'Context-required P2P market')
 ON CONFLICT (country_code)
 DO UPDATE
   SET

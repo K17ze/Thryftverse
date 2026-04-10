@@ -14,17 +14,19 @@ export interface GoldRateSnapshot {
   isOverride: boolean;
 }
 
-export interface GoldReserveAttestation {
+export interface IzeReconciliationAttestation {
   id: string;
-  reserveGrams: number;
+  liquidityBufferIze: null;
   outstandingIze: number;
   circulatingIze: number;
   supplyDeltaIze: number;
-  driftGrams: number;
+  driftIze: number;
   withinThreshold: boolean;
   createdAt: string;
-  thresholdGrams: number;
+  thresholdIze: number;
 }
+
+export type GoldReserveAttestation = IzeReconciliationAttestation;
 
 const DEFAULT_FALLBACK_RATES: Record<string, number> = {
   GBP: 75.2,
@@ -371,7 +373,7 @@ export async function setGoldRateOverride(
 
 async function getPlatformLedgerBalance(
   client: Queryable,
-  accountCode: 'ize_outstanding' | 'gold_reserve_grams',
+  accountCode: 'ize_outstanding',
   currency: string
 ): Promise<number> {
   const result = await client.query<{ balance: string }>(
@@ -423,35 +425,34 @@ async function getTotalUserIzeWalletBalance(client: Queryable): Promise<number> 
   return Number(result.rows[0]?.balance ?? '0');
 }
 
-export async function createGoldReserveAttestation(
+export async function createIzeReconciliationAttestation(
   client: Queryable,
   options?: {
     attestedBy?: string;
     metadata?: Record<string, unknown>;
-    thresholdGrams?: number;
+    thresholdIze?: number;
   }
-): Promise<GoldReserveAttestation> {
-  const threshold = options?.thresholdGrams ?? config.goldReserveDriftThresholdGrams;
+): Promise<IzeReconciliationAttestation> {
+  const threshold = options?.thresholdIze ?? config.goldReserveDriftThresholdGrams;
 
-  const [reserveGrams, outstandingIze, circulatingIze] = await Promise.all([
-    getPlatformLedgerBalance(client, 'gold_reserve_grams', 'XAU'),
+  const [outstandingIze, circulatingIze] = await Promise.all([
     getPlatformLedgerBalance(client, 'ize_outstanding', 'IZE'),
     getTotalUserIzeWalletBalance(client),
   ]);
 
   const supplyDeltaIze = Number((circulatingIze - outstandingIze).toFixed(6));
-  const driftGrams = supplyDeltaIze;
+  const driftIze = supplyDeltaIze;
   const withinThreshold = Math.abs(supplyDeltaIze) <= Math.abs(threshold);
-  const legacyReserveDriftGrams = Number((reserveGrams - outstandingIze).toFixed(6));
+  const liquidityBufferIzeForStorage = 0;
   const attestationId = runtimeId('att');
 
   const inserted = await client.query<{ created_at: string }>(
     `
-      INSERT INTO gold_reserve_attestations (
+      INSERT INTO ize_reconciliation_snapshots (
         id,
-        reserve_grams,
+        liquidity_buffer_ize,
         outstanding_ize,
-        drift_grams,
+        supply_delta_ize,
         within_threshold,
         attested_by,
         metadata
@@ -461,9 +462,9 @@ export async function createGoldReserveAttestation(
     `,
     [
       attestationId,
-      reserveGrams,
+      liquidityBufferIzeForStorage,
       outstandingIze,
-      driftGrams,
+      driftIze,
       withinThreshold,
       options?.attestedBy ?? null,
       JSON.stringify({
@@ -471,8 +472,8 @@ export async function createGoldReserveAttestation(
         circulatingIze,
         supplyDeltaIze,
         toleranceIze: Math.abs(threshold),
-        legacyReserveDriftGrams,
-        operationalLiquidityGrams: reserveGrams,
+        reserveModel: 'none',
+        operationalLiquidityGrams: null,
         ...(options?.metadata ?? {}),
       }),
     ]
@@ -480,24 +481,28 @@ export async function createGoldReserveAttestation(
 
   return {
     id: attestationId,
-    reserveGrams,
+    liquidityBufferIze: null,
     outstandingIze,
     circulatingIze,
     supplyDeltaIze,
-    driftGrams,
+    driftIze,
     withinThreshold,
     createdAt: inserted.rows[0]?.created_at ?? new Date().toISOString(),
-    thresholdGrams: threshold,
+    thresholdIze: threshold,
   };
 }
 
-export function assertGoldOperatorToken(token: string | undefined): void {
+export const createGoldReserveAttestation = createIzeReconciliationAttestation;
+
+export function assertOperatorToken(token: string | undefined): void {
   const configured = config.goldOperatorToken ?? config.apiSecurityAdminToken;
   if (!configured) {
     return;
   }
 
   if (!token || token !== configured) {
-    throw new Error('Missing or invalid gold operator token');
+    throw new Error('Missing or invalid operator token');
   }
 }
+
+export const assertGoldOperatorToken = assertOperatorToken;
