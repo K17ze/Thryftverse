@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import Stripe from 'stripe';
 import { config } from '../config.js';
 
-export type ProviderSlug = 'stripe' | 'razorpay' | 'mollie' | 'flutterwave' | 'tap';
+export type ProviderSlug = 'stripe' | 'razorpay' | 'mollie' | 'flutterwave' | 'tap' | 'wise';
 
 export type MoneyGatewayId =
   | 'mock_fiat_gbp'
@@ -11,7 +11,8 @@ export type MoneyGatewayId =
   | 'razorpay_in'
   | 'mollie_eu'
   | 'flutterwave_africa'
-  | 'tap_gulf';
+  | 'tap_gulf'
+  | 'wise_global';
 
 export type ProviderPaymentStatus =
   | 'requires_confirmation'
@@ -69,6 +70,8 @@ function providerToGatewayId(provider: ProviderSlug): MoneyGatewayId {
       return 'flutterwave_africa';
     case 'tap':
       return 'tap_gulf';
+    case 'wise':
+      return 'wise_global';
     default:
       return 'mock_fiat_gbp';
   }
@@ -110,6 +113,17 @@ function hexDigest(secret: string, payload: string): string {
 function timingSafeEqualHex(a: string, b: string): boolean {
   const left = Buffer.from(a, 'hex');
   const right = Buffer.from(b, 'hex');
+
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(left, right);
+}
+
+function timingSafeEqualString(a: string, b: string): boolean {
+  const left = Buffer.from(a, 'utf8');
+  const right = Buffer.from(b, 'utf8');
 
   if (left.length !== right.length) {
     return false;
@@ -256,6 +270,58 @@ function statusFromTapState(status: string | undefined): ProviderPaymentStatus |
   }
 
   if (normalized === 'initiated' || normalized === 'pending') {
+    return 'processing';
+  }
+
+  return undefined;
+}
+
+function statusFromWisePayoutState(
+  status: string | undefined,
+  eventType: string
+): ProviderPayoutStatus | undefined {
+  const normalizedStatus = status?.toLowerCase();
+  const normalizedEventType = eventType.toLowerCase();
+
+  if (
+    normalizedStatus === 'completed'
+    || normalizedStatus === 'outgoing_payment_sent'
+    || normalizedStatus === 'funds_converted'
+    || normalizedStatus === 'paid'
+    || normalizedEventType.includes('completed')
+    || normalizedEventType.includes('outgoing_payment_sent')
+  ) {
+    return 'paid';
+  }
+
+  if (
+    normalizedStatus === 'cancelled'
+    || normalizedStatus === 'canceled'
+    || normalizedEventType.includes('cancel')
+  ) {
+    return 'cancelled';
+  }
+
+  if (
+    normalizedStatus === 'failed'
+    || normalizedStatus === 'rejected'
+    || normalizedStatus === 'bounced'
+    || normalizedStatus === 'error'
+    || normalizedEventType.includes('fail')
+    || normalizedEventType.includes('reject')
+  ) {
+    return 'failed';
+  }
+
+  if (
+    normalizedStatus === 'processing'
+    || normalizedStatus === 'pending'
+    || normalizedStatus === 'queued'
+    || normalizedStatus === 'created'
+    || normalizedStatus === 'incoming_payment_waiting'
+    || normalizedEventType.includes('processing')
+    || normalizedEventType.includes('pending')
+  ) {
     return 'processing';
   }
 
@@ -516,6 +582,52 @@ function normalizeTapEvent(payload: Record<string, unknown>, rawBody: string): N
   return normalized;
 }
 
+function normalizeWiseEvent(payload: Record<string, unknown>, rawBody: string): NormalizedWebhookEvent {
+  const eventType = asString(payload.event_type) ?? asString(payload.type) ?? 'unknown';
+  const data = asRecord(payload.data);
+  const resource = asRecord(data.resource);
+  const metadata = {
+    ...asRecord(data.metadata),
+    ...asRecord(resource.metadata),
+  };
+
+  const providerPayoutRef =
+    asString(resource.id)
+    ?? asString(data.resource_id)
+    ?? asString(data.transfer_id)
+    ?? asString(data.id)
+    ?? undefined;
+
+  const payoutRequestId =
+    asString(metadata.payoutRequestId)
+    ?? asString(metadata.payout_request_id)
+    ?? asString(data.payoutRequestId)
+    ?? asString(data.payout_request_id)
+    ?? undefined;
+
+  const state =
+    asString(resource.status)
+    ?? asString(asRecord(data.current_state).status)
+    ?? asString(data.status)
+    ?? undefined;
+
+  const providerEventId =
+    asString(payload.id)
+    ?? asString(data.id)
+    ?? (providerPayoutRef ? `${eventType}:${providerPayoutRef}` : derivedEventId('wise', eventType, rawBody));
+
+  return {
+    gatewayId: 'wise_global',
+    providerEventId,
+    eventType,
+    providerIntentRef: providerPayoutRef,
+    payoutRequestId,
+    payoutStatus: statusFromWisePayoutState(state, eventType),
+    metadata,
+    rawPayload: payload,
+  };
+}
+
 function verifyHmacSignature(
   headers: Record<string, unknown>,
   headerName: string,
@@ -556,6 +668,35 @@ function verifyStripeSignature(headers: Record<string, unknown>, rawBody: string
   } catch {
     return null;
   }
+}
+
+function verifyWiseSignature(headers: Record<string, unknown>, rawBody: string): boolean {
+  const signatureHeader =
+    headerValue(headers, 'x-wise-signature')
+    ?? headerValue(headers, 'x-signature');
+
+  if (signatureHeader && config.wiseWebhookSecret) {
+    const expected = hexDigest(config.wiseWebhookSecret, rawBody);
+    const normalized = signatureHeader.replace(/^sha256=/i, '');
+    return timingSafeEqualHex(expected, normalized);
+  }
+
+  if (!config.wiseApiKey) {
+    return false;
+  }
+
+  const bearer = headerValue(headers, 'authorization');
+  const bearerToken =
+    typeof bearer === 'string' && bearer.toLowerCase().startsWith('bearer ')
+      ? bearer.slice(7).trim()
+      : null;
+  const apiToken = bearerToken ?? headerValue(headers, 'x-api-key');
+
+  if (!apiToken) {
+    return false;
+  }
+
+  return timingSafeEqualString(apiToken, config.wiseApiKey);
 }
 
 export async function verifyAndNormalizeWebhook(
@@ -665,6 +806,21 @@ export async function verifyAndNormalizeWebhook(
     };
   }
 
+  if (provider === 'wise') {
+    const ok = verifyWiseSignature(headers, rawBody);
+    if (!ok) {
+      return {
+        verified: false,
+        reason: 'Invalid Wise webhook signature',
+      };
+    }
+
+    return {
+      verified: true,
+      event: normalizeWiseEvent(payload, rawBody),
+    };
+  }
+
   return {
     verified: false,
     reason: `Unsupported provider '${provider}'`,
@@ -691,6 +847,10 @@ export function resolveProviderFromPathSegment(providerSegment: string): Provide
 
   if (normalized === 'tap') {
     return 'tap';
+  }
+
+  if (normalized === 'wise') {
+    return 'wise';
   }
 
   return null;

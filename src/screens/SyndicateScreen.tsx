@@ -531,7 +531,7 @@ export default function CoOwnScreen() {
       <View style={styles.pegCard}>
         <Ionicons name="sparkles-outline" size={14} color={BRAND} />
         <Text style={styles.pegCardText}>
-          1 {STABLE_COIN} = 1 gram of gold. Local value: {formatFromIze(1, { displayMode: 'fiat' })}.
+          {STABLE_COIN} is a closed-loop settlement credit. Local reference value: {formatFromIze(1, { displayMode: 'fiat' })}.
         </Text>
       </View>
     </View>

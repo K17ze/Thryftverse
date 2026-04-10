@@ -38,7 +38,7 @@ const SLIDES = [
   {
     icon: 'wallet-outline' as const,
     title: '1ze + Local Fiat',
-    body: 'Use your preferred display mode while transactions settle through the gold-aware wallet layer.',
+    body: 'Use your preferred display mode while transactions settle through the closed-loop, market-referenced wallet layer.',
   },
   {
     icon: 'shield-checkmark-outline' as const,

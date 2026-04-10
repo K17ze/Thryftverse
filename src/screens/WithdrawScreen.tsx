@@ -19,14 +19,11 @@ import { useCurrencyContext } from '../context/CurrencyContext';
 import { CURRENCIES } from '../constants/currencies';
 import { useToast } from '../context/ToastContext';
 import { useStore } from '../store/useStore';
-import { formatIzeAmount } from '../utils/currency';
 import { parseApiError } from '../lib/apiClient';
 import {
-  burnIze,
   createPayoutAccount,
   createPayoutRequest,
   getIzeFxQuote,
-  getIzeQuote,
   listPayoutAccounts,
   PayoutAccountPayload,
 } from '../services/walletApi';
@@ -293,57 +290,39 @@ export default function WithdrawScreen() {
         throw new Error('Unable to resolve payout conversion right now.');
       }
 
-      const burnQuote = await getIzeQuote({
-        fiatCurrency: payoutCurrency,
-        fiatAmount: payoutAmount,
-      });
-
       const payoutRequestInput =
         payoutCurrency === 'GBP'
           ? {
               payoutAccountId: payoutProfile.id,
-              amountGbp: burnQuote.quote.fiatAmount,
+              amountGbp,
               amountCurrency: 'GBP',
               metadata: {
                 source: 'withdraw_screen_request',
                 enteredDisplayAmount: numericAmountDisplay,
                 enteredDisplayCurrency: currencyCode,
+                payoutMode: 'sale_proceeds_only',
               },
             }
           : {
               payoutAccountId: payoutProfile.id,
-              amount: burnQuote.quote.fiatAmount,
+              amount: payoutAmount,
               amountCurrency: payoutCurrency,
               metadata: {
                 source: 'withdraw_screen_request',
                 enteredDisplayAmount: numericAmountDisplay,
                 enteredDisplayCurrency: currencyCode,
+                payoutMode: 'sale_proceeds_only',
               },
             };
 
-      const payoutRequest = await createPayoutRequest(currentUser.id, payoutRequestInput);
-
-      const burnResult = await burnIze({
-        userId: currentUser.id,
-        izeAmount: burnQuote.quote.izeAmount,
-        fiatCurrency: payoutCurrency,
-        payoutRequestId: payoutRequest.payoutRequest.id,
-        metadata: {
-          source: 'withdraw_screen_burn',
-          payoutRequestId: payoutRequest.payoutRequest.id,
-          displayCurrency: currencyCode,
-          enteredDisplayAmount: numericAmountDisplay,
-        },
-      });
+      await createPayoutRequest(currentUser.id, payoutRequestInput);
 
       const nextBalance = Number(Math.max(0, availableBalance - amountGbp).toFixed(2));
       setAvailableBalance(nextBalance);
       setAmount(getDefaultWithdrawDisplayAmount(nextBalance, currencyCode, goldRates).toFixed(2));
 
       show(
-        `Withdrawal queued: ${formatFromFiat(amountGbp, 'GBP', { displayMode: 'fiat' })} (${formatIzeAmount(
-          burnResult.operation.izeAmount
-        )} redeemed).`,
+        `Withdrawal requested: ${formatFromFiat(amountGbp, 'GBP', { displayMode: 'fiat' })} from your available sale proceeds.`,
         'success'
       );
       navigation.goBack();
@@ -424,7 +403,7 @@ export default function WithdrawScreen() {
         </ScrollView>
 
         <View style={styles.footer}>
-          <Text style={styles.feeText}>Withdrawals take 3-5 working days. No fees apply.</Text>
+          <Text style={styles.feeText}>Withdrawals are processed from completed sale proceeds in 3-5 working days.</Text>
           <AnimatedPressable 
             style={[styles.primaryBtn, !canWithdraw && styles.primaryBtnDisabled]} 
             activeOpacity={0.9} 

@@ -181,6 +181,10 @@ interface MintIzeResponse {
   balances: {
     userIze: number;
     outstandingIze: number;
+    circulatingIze?: number;
+    supplyDeltaIze?: number;
+    supplyParityRatio?: number | null;
+    liquidityBufferGrams?: number;
     reserveGrams: number;
   };
 }
@@ -200,6 +204,10 @@ interface BurnIzeResponse {
   balances: {
     userIze: number;
     outstandingIze: number;
+    circulatingIze?: number;
+    supplyDeltaIze?: number;
+    supplyParityRatio?: number | null;
+    liquidityBufferGrams?: number;
     reserveGrams: number;
   };
 }
@@ -220,6 +228,10 @@ interface WalletIzePositionResponse {
     userIze: number;
     userFiatValue: number;
     outstandingIze: number;
+    circulatingIze?: number;
+    supplyDeltaIze?: number;
+    supplyParityRatio?: number | null;
+    liquidityBufferGrams?: number;
     reserveGrams: number;
     reserveCoverageRatio: number | null;
   };

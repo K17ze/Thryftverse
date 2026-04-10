@@ -74,7 +74,7 @@ $env:EXPO_PUBLIC_API_BASE_URL="http://192.168.1.10:4000"; npx expo start
 - `POST /wallets/:userId/snapshot` and `GET /wallets/:userId/snapshot`
 - `POST /security/keys/:keyName/rotate` (admin-maintenance route, optional bulk rewrap)
 - `POST /ops/auctions/sweep` (admin maintenance trigger for auction settlement job)
-- `POST /ops/oneze/reconcile` (admin maintenance trigger for 1ze reserve invariant snapshot)
+- `POST /ops/oneze/reconcile` (admin maintenance trigger for 1ze closed-loop supply reconciliation snapshot)
 - `POST /ops/oneze/attest` (admin maintenance trigger for signed daily 1ze attestation artifact export)
 - `POST /ops/oneze/mint/:operationId/retry` (admin maintenance trigger for mint reserve-worker retry)
 
@@ -110,18 +110,18 @@ Payout operations:
 - `POST /wallet/1ze/mint/quote`
 - `GET /wallet/1ze/mint/:operationId`
 - `POST /wallet/1ze/mint`
-- `POST /wallet/1ze/burn`
+- `POST /wallet/1ze/burn` (deprecated/disabled in closed-loop mode)
 - `POST /wallet/1ze/transfer`
-- `POST /wallet/1ze/withdrawals/quote`
-- `POST /wallet/1ze/withdrawals/:withdrawalId/accept`
-- `POST /wallet/1ze/withdrawals/:withdrawalId/execute` (admin-maintenance route)
-- `POST /wallet/1ze/withdrawals/:withdrawalId/fail` (admin-maintenance route)
-- `GET /wallet/1ze/:userId/withdrawals`
+- `POST /wallet/1ze/withdrawals/quote` (deprecated/disabled in closed-loop mode)
+- `POST /wallet/1ze/withdrawals/:withdrawalId/accept` (deprecated/disabled in closed-loop mode)
+- `POST /wallet/1ze/withdrawals/:withdrawalId/execute` (deprecated/disabled in closed-loop mode)
+- `POST /wallet/1ze/withdrawals/:withdrawalId/fail` (deprecated/disabled in closed-loop mode)
+- `GET /wallet/1ze/:userId/withdrawals` (deprecated/disabled in closed-loop mode)
 - `GET /wallet/1ze/:userId/balance`
 - `GET /wallet/1ze/:userId/ledger`
 - `GET /wallet/1ze/:userId/transfers`
 - `GET /wallet/1ze/:userId/position`
-- `POST /wallet/1ze/reconcile` (gold operator token required)
+- `POST /wallet/1ze/reconcile` (gold operator token required; reserve override is deprecated in closed-loop mode)
 
 Compliance and regulatory:
 
@@ -181,21 +181,19 @@ Market history pagination:
 Money-layer request notes:
 
 - `POST /wallet/1ze/mint/quote` creates a stateful mint operation (`INITIATED` -> `PAYMENT_PENDING`) with a locked gold quote (`ONEZE_MINT_QUOTE_TTL_SECONDS`) and a wallet-topup payment intent.
-- `POST /webhooks/:provider` now advances mint operations to `PAYMENT_CONFIRMED` on settled wallet-topup payment events and enqueues reserve allocation.
-- Mint reserve worker flow is queue-driven and follows `PAYMENT_CONFIRMED` -> `RESERVE_PURCHASING` -> `RESERVE_ALLOCATED` -> `WALLET_CREDITED` -> `SETTLED`.
+- `POST /webhooks/:provider` now advances mint operations to `PAYMENT_CONFIRMED` on settled wallet-topup payment events and enqueues mint allocation processing.
+- Mint allocation worker flow is queue-driven and follows `PAYMENT_CONFIRMED` -> `RESERVE_PURCHASING` -> `RESERVE_ALLOCATED` -> `WALLET_CREDITED` -> `SETTLED`.
 - `GET /wallet/1ze/mint/:operationId` returns the full mint operation state for frontend polling/progress UX.
 - `POST /wallet/1ze/mint` accepts `fiatAmount` + `fiatCurrency` and optional `paymentIntentId`.
-- `POST /wallet/1ze/burn` accepts `izeAmount` + `fiatCurrency` and optional `payoutRequestId`.
+- `POST /wallet/1ze/burn` is disabled in closed-loop mode (`ONEZE_BURN_DISABLED`).
 - `POST /wallet/1ze/transfer` accepts `recipientUserId` + `izeAmount`, with optional `senderUserId` (admin context), `fiatCurrency`, `note`, and metadata.
-- `POST /wallet/1ze/withdrawals/quote` accepts exactly one of `amountMg` or `amountOneze`, plus `targetCurrency`; quote validity defaults to `ONEZE_WITHDRAWAL_QUOTE_TTL_SECONDS`.
-- `POST /wallet/1ze/withdrawals/:withdrawalId/accept` reserves 1ze balance atomically (wallet debit + `WITHDRAWAL_RESERVED` ledger row). Amounts above `ONEZE_WITHDRAWAL_INSTANT_LIMIT_MG` are queued for async execution.
-- `POST /wallet/1ze/withdrawals/:withdrawalId/execute` finalizes payout and reserve consumption (`WITHDRAWAL_SETTLED`) and marks withdrawal `PAID_OUT`.
-- `POST /wallet/1ze/withdrawals/:withdrawalId/fail` reverses reserved 1ze (`WITHDRAWAL_REVERSED`) and marks withdrawal `FAILED`.
+- Legacy `wallet/1ze/withdrawals/*` routes are disabled in closed-loop mode (`ONEZE_WITHDRAWAL_DISABLED`).
+- Sale-proceeds withdrawals are created with `POST /users/:userId/payout-requests` and settled through payout rails.
 - `GET /wallet/1ze/:userId/balance` and `GET /wallet/1ze/:userId/ledger` read from the new `wallets` and append-only `wallet_ledger` architecture tables.
 - `GET /wallet/1ze/:userId/transfers` supports `direction=all|inbound|outbound` and `limit`.
-- `POST /wallet/1ze/mint` and `POST /wallet/1ze/burn` support optional `idempotencyKey` for safe retries.
-- Reconciliation safety guard: if reserve invariant fails, mint/burn/withdraw-accept entry points return a halt error until reconciliation is healthy again.
-- In production, `paymentIntentId` is required for mint and `payoutRequestId` is required for burn.
+- `POST /wallet/1ze/mint` supports optional `idempotencyKey` for safe retries.
+- Reconciliation safety guard: if closed-loop supply parity drifts beyond tolerance, mint and transfer entry points return a halt error until reconciliation is healthy again.
+- In production, `paymentIntentId` is required for mint.
 - `POST /users/:userId/payout-requests` accepts exactly one of:
 	- `amountGbp` (explicit internal settlement amount), or
 	- `amount` (in payout account currency; converted to GBP internally via XAU cross rates).

@@ -15,6 +15,7 @@ export type CapabilityPaymentGatewayId =
   | 'mollie_eu'
   | 'flutterwave_africa'
   | 'tap_gulf'
+  | 'wise_global'
   | 'mock_fiat_gbp';
 
 export type CapabilityPaymentChannel = 'commerce' | 'co-own' | 'wallet_topup' | 'wallet_withdrawal';

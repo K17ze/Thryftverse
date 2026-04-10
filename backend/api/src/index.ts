@@ -133,6 +133,29 @@ function toJsonString(value: unknown): string {
   return JSON.stringify(value);
 }
 
+function asObject(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function asFiniteNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+
+  return null;
+}
+
 async function ensureUserExists(userId: string) {
   const result = await db.query<{ id: string }>(
     `
@@ -202,6 +225,25 @@ const ONEZE_MG_PER_IZE = 1_000;
 const DEFAULT_WALLET_FIAT_CURRENCY = 'INR';
 const ONEZE_MINT_BURN_HALT_REDIS_KEY = 'oneze:mint_burn_halted';
 const ONEZE_MINT_DEFAULT_CUSTODIAN = 'MMTC-PAMP';
+const PARCEL_EVENT_TYPES = [
+  'picked_up',
+  'in_transit',
+  'out_for_delivery',
+  'delivered',
+  'collection_confirmed',
+  'delivery_failed',
+  'returned',
+] as const;
+type ParcelEventType = (typeof PARCEL_EVENT_TYPES)[number];
+const PARCEL_DELIVERY_RELEASE_EVENTS = new Set<ParcelEventType>([
+  'delivered',
+  'collection_confirmed',
+]);
+const PARCEL_SHIPPING_PROGRESS_EVENTS = new Set<ParcelEventType>([
+  'picked_up',
+  'in_transit',
+  'out_for_delivery',
+]);
 
 const MINT_OPERATION_TERMINAL_STATES = new Set<string>([
   'SETTLED',
@@ -1517,7 +1559,7 @@ async function assertRedeemablePayoutRequest(
 
   const payoutRequest = result.rows[0];
   if (!payoutRequest) {
-    throw createApiError('PAYOUT_REQUEST_NOT_FOUND', 'Payout request not found for 1ze redemption');
+    throw createApiError('PAYOUT_REQUEST_NOT_FOUND', 'Payout request not found for closed-loop settlement');
   }
 
   if (payoutRequest.user_id !== input.userId) {
@@ -1529,7 +1571,7 @@ async function assertRedeemablePayoutRequest(
   }
 
   if (payoutRequest.status === 'failed' || payoutRequest.status === 'cancelled') {
-    throw createApiError('PAYOUT_REQUEST_INVALID', 'Payout request is not redeemable in its current status', {
+    throw createApiError('PAYOUT_REQUEST_INVALID', 'Payout request is not withdrawable in its current status', {
       payoutRequestId: input.payoutRequestId,
       status: payoutRequest.status,
     });
@@ -1592,6 +1634,17 @@ async function ledgerTablesAvailable(client: DbQueryable): Promise<boolean> {
   return Boolean(result.rows[0]?.exists);
 }
 
+async function orderParcelEventsTableAvailable(client: DbQueryable): Promise<boolean> {
+  const result = await client.query<{ exists: boolean }>(
+    `
+      SELECT
+        to_regclass('public.order_parcel_events') IS NOT NULL AS exists
+    `
+  );
+
+  return Boolean(result.rows[0]?.exists);
+}
+
 async function onezeTablesAvailable(client: DbQueryable): Promise<boolean> {
   const result = await client.query<{ exists: boolean }>(
     `
@@ -1629,8 +1682,6 @@ async function onezeArchitectureTablesAvailable(client: DbQueryable): Promise<bo
       SELECT
         to_regclass('public.wallets') IS NOT NULL
         AND to_regclass('public.wallet_ledger') IS NOT NULL
-        AND to_regclass('public.gold_reserve_lots') IS NOT NULL
-        AND to_regclass('public.reserve_movements') IS NOT NULL
         AND to_regclass('public.gold_price_ticks') IS NOT NULL
         AND to_regclass('public.payout_corridors') IS NOT NULL
         AND to_regclass('public.fx_rates') IS NOT NULL
@@ -1651,9 +1702,7 @@ async function onezeMintFlowTablesAvailable(client: DbQueryable): Promise<boolea
         to_regclass('public.mint_operations') IS NOT NULL
         AND to_regclass('public.payment_intents') IS NOT NULL
         AND to_regclass('public.wallets') IS NOT NULL
-        AND to_regclass('public.wallet_ledger') IS NOT NULL
-        AND to_regclass('public.gold_reserve_lots') IS NOT NULL
-        AND to_regclass('public.reserve_movements') IS NOT NULL AS exists
+        AND to_regclass('public.wallet_ledger') IS NOT NULL AS exists
     `
   );
 
@@ -2480,9 +2529,12 @@ async function captureOnezeReconciliationSnapshot(
   reserveActiveMg: number;
   withinInvariant: boolean;
   invariantHash: string;
+  supplyDeltaMg: number;
+  toleranceMg: number;
+  operationalLiquidityMg: number;
   createdAt: string;
 }> {
-  const [circulatingResult, reserveResult] = await Promise.all([
+  const [circulatingResult, operationalLiquidityResult, outstandingIze] = await Promise.all([
     client.query<{ total: string }>(
       `
         SELECT COALESCE(SUM(oneze_balance_mg), 0)::text AS total
@@ -2496,11 +2548,15 @@ async function captureOnezeReconciliationSnapshot(
         WHERE status = 'active'
       `
     ),
+    getLedgerAccountBalance(client, 'platform', 'platform', 'ize_outstanding', 'IZE'),
   ]);
 
   const circulatingMg = Number(circulatingResult.rows[0]?.total ?? '0');
-  const reserveActiveMg = Number(reserveResult.rows[0]?.total ?? '0');
-  const withinInvariant = circulatingMg <= reserveActiveMg;
+  const reserveActiveMg = Math.max(0, Math.round(outstandingIze * ONEZE_MG_PER_IZE));
+  const operationalLiquidityMg = Number(operationalLiquidityResult.rows[0]?.total ?? '0');
+  const supplyDeltaMg = circulatingMg - reserveActiveMg;
+  const toleranceMg = Math.max(0, Math.round(Math.abs(config.goldReserveDriftThresholdGrams) * ONEZE_MG_PER_IZE));
+  const withinInvariant = Math.abs(supplyDeltaMg) <= toleranceMg;
   const invariantHash = crypto
     .createHash('sha256')
     .update(`${circulatingMg}|${reserveActiveMg}|${reason}`)
@@ -2528,7 +2584,13 @@ async function captureOnezeReconciliationSnapshot(
       withinInvariant,
       invariantHash,
       reason,
-      toJsonString(metadata ?? {}),
+      toJsonString({
+        invariantMode: 'closed_loop_supply_parity',
+        supplyDeltaMg,
+        toleranceMg,
+        operationalLiquidityMg,
+        ...(metadata ?? {}),
+      }),
     ]
   );
 
@@ -2538,6 +2600,9 @@ async function captureOnezeReconciliationSnapshot(
     reserveActiveMg,
     withinInvariant,
     invariantHash,
+    supplyDeltaMg,
+    toleranceMg,
+    operationalLiquidityMg,
     createdAt: inserted.rows[0]?.created_at ?? new Date().toISOString(),
   };
 }
@@ -2708,6 +2773,7 @@ async function appendLedgerEntry(
     currency?: string;
     sourceType:
       | 'order_payment'
+      | 'order_delivery'
       | 'payout'
       | 'refund'
       | 'adjustment'
@@ -2821,18 +2887,56 @@ async function getUserCumulativeWithdrawnGbp(client: DbQueryable, userId: string
   return Number(result.rows[0]?.total ?? '0');
 }
 
+async function getTotalUserLedgerIzeBalance(client: DbQueryable): Promise<number> {
+  const result = await client.query<{ balance: string }>(
+    `
+      SELECT
+        COALESCE(
+          SUM(
+            CASE
+              WHEN le.direction = 'credit' THEN le.amount
+              ELSE -le.amount
+            END
+          ),
+          0
+        )::text AS balance
+      FROM ledger_entries le
+      INNER JOIN ledger_accounts la
+        ON la.id = le.account_id
+      WHERE la.owner_type = 'user'
+        AND la.account_code = 'ize_wallet'
+        AND la.currency = 'IZE'
+    `
+  );
+
+  return Number(result.rows[0]?.balance ?? '0');
+}
+
 async function getPlatformIzeReserveSnapshot(client: DbQueryable): Promise<{
   outstandingIze: number;
   reserveGrams: number;
+  circulatingIze: number;
+  supplyDeltaIze: number;
+  supplyParityRatio: number | null;
 }> {
-  const [outstandingIze, reserveGrams] = await Promise.all([
+  const [outstandingIze, reserveGrams, circulatingIze] = await Promise.all([
     getLedgerAccountBalance(client, 'platform', 'platform', 'ize_outstanding', 'IZE'),
     getLedgerAccountBalance(client, 'platform', 'platform', 'gold_reserve_grams', 'XAU'),
+    getTotalUserLedgerIzeBalance(client),
   ]);
+
+  const supplyDeltaIze = Number((circulatingIze - outstandingIze).toFixed(6));
+  const supplyParityRatio =
+    outstandingIze > 0
+      ? Number((circulatingIze / outstandingIze).toFixed(6))
+      : null;
 
   return {
     outstandingIze,
     reserveGrams,
+    circulatingIze,
+    supplyDeltaIze,
+    supplyParityRatio,
   };
 }
 
@@ -2856,13 +2960,6 @@ async function recordIzeMint(
     'platform',
     'ize_outstanding',
     'IZE'
-  );
-  const reserveAccountId = await ensureLedgerAccount(
-    client,
-    'platform',
-    'platform',
-    'gold_reserve_grams',
-    'XAU'
   );
 
   await appendLedgerEntry(client, {
@@ -2892,21 +2989,6 @@ async function recordIzeMint(
     sourceType: 'mint',
     sourceId: input.operationId,
     lineType: 'mint_outstanding_credit',
-    metadata: {
-      userId: input.userId,
-      ...(input.metadata ?? {}),
-    },
-  });
-
-  await appendLedgerEntry(client, {
-    accountId: reserveAccountId,
-    counterpartyAccountId: reserveAccountId,
-    direction: 'credit',
-    amount: input.izeAmount,
-    currency: 'XAU',
-    sourceType: 'mint',
-    sourceId: input.operationId,
-    lineType: 'mint_reserve_credit',
     metadata: {
       userId: input.userId,
       ...(input.metadata ?? {}),
@@ -2972,13 +3054,6 @@ async function recordIzeBurn(
     'ize_outstanding',
     'IZE'
   );
-  const reserveAccountId = await ensureLedgerAccount(
-    client,
-    'platform',
-    'platform',
-    'gold_reserve_grams',
-    'XAU'
-  );
 
   await appendLedgerEntry(client, {
     accountId: userWalletAccountId,
@@ -3006,21 +3081,6 @@ async function recordIzeBurn(
     sourceType: 'burn',
     sourceId: input.operationId,
     lineType: 'burn_outstanding_debit',
-    metadata: {
-      userId: input.userId,
-      ...(input.metadata ?? {}),
-    },
-  });
-
-  await appendLedgerEntry(client, {
-    accountId: reserveAccountId,
-    counterpartyAccountId: reserveAccountId,
-    direction: 'debit',
-    amount: input.izeAmount,
-    currency: 'XAU',
-    sourceType: 'burn',
-    sourceId: input.operationId,
-    lineType: 'burn_reserve_debit',
     metadata: {
       userId: input.userId,
       ...(input.metadata ?? {}),
@@ -3204,13 +3264,6 @@ async function postCommerceOrderLedgerEntries(
     input.buyerId,
     'buyer_spend'
   );
-  const sellerPayableAccountId = await ensureLedgerAccount(
-    client,
-    'user',
-    input.sellerId,
-    'ize_wallet',
-    'IZE'
-  );
   const escrowAccountId = await ensureLedgerAccount(
     client,
     'platform',
@@ -3235,6 +3288,8 @@ async function postCommerceOrderLedgerEntries(
     metadata: {
       buyerId: input.buyerId,
       sellerId: input.sellerId,
+      sellerEscrowHeldGbp: subtotalGbp,
+      releasePolicy: 'parcel_delivery_confirmation',
     },
   });
 
@@ -3249,36 +3304,10 @@ async function postCommerceOrderLedgerEntries(
     metadata: {
       buyerId: input.buyerId,
       sellerId: input.sellerId,
+      sellerEscrowHeldGbp: subtotalGbp,
+      releasePolicy: 'parcel_delivery_confirmation',
     },
   });
-
-  if (subtotalGbp > 0) {
-    await appendLedgerEntry(client, {
-      accountId: escrowAccountId,
-      counterpartyAccountId: sellerPayableAccountId,
-      direction: 'debit',
-      amountGbp: subtotalGbp,
-      sourceType: 'order_payment',
-      sourceId: input.orderId,
-      lineType: 'seller_payable_credit',
-      metadata: {
-        sellerId: input.sellerId,
-      },
-    });
-
-    await appendLedgerEntry(client, {
-      accountId: sellerPayableAccountId,
-      counterpartyAccountId: escrowAccountId,
-      direction: 'credit',
-      amountGbp: subtotalGbp,
-      sourceType: 'order_payment',
-      sourceId: input.orderId,
-      lineType: 'seller_payable_credit',
-      metadata: {
-        sellerId: input.sellerId,
-      },
-    });
-  }
 
   if (platformChargeGbp > 0) {
     await appendLedgerEntry(client, {
@@ -3307,6 +3336,128 @@ async function postCommerceOrderLedgerEntries(
       },
     });
   }
+}
+
+async function hasCommerceOrderSellerEscrowReleased(
+  client: DbQueryable,
+  orderId: string
+): Promise<boolean> {
+  const result = await client.query<{ exists: boolean }>(
+    `
+      SELECT EXISTS (
+        SELECT 1
+        FROM ledger_entries
+        WHERE source_id = $1
+          AND (
+            (source_type = 'order_delivery' AND line_type = 'seller_payable_release')
+            OR (source_type = 'order_payment' AND line_type = 'seller_payable_credit')
+          )
+      ) AS exists
+    `,
+    [orderId]
+  );
+
+  return Boolean(result.rows[0]?.exists);
+}
+
+async function releaseCommerceOrderEscrowToSeller(
+  client: DbQueryable,
+  input: {
+    orderId: string;
+    sellerId: string;
+    subtotalGbp: number;
+    parcelProvider: string;
+    parcelEventType: ParcelEventType;
+    trackingId?: string;
+    providerEventId?: string;
+  }
+): Promise<{ released: boolean; alreadyReleased: boolean }> {
+  const subtotalGbp = roundTo(Math.max(0, input.subtotalGbp), 2);
+  if (subtotalGbp <= 0) {
+    return {
+      released: false,
+      alreadyReleased: true,
+    };
+  }
+
+  if (await hasCommerceOrderSellerEscrowReleased(client, input.orderId)) {
+    return {
+      released: false,
+      alreadyReleased: true,
+    };
+  }
+
+  const escrowBalanceGbp = await getLedgerAccountBalance(
+    client,
+    'platform',
+    'platform',
+    'escrow_liability'
+  );
+  if (subtotalGbp > escrowBalanceGbp + 1e-6) {
+    throw createApiError(
+      'ESCROW_INSUFFICIENT',
+      'Escrow balance is insufficient to release seller funds for this order',
+      {
+        orderId: input.orderId,
+        subtotalGbp,
+        escrowBalanceGbp,
+      }
+    );
+  }
+
+  const escrowAccountId = await ensureLedgerAccount(
+    client,
+    'platform',
+    'platform',
+    'escrow_liability'
+  );
+  const sellerPayableAccountId = await ensureLedgerAccount(
+    client,
+    'user',
+    input.sellerId,
+    'seller_payable'
+  );
+
+  await appendLedgerEntry(client, {
+    accountId: escrowAccountId,
+    counterpartyAccountId: sellerPayableAccountId,
+    direction: 'debit',
+    amountGbp: subtotalGbp,
+    sourceType: 'order_delivery',
+    sourceId: input.orderId,
+    lineType: 'seller_payable_release',
+    metadata: {
+      sellerId: input.sellerId,
+      parcelProvider: input.parcelProvider,
+      parcelEventType: input.parcelEventType,
+      trackingId: input.trackingId ?? null,
+      providerEventId: input.providerEventId ?? null,
+      releasePolicy: 'parcel_delivery_confirmation',
+    },
+  });
+
+  await appendLedgerEntry(client, {
+    accountId: sellerPayableAccountId,
+    counterpartyAccountId: escrowAccountId,
+    direction: 'credit',
+    amountGbp: subtotalGbp,
+    sourceType: 'order_delivery',
+    sourceId: input.orderId,
+    lineType: 'seller_payable_release',
+    metadata: {
+      sellerId: input.sellerId,
+      parcelProvider: input.parcelProvider,
+      parcelEventType: input.parcelEventType,
+      trackingId: input.trackingId ?? null,
+      providerEventId: input.providerEventId ?? null,
+      releasePolicy: 'parcel_delivery_confirmation',
+    },
+  });
+
+  return {
+    released: true,
+    alreadyReleased: false,
+  };
 }
 
 async function postAuctionSettlementLedgerEntries(
@@ -3722,6 +3873,8 @@ async function settlePaymentIntent(
     orderId: string;
     buyerChargedGbp: number;
     sellerPayableCreditedGbp: number;
+    sellerEscrowHeldGbp: number;
+    sellerCashoutEligible: boolean;
     platformCommissionCreditedGbp: number;
     platformChargeCreditedGbp: number;
   };
@@ -3858,6 +4011,8 @@ async function settlePaymentIntent(
         orderId: string;
         buyerChargedGbp: number;
         sellerPayableCreditedGbp: number;
+        sellerEscrowHeldGbp: number;
+        sellerCashoutEligible: boolean;
         platformCommissionCreditedGbp: number;
         platformChargeCreditedGbp: number;
       }
@@ -3904,7 +4059,9 @@ async function settlePaymentIntent(
       orderSettlement = {
         orderId: paidOrder.id,
         buyerChargedGbp: Number(paidOrder.total_gbp),
-        sellerPayableCreditedGbp: Number(paidOrder.subtotal_gbp),
+        sellerPayableCreditedGbp: 0,
+        sellerEscrowHeldGbp: Number(paidOrder.subtotal_gbp),
+        sellerCashoutEligible: false,
         platformCommissionCreditedGbp: platformChargeCreditedGbp,
         platformChargeCreditedGbp,
       };
@@ -5197,7 +5354,7 @@ async function processQueuedOnezeMintReserveAllocation(input: {
       {
         mintOperationId: input.mintOperationId,
       },
-      'Skipped queued 1ze mint reserve allocation because mint flow tables are unavailable'
+      'Skipped queued 1ze mint allocation because mint flow tables are unavailable'
     );
     return;
   }
@@ -5228,7 +5385,7 @@ async function processQueuedOnezeMintReserveAllocation(input: {
       && operation.state !== 'WALLET_CREDITED'
       && operation.state !== 'SETTLED'
     ) {
-      throw createApiError('MINT_OPERATION_STATE_INVALID', 'Mint operation is not ready for reserve allocation', {
+      throw createApiError('MINT_OPERATION_STATE_INVALID', 'Mint operation is not ready for allocation', {
         mintOperationId: input.mintOperationId,
         state: operation.state,
       });
@@ -5287,45 +5444,16 @@ async function processQueuedOnezeMintReserveAllocation(input: {
       mutableOperation = purchasingResult.rows[0];
     }
 
-    if (!mutableOperation.lot_id) {
-      const amountMg = Number(mutableOperation.ize_amount_mg);
-      const reserveMovementTxId = mutableOperation.escrow_ledger_tx_id ?? createRuntimeId('mintres');
-      const acquisitionCostInr = Math.max(0, Math.round(mgToOnezeAmount(amountMg) * rateInr.ratePerGram));
-      const metadataRecord = mutableOperation.metadata ?? {};
-      const rawCustodian = metadataRecord.custodian;
-      const rawCustodianRef = metadataRecord.custodianRef;
-      const custodian =
-        typeof rawCustodian === 'string' && rawCustodian.trim().length > 0
-          ? rawCustodian
-          : ONEZE_MINT_DEFAULT_CUSTODIAN;
-      const custodianRef =
-        typeof rawCustodianRef === 'string' && rawCustodianRef.trim().length > 0
-          ? rawCustodianRef
-          : (mutableOperation.payment_intent_id ?? mutableOperation.id);
-
-      const lotId = await addReserveLotForMint(client, {
-        linkedTxId: reserveMovementTxId,
-        weightMg: amountMg,
-        custodian,
-        custodianRef,
-        purity: 0.9999,
-        acquisitionCostInr,
-        metadata: {
-          mintOperationId: mutableOperation.id,
-          userId: mutableOperation.user_id,
-          source: 'mint_reserve_worker',
-        },
-      });
+    if (mutableOperation.state === 'PAYMENT_CONFIRMED' || mutableOperation.state === 'RESERVE_PURCHASING') {
+      const allocationTxId = mutableOperation.escrow_ledger_tx_id ?? createRuntimeId('mintalloc');
 
       const allocatedResult = await client.query<MintOperationRow>(
         `
           UPDATE mint_operations
           SET
             state = 'RESERVE_ALLOCATED',
-            lot_id = $2,
-            custodian_ref = $3,
-            escrow_ledger_tx_id = $4,
-            metadata = metadata || $5::jsonb,
+            escrow_ledger_tx_id = COALESCE(escrow_ledger_tx_id, $2),
+            metadata = metadata || $3::jsonb,
             updated_at = NOW()
           WHERE id = $1
           RETURNING
@@ -5355,13 +5483,11 @@ async function processQueuedOnezeMintReserveAllocation(input: {
         `,
         [
           mutableOperation.id,
-          lotId,
-          custodianRef,
-          reserveMovementTxId,
+          allocationTxId,
           toJsonString({
-            reserveAllocatedAt: new Date().toISOString(),
-            reserveLotId: lotId,
-            reserveMovementTxId,
+            allocationMode: 'closed_loop_no_custody',
+            allocationRecordedAt: new Date().toISOString(),
+            allocationTxId,
           }),
         ]
       );
@@ -5386,7 +5512,7 @@ async function processQueuedOnezeMintReserveAllocation(input: {
         metadata: {
           mintOperationId: mutableOperation.id,
           paymentIntentId: mutableOperation.payment_intent_id,
-          lotId: mutableOperation.lot_id,
+          allocationMode: 'closed_loop_no_custody',
           initiatedBy: input.initiatedBy,
         },
       });
@@ -5453,7 +5579,7 @@ async function processQueuedOnezeMintReserveAllocation(input: {
           mutableOperation.id,
           toJsonString({
             settledAt: new Date().toISOString(),
-            settlementMode: 'escrow_sweep_pending_reconciliation',
+            settlementMode: 'closed_loop_credit_issue',
           }),
         ]
       );
@@ -5467,7 +5593,7 @@ async function processQueuedOnezeMintReserveAllocation(input: {
         initiatedBy: input.initiatedBy,
         reason: input.reason,
       },
-      'Processed queued 1ze mint reserve allocation'
+      'Processed queued 1ze mint allocation'
     );
   } catch (error) {
     await client.query('ROLLBACK');
@@ -5477,7 +5603,7 @@ async function processQueuedOnezeMintReserveAllocation(input: {
         mintOperationId: input.mintOperationId,
         reason: input.reason,
       },
-      'Failed queued 1ze mint reserve allocation'
+      'Failed queued 1ze mint allocation'
     );
     throw error;
   } finally {
@@ -5490,53 +5616,14 @@ async function processQueuedOnezeWithdrawalExecution(input: {
   initiatedBy: string;
   reason: 'threshold_queue' | 'manual_queue';
 }): Promise<void> {
-  if (!(await onezeArchitectureTablesAvailable(db))) {
-    app.log.warn(
-      {
-        withdrawalId: input.withdrawalId,
-      },
-      'Skipped queued 1ze withdrawal execution because architecture tables are unavailable'
-    );
-    return;
-  }
-
-  const client = await db.connect();
-  try {
-    await client.query('BEGIN');
-
-    const execution = await executeReservedWithdrawal(client, {
+  app.log.warn(
+    {
       withdrawalId: input.withdrawalId,
-      metadata: {
-        source: 'queue_worker',
-        initiatedBy: input.initiatedBy,
-        queueReason: input.reason,
-      },
-    });
-
-    await client.query('COMMIT');
-
-    app.log.info(
-      {
-        withdrawalId: input.withdrawalId,
-        alreadySettled: execution.alreadySettled,
-        queueReason: input.reason,
-      },
-      'Processed queued 1ze withdrawal execution'
-    );
-  } catch (error) {
-    await client.query('ROLLBACK');
-    app.log.error(
-      {
-        err: error,
-        withdrawalId: input.withdrawalId,
-        queueReason: input.reason,
-      },
-      'Failed queued 1ze withdrawal execution'
-    );
-    throw error;
-  } finally {
-    client.release();
-  }
+      initiatedBy: input.initiatedBy,
+      queueReason: input.reason,
+    },
+    'Skipped queued 1ze withdrawal execution because direct 1ze withdrawals are disabled in closed-loop mode'
+  );
 }
 
 async function runOnezeReconciliation(reason: 'startup' | 'interval' | 'manual'): Promise<{
@@ -5545,6 +5632,9 @@ async function runOnezeReconciliation(reason: 'startup' | 'interval' | 'manual')
   reserveActiveMg: number;
   withinInvariant: boolean;
   invariantHash: string;
+  supplyDeltaMg: number;
+  toleranceMg: number;
+  operationalLiquidityMg: number;
   createdAt: string;
 } | null> {
   if (!(await onezeArchitectureTablesAvailable(db))) {
@@ -5558,7 +5648,7 @@ async function runOnezeReconciliation(reason: 'startup' | 'interval' | 'manual')
   if (!snapshot.withinInvariant) {
     await setOnezeMintBurnHaltState({
       halted: true,
-      reason: 'reconciliation_invariant_failed',
+      reason: 'reconciliation_supply_mismatch',
       reconciliationId: snapshot.id,
     });
 
@@ -5568,7 +5658,7 @@ async function runOnezeReconciliation(reason: 'startup' | 'interval' | 'manual')
           UPDATE mint_operations
           SET
             state = 'RECONCILIATION_HOLD',
-            last_error = 'reconciliation_invariant_failed',
+            last_error = 'reconciliation_supply_mismatch',
             metadata = metadata || $1::jsonb,
             updated_at = NOW()
           WHERE state IN ('PAYMENT_PENDING', 'PAYMENT_CONFIRMED', 'RESERVE_PURCHASING', 'RESERVE_ALLOCATED')
@@ -5587,14 +5677,17 @@ async function runOnezeReconciliation(reason: 'startup' | 'interval' | 'manual')
       {
         reconciliationId: snapshot.id,
         circulatingMg: snapshot.circulatingMg,
-        reserveActiveMg: snapshot.reserveActiveMg,
+        referenceSupplyMg: snapshot.reserveActiveMg,
+        supplyDeltaMg: snapshot.supplyDeltaMg,
+        toleranceMg: snapshot.toleranceMg,
+        operationalLiquidityMg: snapshot.operationalLiquidityMg,
       },
-      '1ze reconciliation invariant failed: circulating supply exceeds active reserve'
+      '1ze reconciliation detected a closed-loop supply mismatch'
     );
   } else {
     await setOnezeMintBurnHaltState({
       halted: false,
-      reason: 'reconciliation_invariant_restored',
+      reason: 'reconciliation_supply_restored',
       reconciliationId: snapshot.id,
     });
   }
@@ -5635,7 +5728,12 @@ async function runOnezeDailyAttestation(reason: 'startup' | 'interval' | 'manual
       reconciliation: {
         id: snapshot.id,
         circulatingMg: snapshot.circulatingMg,
+        referenceSupplyMg: snapshot.reserveActiveMg,
         reserveActiveMg: snapshot.reserveActiveMg,
+        supplyDeltaMg: snapshot.supplyDeltaMg,
+        toleranceMg: snapshot.toleranceMg,
+        operationalLiquidityMg: snapshot.operationalLiquidityMg,
+        withinSupplyTolerance: snapshot.withinInvariant,
         withinInvariant: snapshot.withinInvariant,
         invariantHash: snapshot.invariantHash,
         createdAt: snapshot.createdAt,
@@ -12638,7 +12736,6 @@ app.post('/wallet/1ze/mint', async (request, reply) => {
     const architectureEnabled = await onezeArchitectureTablesAvailable(client);
     let architectureWalletId: string | null = null;
     let architectureWalletBalanceMg: number | null = null;
-    let architectureReserveLotId: string | null = null;
 
     if (architectureEnabled) {
       const amountMg = onezeAmountToMg(izeAmount);
@@ -12664,35 +12761,12 @@ app.post('/wallet/1ze/mint', async (request, reply) => {
           paymentIntentId: payload.paymentIntentId ?? null,
           fiatAmount: feeBreakdown.netFiatAmount,
           fiatCurrency: payload.fiatCurrency.toUpperCase(),
+          pricingReferenceSource: quote.source,
           ...(payload.metadata ?? {}),
         },
       });
 
-      const maybeCustodian = payload.metadata?.custodian;
-      const maybeCustodianRef = payload.metadata?.custodianRef;
-      const custodian = typeof maybeCustodian === 'string' && maybeCustodian.trim().length > 0
-        ? maybeCustodian
-        : 'MMTC-PAMP';
-      const custodianRef = typeof maybeCustodianRef === 'string' && maybeCustodianRef.trim().length > 0
-        ? maybeCustodianRef
-        : payload.paymentIntentId ?? operationId;
-      const acquisitionCostInr = Math.max(0, Math.round(mgToOnezeAmount(amountMg) * inrRate.ratePerGram));
-
-      architectureReserveLotId = await addReserveLotForMint(client, {
-        linkedTxId: walletTxId,
-        weightMg: amountMg,
-        custodian,
-        custodianRef,
-        purity: 0.9999,
-        acquisitionCostInr,
-        metadata: {
-          operationId,
-          userId: actorUserId,
-          source: 'wallet_mint',
-        },
-      });
-
-      await appendGoldPriceTick(client, `wallet_mint:${quote.source}`, inrRate.ratePerGram);
+      await appendGoldPriceTick(client, `wallet_mint_reference:${quote.source}`, inrRate.ratePerGram);
     }
 
     const [walletBalanceIze, reserveSnapshot] = await Promise.all([
@@ -12720,6 +12794,10 @@ app.post('/wallet/1ze/mint', async (request, reply) => {
       balances: {
         userIze: walletBalanceIze,
         outstandingIze: reserveSnapshot.outstandingIze,
+        circulatingIze: reserveSnapshot.circulatingIze,
+        supplyDeltaIze: reserveSnapshot.supplyDeltaIze,
+        supplyParityRatio: reserveSnapshot.supplyParityRatio,
+        liquidityBufferGrams: reserveSnapshot.reserveGrams,
         reserveGrams: reserveSnapshot.reserveGrams,
       },
       architecture: architectureEnabled
@@ -12730,7 +12808,6 @@ app.post('/wallet/1ze/mint', async (request, reply) => {
               architectureWalletBalanceMg === null
                 ? null
                 : mgToOnezeAmount(architectureWalletBalanceMg),
-            reserveLotId: architectureReserveLotId,
           }
         : null,
     };
@@ -12784,238 +12861,17 @@ app.post('/wallet/1ze/burn', async (request, reply) => {
   const payload = bodySchema.parse(request.body ?? {});
   const actorUserId = resolveAuthenticatedUserId(request, payload.userId);
 
-  if (!(await onezeTablesAvailable(db))) {
-    reply.code(503);
-    return {
-      ok: false,
-      error: '1ze money-layer tables are unavailable. Run migrations first.',
-    };
-  }
-
-  const client = await db.connect();
-  try {
-    await client.query('BEGIN');
-    await ensureUserExists(actorUserId);
-
-    const idempotencyRequestHash = payload.idempotencyKey
-      ? hashWalletIdempotencyPayload({
-          userId: actorUserId,
-          izeAmount: Number(payload.izeAmount.toFixed(6)),
-          fiatCurrency: payload.fiatCurrency.toUpperCase(),
-          payoutRequestId: payload.payoutRequestId ?? null,
-          metadata: payload.metadata ?? {},
-        })
-      : null;
-
-    if (payload.idempotencyKey && idempotencyRequestHash) {
-      const idempotentResponse = await getWalletIdempotentResponse(client, {
-        userId: actorUserId,
-        operation: 'burn',
-        idempotencyKey: payload.idempotencyKey,
-        requestHash: idempotencyRequestHash,
-      });
-
-      if (idempotentResponse) {
-        await client.query('COMMIT');
-        return idempotentResponse;
-      }
-    }
-
-    if (config.nodeEnv === 'production' && !payload.payoutRequestId) {
-      throw createApiError(
-        'IZE_BURN_BACKING_REQUIRED',
-        'A requested/processing/paid payoutRequestId is required to redeem 1ze in production'
-      );
-    }
-
-    let payoutGatewayId: string | null = null;
-    let payoutStatus: PayoutRequestStatus | null = null;
-    let payoutAmountCurrency: string | null = null;
-    let payoutAmountGbp: number | null = null;
-    if (payload.payoutRequestId) {
-      const payout = await assertRedeemablePayoutRequest(client, {
-        payoutRequestId: payload.payoutRequestId,
-        userId: actorUserId,
-      });
-
-      payoutGatewayId = payout.gatewayId;
-      payoutStatus = payout.status;
-      payoutAmountCurrency = payout.amountCurrency.toUpperCase();
-      payoutAmountGbp = payout.amountGbp;
-    }
-
-    const quote = await resolveGoldRate(client, payload.fiatCurrency, {
-      forceRefresh: false,
-    });
-    const fiatAmount = Number((payload.izeAmount * quote.ratePerGram).toFixed(6));
-
-    if (payoutAmountCurrency && payoutAmountCurrency !== payload.fiatCurrency.toUpperCase()) {
-      throw createApiError(
-        'PAYOUT_REQUEST_CURRENCY_MISMATCH',
-        'Payout request currency does not match requested 1ze burn currency',
-        {
-          payoutRequestId: payload.payoutRequestId,
-          payoutAmountCurrency,
-          burnCurrency: payload.fiatCurrency.toUpperCase(),
-        }
-      );
-    }
-
-    if (payoutAmountGbp !== null) {
-      let redemptionAmountGbp = fiatAmount;
-      if (payload.fiatCurrency.toUpperCase() !== 'GBP') {
-        const gbpQuote = await resolveGoldRate(client, 'GBP', {
-          forceRefresh: false,
-        });
-        redemptionAmountGbp = Number((payload.izeAmount * gbpQuote.ratePerGram).toFixed(6));
-      }
-
-      const tolerance = Math.max(0.5, payoutAmountGbp * 0.03);
-      if (Math.abs(redemptionAmountGbp - payoutAmountGbp) > tolerance) {
-        throw createApiError(
-          'PAYOUT_REQUEST_AMOUNT_MISMATCH',
-          'Computed redemption value does not match payout request amount',
-          {
-            payoutRequestId: payload.payoutRequestId,
-            payoutAmountGbp,
-            redemptionAmountGbp,
-            tolerance,
-          }
-        );
-      }
-    }
-
-    const operationId = createRuntimeId('ize_burn');
-    await recordIzeBurn(client, {
-      operationId,
-      userId: actorUserId,
-      fiatAmount,
+  reply.code(410);
+  return {
+    ok: false,
+    error:
+      'Direct 1ze burn withdrawals are disabled in closed-loop mode. Use payout requests funded by completed sale proceeds.',
+    code: 'ONEZE_BURN_DISABLED',
+    details: {
+      actorUserId,
       fiatCurrency: payload.fiatCurrency.toUpperCase(),
-      izeAmount: Number(payload.izeAmount.toFixed(6)),
-      ratePerGram: quote.ratePerGram,
-      payoutRequestId: payload.payoutRequestId,
-      metadata: payload.metadata,
-    });
-
-    const architectureEnabled = await onezeArchitectureTablesAvailable(client);
-    let architectureWalletId: string | null = null;
-    let architectureWalletBalanceMg: number | null = null;
-    let architectureReserveMovements: Array<{ lotId: string; consumedMg: number }> = [];
-
-    if (architectureEnabled) {
-      const amountMg = onezeAmountToMg(Number(payload.izeAmount.toFixed(6)));
-      const inrRate = await resolveGoldRate(client, 'INR', {
-        forceRefresh: false,
-      });
-      const wallet = await ensureWallet(client, actorUserId, payload.fiatCurrency.toUpperCase());
-      const walletTxId = createRuntimeId('wtx');
-
-      architectureWalletId = wallet.id;
-      architectureWalletBalanceMg = await applyWalletLedgerDelta(client, {
-        walletId: wallet.id,
-        txId: walletTxId,
-        asset: '1ZE',
-        amount: -amountMg,
-        kind: 'BURN',
-        refType: 'wallet_ize_operation',
-        refId: operationId,
-        goldRateInrPerG: inrRate.ratePerGram,
-        metadata: {
-          operationId,
-          userId: actorUserId,
-          payoutRequestId: payload.payoutRequestId ?? null,
-          fiatAmount,
-          fiatCurrency: payload.fiatCurrency.toUpperCase(),
-          ...(payload.metadata ?? {}),
-        },
-      });
-
-      architectureReserveMovements = await consumeReserveLotsForBurn(client, {
-        linkedTxId: walletTxId,
-        requiredMg: amountMg,
-        metadata: {
-          operationId,
-          userId: actorUserId,
-          source: 'wallet_burn',
-        },
-      });
-
-      await appendGoldPriceTick(client, `wallet_burn:${quote.source}`, inrRate.ratePerGram);
-    }
-
-    const [walletBalanceIze, reserveSnapshot] = await Promise.all([
-      getLedgerAccountBalance(client, 'user', actorUserId, 'ize_wallet', 'IZE'),
-      getPlatformIzeReserveSnapshot(client),
-    ]);
-
-    const responsePayload: Record<string, unknown> = {
-      ok: true,
-      operation: {
-        id: operationId,
-        type: 'burn',
-        userId: actorUserId,
-        fiatAmount,
-        fiatCurrency: payload.fiatCurrency.toUpperCase(),
-        izeAmount: Number(payload.izeAmount.toFixed(6)),
-        ratePerGram: quote.ratePerGram,
-        rateSource: quote.source,
-        payoutGatewayId,
-        payoutStatus,
-        payoutAmountCurrency,
-        payoutAmountGbp,
-      },
-      balances: {
-        userIze: walletBalanceIze,
-        outstandingIze: reserveSnapshot.outstandingIze,
-        reserveGrams: reserveSnapshot.reserveGrams,
-      },
-      architecture: architectureEnabled
-        ? {
-            walletId: architectureWalletId,
-            walletBalanceMg: architectureWalletBalanceMg,
-            walletBalanceOneze:
-              architectureWalletBalanceMg === null
-                ? null
-                : mgToOnezeAmount(architectureWalletBalanceMg),
-            reserveMovements: architectureReserveMovements,
-          }
-        : null,
-    };
-
-    if (payload.idempotencyKey && idempotencyRequestHash) {
-      await saveWalletIdempotentResponse(client, {
-        userId: actorUserId,
-        operation: 'burn',
-        idempotencyKey: payload.idempotencyKey,
-        requestHash: idempotencyRequestHash,
-        responsePayload,
-      });
-    }
-
-    await client.query('COMMIT');
-    reply.code(201);
-    return responsePayload;
-  } catch (error) {
-    await client.query('ROLLBACK');
-    const apiError = getApiError(error);
-    if (apiError) {
-      reply.code(statusCodeForApiError(apiError.code));
-      return {
-        ok: false,
-        error: apiError.message,
-        details: apiError.details,
-      };
-    }
-
-    request.log.error({ err: error, userId: actorUserId }, 'Failed to burn 1ze');
-    reply.code(500);
-    return {
-      ok: false,
-      error: 'Unable to burn 1ze',
-    };
-  } finally {
-    client.release();
-  }
+    },
+  };
 });
 
 app.post('/wallet/1ze/transfer', async (request, reply) => {
@@ -13376,256 +13232,17 @@ app.post('/wallet/1ze/withdrawals/quote', async (request, reply) => {
   const payload = bodySchema.parse(request.body ?? {});
   const actorUserId = resolveAuthenticatedUserId(request, payload.userId);
 
-  const providedAmountCount = Number(payload.amountMg !== undefined) + Number(payload.amountOneze !== undefined);
-  if (providedAmountCount !== 1) {
-    reply.code(400);
-    return {
-      ok: false,
-      error: 'Provide exactly one of amountMg or amountOneze',
-    };
-  }
-
-  if (!(await onezeArchitectureTablesAvailable(db))) {
-    reply.code(503);
-    return {
-      ok: false,
-      error: '1ze wallet architecture tables are unavailable. Run migrations first.',
-    };
-  }
-
-  try {
-    await assertOnezeMintBurnNotHalted();
-  } catch (error) {
-    const apiError = getApiError(error);
-    if (apiError) {
-      reply.code(statusCodeForApiError(apiError.code));
-      return {
-        ok: false,
-        error: apiError.message,
-        details: apiError.details,
-      };
-    }
-
-    throw error;
-  }
-
-  const client = await db.connect();
-  try {
-    await client.query('BEGIN');
-    await ensureUserExists(actorUserId);
-
-    const amountMg = payload.amountMg ?? onezeAmountToMg(Number((payload.amountOneze ?? 0).toFixed(6)));
-    if (!Number.isSafeInteger(amountMg) || amountMg <= 0) {
-      throw createApiError('WITHDRAWAL_AMOUNT_INVALID', 'Withdrawal amount cannot be represented safely in mg');
-    }
-
-    const targetCurrency = payload.targetCurrency.toUpperCase();
-    const idempotencyRequestHash = payload.idempotencyKey
-      ? hashWalletIdempotencyPayload({
-          userId: actorUserId,
-          amountMg,
-          targetCurrency,
-          payoutDestination: payload.payoutDestination ?? {},
-        })
-      : null;
-
-    if (payload.idempotencyKey && idempotencyRequestHash) {
-      const idempotentResponse = await getWalletIdempotentResponse(client, {
-        userId: actorUserId,
-        operation: 'withdraw_quote',
-        idempotencyKey: payload.idempotencyKey,
-        requestHash: idempotencyRequestHash,
-      });
-
-      if (idempotentResponse) {
-        await client.query('COMMIT');
-        return idempotentResponse;
-      }
-    }
-
-    const corridor = await resolvePayoutCorridor(client, targetCurrency);
-    if (!corridor || !corridor.enabled) {
-      throw createApiError('WITHDRAWAL_CORRIDOR_UNAVAILABLE', 'Target payout corridor is unavailable', {
-        targetCurrency,
-      });
-    }
-
-    const fxRate = await resolveXauFxRate(client, targetCurrency, {
-      forceRefresh: payload.forceRefresh,
-    });
-
-    const amountOneze = mgToOnezeAmount(amountMg);
-    const grossMinor = toFiatMinor(amountOneze * fxRate.rate, targetCurrency);
-    const spreadMinor = Math.round((grossMinor * Number(corridor.spread_bps)) / 10_000);
-    const networkFeeMinor = Number(corridor.network_fee_minor);
-    const netMinor = grossMinor - spreadMinor - networkFeeMinor;
-    const minAmountMinor = Number(corridor.min_amount_minor);
-    const maxAmountMinor = Number(corridor.max_amount_minor);
-
-    if (grossMinor < minAmountMinor || grossMinor > maxAmountMinor) {
-      throw createApiError(
-        'WITHDRAWAL_AMOUNT_OUT_OF_RANGE',
-        'Withdrawal amount is outside corridor limits',
-        {
-          targetCurrency,
-          minAmountMinor,
-          maxAmountMinor,
-          requestedGrossMinor: grossMinor,
-        }
-      );
-    }
-
-    if (netMinor <= 0) {
-      throw createApiError('WITHDRAWAL_NET_AMOUNT_INVALID', 'Withdrawal net payout must be positive', {
-        targetCurrency,
-        grossMinor,
-        spreadMinor,
-        networkFeeMinor,
-        netMinor,
-      });
-    }
-
-    const withdrawalId = createRuntimeId('wdq');
-    const rateExpiresAt = new Date(Date.now() + config.onezeWithdrawalQuoteTtlSeconds * 1_000).toISOString();
-    const withdrawalResult = await client.query<WithdrawalRow>(
-      `
-        INSERT INTO withdrawals (
-          id,
-          user_id,
-          burn_tx_id,
-          amount_mg,
-          target_currency,
-          gross_minor,
-          spread_minor,
-          network_fee_minor,
-          net_minor,
-          rate_locked,
-          rate_expires_at,
-          rail,
-          rail_ref,
-          status,
-          payout_destination,
-          metadata
-        )
-        VALUES (
-          $1,
-          $2,
-          NULL,
-          $3,
-          $4,
-          $5,
-          $6,
-          $7,
-          $8,
-          $9,
-          $10,
-          $11,
-          NULL,
-          'QUOTED',
-          $12::jsonb,
-          $13::jsonb
-        )
-        RETURNING
-          id,
-          user_id,
-          burn_tx_id,
-          amount_mg::text,
-          target_currency,
-          gross_minor::text,
-          spread_minor::text,
-          network_fee_minor::text,
-          net_minor::text,
-          rate_locked::text,
-          rate_expires_at::text,
-          rail,
-          rail_ref,
-          status,
-          payout_destination,
-          metadata,
-          created_at::text,
-          completed_at::text
-      `,
-      [
-        withdrawalId,
-        actorUserId,
-        amountMg,
-        targetCurrency,
-        grossMinor,
-        spreadMinor,
-        networkFeeMinor,
-        netMinor,
-        fxRate.rate,
-        rateExpiresAt,
-        corridor.rail,
-        toJsonString(payload.payoutDestination ?? {}),
-        toJsonString({
-          quoteSource: fxRate.source,
-          quoteObservedAt: fxRate.observedAt,
-          quoteValidForSeconds: config.onezeWithdrawalQuoteTtlSeconds,
-          corridor: {
-            currency: targetCurrency,
-            rail: corridor.rail,
-            spreadBps: corridor.spread_bps,
-            settlementSlaHours: corridor.settlement_sla_hours,
-          },
-          ...(payload.metadata ?? {}),
-        }),
-      ]
-    );
-
-    const withdrawal = toWithdrawalPayload(withdrawalResult.rows[0]);
-    const responsePayload: Record<string, unknown> = {
-      ok: true,
-      withdrawal,
-      quote: {
-        validForSeconds: config.onezeWithdrawalQuoteTtlSeconds,
-        expiresAt: withdrawal.rateExpiresAt,
-        source: fxRate.source,
-      },
-      corridor: {
-        currency: targetCurrency,
-        rail: corridor.rail,
-        spreadBps: corridor.spread_bps,
-        networkFeeMinor,
-        minAmountMinor,
-        maxAmountMinor,
-      },
-    };
-
-    if (payload.idempotencyKey && idempotencyRequestHash) {
-      await saveWalletIdempotentResponse(client, {
-        userId: actorUserId,
-        operation: 'withdraw_quote',
-        idempotencyKey: payload.idempotencyKey,
-        requestHash: idempotencyRequestHash,
-        responsePayload,
-      });
-    }
-
-    await client.query('COMMIT');
-    reply.code(201);
-    return responsePayload;
-  } catch (error) {
-    await client.query('ROLLBACK');
-    const apiError = getApiError(error);
-    if (apiError) {
-      reply.code(statusCodeForApiError(apiError.code));
-      return {
-        ok: false,
-        error: apiError.message,
-        details: apiError.details,
-      };
-    }
-
-    request.log.error({ err: error, userId: actorUserId }, 'Failed to quote 1ze withdrawal');
-    reply.code(500);
-    return {
-      ok: false,
-      error: 'Unable to quote 1ze withdrawal',
-    };
-  } finally {
-    client.release();
-  }
+  reply.code(410);
+  return {
+    ok: false,
+    error:
+      'Direct 1ze withdrawal quotes are disabled in closed-loop mode. Withdrawals must be created from completed sale proceeds via payout requests.',
+    code: 'ONEZE_WITHDRAWAL_DISABLED',
+    details: {
+      actorUserId,
+      targetCurrency: payload.targetCurrency.toUpperCase(),
+    },
+  };
 });
 
 app.post('/wallet/1ze/withdrawals/:withdrawalId/accept', async (request, reply) => {
@@ -13643,238 +13260,17 @@ app.post('/wallet/1ze/withdrawals/:withdrawalId/accept', async (request, reply) 
   const payload = bodySchema.parse(request.body ?? {});
   const actorUserId = resolveAuthenticatedUserId(request, payload.userId);
 
-  if (!(await onezeArchitectureTablesAvailable(db))) {
-    reply.code(503);
-    return {
-      ok: false,
-      error: '1ze wallet architecture tables are unavailable. Run migrations first.',
-    };
-  }
-
-  try {
-    await assertOnezeMintBurnNotHalted();
-  } catch (error) {
-    const apiError = getApiError(error);
-    if (apiError) {
-      reply.code(statusCodeForApiError(apiError.code));
-      return {
-        ok: false,
-        error: apiError.message,
-        details: apiError.details,
-      };
-    }
-
-    throw error;
-  }
-
-  const client = await db.connect();
-  try {
-    await client.query('BEGIN');
-
-    const idempotencyRequestHash = payload.idempotencyKey
-      ? hashWalletIdempotencyPayload({
-          actorUserId,
-          withdrawalId,
-        })
-      : null;
-
-    if (payload.idempotencyKey && idempotencyRequestHash) {
-      const idempotentResponse = await getWalletIdempotentResponse(client, {
-        userId: actorUserId,
-        operation: 'withdraw_accept',
-        idempotencyKey: payload.idempotencyKey,
-        requestHash: idempotencyRequestHash,
-      });
-
-      if (idempotentResponse) {
-        await client.query('COMMIT');
-        return idempotentResponse;
-      }
-    }
-
-    const withdrawal = await loadWithdrawalById(client, withdrawalId, { forUpdate: true });
-    if (!withdrawal) {
-      throw createApiError('WITHDRAWAL_NOT_FOUND', 'Withdrawal quote not found', { withdrawalId });
-    }
-
-    if (request.authUser?.role !== 'admin' && withdrawal.user_id !== actorUserId) {
-      throw createApiError('FORBIDDEN_USER_CONTEXT', 'Forbidden: withdrawal does not belong to user context', {
-        authUserId: actorUserId,
-        withdrawalUserId: withdrawal.user_id,
-      });
-    }
-
-    if (withdrawal.status === 'RESERVED' || withdrawal.status === 'PAID_OUT') {
-      const wallet = await ensureWallet(client, withdrawal.user_id, withdrawal.target_currency);
-      const responsePayload: Record<string, unknown> = {
-        ok: true,
-        alreadyReserved: true,
-        withdrawal: toWithdrawalPayload(withdrawal),
-        wallet: toWalletPayload(wallet),
-      };
-
-      if (payload.idempotencyKey && idempotencyRequestHash) {
-        await saveWalletIdempotentResponse(client, {
-          userId: actorUserId,
-          operation: 'withdraw_accept',
-          idempotencyKey: payload.idempotencyKey,
-          requestHash: idempotencyRequestHash,
-          responsePayload,
-        });
-      }
-
-      await client.query('COMMIT');
-      return responsePayload;
-    }
-
-    if (!canTransitionWithdrawalStatus(withdrawal.status, 'RESERVED')) {
-      throw createApiError('WITHDRAWAL_STATE_INVALID', 'Withdrawal cannot be reserved from current status', {
-        withdrawalId,
-        status: withdrawal.status,
-      });
-    }
-
-    const expiresAtMs = Date.parse(withdrawal.rate_expires_at);
-    if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
-      throw createApiError('WITHDRAWAL_QUOTE_EXPIRED', 'Withdrawal quote has expired', {
-        withdrawalId,
-        rateExpiresAt: withdrawal.rate_expires_at,
-      });
-    }
-
-    const amountMg = Number(withdrawal.amount_mg);
-    const requiresQueuedExecution = amountMg > config.onezeWithdrawalInstantLimitMg;
-    const wallet = await ensureWallet(client, withdrawal.user_id, withdrawal.target_currency);
-    const inrRate = await resolveGoldRate(client, 'INR', {
-      forceRefresh: false,
-    });
-    const burnTxId = withdrawal.burn_tx_id ?? createRuntimeId('wdburn');
-
-    const walletBalanceAfterMg = await applyWalletLedgerDelta(client, {
-      walletId: wallet.id,
-      txId: burnTxId,
-      asset: '1ZE',
-      amount: -amountMg,
-      kind: 'WITHDRAWAL_RESERVED',
-      refType: 'withdrawal',
-      refId: withdrawal.id,
-      goldRateInrPerG: inrRate.ratePerGram,
-      metadata: {
-        withdrawalId: withdrawal.id,
-        actorUserId,
-        targetCurrency: withdrawal.target_currency,
-        ...(payload.metadata ?? {}),
-      },
-    });
-
-    const updatedResult = await client.query<WithdrawalRow>(
-      `
-        UPDATE withdrawals
-        SET
-          burn_tx_id = $2,
-          status = 'RESERVED',
-          metadata = metadata || $3::jsonb
-        WHERE id = $1
-        RETURNING
-          id,
-          user_id,
-          burn_tx_id,
-          amount_mg::text,
-          target_currency,
-          gross_minor::text,
-          spread_minor::text,
-          network_fee_minor::text,
-          net_minor::text,
-          rate_locked::text,
-          rate_expires_at::text,
-          rail,
-          rail_ref,
-          status,
-          payout_destination,
-          metadata,
-          created_at::text,
-          completed_at::text
-      `,
-      [
-        withdrawal.id,
-        burnTxId,
-        toJsonString({
-          acceptedAt: new Date().toISOString(),
-          acceptedBy: actorUserId,
-          ...(payload.metadata ?? {}),
-        }),
-      ]
-    );
-
-    const updatedWithdrawal = updatedResult.rows[0];
-    const responsePayload: Record<string, unknown> = {
-      ok: true,
-      withdrawal: toWithdrawalPayload(updatedWithdrawal),
-      wallet: {
-        walletId: wallet.id,
-        onezeBalanceMg: walletBalanceAfterMg,
-        onezeBalance: mgToOnezeAmount(walletBalanceAfterMg),
-      },
-      execution: {
-        mode: requiresQueuedExecution ? 'queued' : 'manual',
-        queued: requiresQueuedExecution,
-        instantLimitMg: config.onezeWithdrawalInstantLimitMg,
-      },
-    };
-
-    await client.query('COMMIT');
-
-    if (requiresQueuedExecution) {
-      try {
-        await enqueueOnezeWithdrawalExecuteJob({
-          withdrawalId: updatedWithdrawal.id,
-          initiatedBy: actorUserId,
-          reason: 'threshold_queue',
-        });
-      } catch (queueError) {
-        request.log.error(
-          { err: queueError, withdrawalId: updatedWithdrawal.id },
-          'Failed to enqueue threshold-based 1ze withdrawal execution'
-        );
-
-        const execution = responsePayload.execution as Record<string, unknown>;
-        execution.queued = false;
-        execution.queueError = 'queue_enqueue_failed';
-      }
-    }
-
-    if (payload.idempotencyKey && idempotencyRequestHash) {
-      await saveWalletIdempotentResponse(client, {
-        userId: actorUserId,
-        operation: 'withdraw_accept',
-        idempotencyKey: payload.idempotencyKey,
-        requestHash: idempotencyRequestHash,
-        responsePayload,
-      });
-    }
-
-    return responsePayload;
-  } catch (error) {
-    await client.query('ROLLBACK');
-    const apiError = getApiError(error);
-    if (apiError) {
-      reply.code(statusCodeForApiError(apiError.code));
-      return {
-        ok: false,
-        error: apiError.message,
-        details: apiError.details,
-      };
-    }
-
-    request.log.error({ err: error, withdrawalId, userId: actorUserId }, 'Failed to accept 1ze withdrawal');
-    reply.code(500);
-    return {
-      ok: false,
-      error: 'Unable to accept 1ze withdrawal',
-    };
-  } finally {
-    client.release();
-  }
+  reply.code(410);
+  return {
+    ok: false,
+    error:
+      'Direct 1ze withdrawal accepts are disabled in closed-loop mode. Withdrawals must be created from completed sale proceeds via payout requests.',
+    code: 'ONEZE_WITHDRAWAL_DISABLED',
+    details: {
+      actorUserId,
+      withdrawalId,
+    },
+  };
 });
 
 app.post('/wallet/1ze/withdrawals/:withdrawalId/execute', async (request, reply) => {
@@ -13895,64 +13291,17 @@ app.post('/wallet/1ze/withdrawals/:withdrawalId/execute', async (request, reply)
   const { withdrawalId } = paramsSchema.parse(request.params);
   const payload = bodySchema.parse(request.body ?? {});
 
-  if (!(await onezeArchitectureTablesAvailable(db))) {
-    reply.code(503);
-    return {
-      ok: false,
-      error: '1ze wallet architecture tables are unavailable. Run migrations first.',
-    };
-  }
-
-  const client = await db.connect();
-  try {
-    await client.query('BEGIN');
-
-    const execution = await executeReservedWithdrawal(client, {
+  reply.code(410);
+  return {
+    ok: false,
+    error:
+      'Direct 1ze withdrawal execution is disabled in closed-loop mode. Withdrawals must be created from completed sale proceeds via payout requests.',
+    code: 'ONEZE_WITHDRAWAL_DISABLED',
+    details: {
       withdrawalId,
-      railRef: payload.railRef,
-      metadata: {
-        ...(payload.metadata ?? {}),
-        source: 'admin_execute_endpoint',
-      },
-    });
-
-    await client.query('COMMIT');
-
-    if (execution.alreadySettled) {
-      return {
-        ok: true,
-        alreadySettled: true,
-        withdrawal: execution.withdrawal,
-      };
-    }
-
-    return {
-      ok: true,
-      withdrawal: execution.withdrawal,
-      settlement: execution.settlement,
-      wallet: execution.wallet,
-    };
-  } catch (error) {
-    await client.query('ROLLBACK');
-    const apiError = getApiError(error);
-    if (apiError) {
-      reply.code(statusCodeForApiError(apiError.code));
-      return {
-        ok: false,
-        error: apiError.message,
-        details: apiError.details,
-      };
-    }
-
-    request.log.error({ err: error, withdrawalId }, 'Failed to execute 1ze withdrawal');
-    reply.code(500);
-    return {
-      ok: false,
-      error: 'Unable to execute 1ze withdrawal',
-    };
-  } finally {
-    client.release();
-  }
+      railRef: payload.railRef ?? null,
+    },
+  };
 });
 
 app.post('/wallet/1ze/withdrawals/:withdrawalId/fail', async (request, reply) => {
@@ -13973,136 +13322,17 @@ app.post('/wallet/1ze/withdrawals/:withdrawalId/fail', async (request, reply) =>
   const { withdrawalId } = paramsSchema.parse(request.params);
   const payload = bodySchema.parse(request.body ?? {});
 
-  if (!(await onezeArchitectureTablesAvailable(db))) {
-    reply.code(503);
-    return {
-      ok: false,
-      error: '1ze wallet architecture tables are unavailable. Run migrations first.',
-    };
-  }
-
-  const client = await db.connect();
-  try {
-    await client.query('BEGIN');
-
-    const withdrawal = await loadWithdrawalById(client, withdrawalId, { forUpdate: true });
-    if (!withdrawal) {
-      throw createApiError('WITHDRAWAL_NOT_FOUND', 'Withdrawal not found', { withdrawalId });
-    }
-
-    if (withdrawal.status === 'FAILED' || withdrawal.status === 'REVERSED') {
-      await client.query('COMMIT');
-      return {
-        ok: true,
-        alreadyFailed: true,
-        withdrawal: toWithdrawalPayload(withdrawal),
-      };
-    }
-
-    if (!canTransitionWithdrawalStatus(withdrawal.status, 'FAILED')) {
-      throw createApiError('WITHDRAWAL_STATE_INVALID', 'Withdrawal cannot be failed from current status', {
-        withdrawalId,
-        status: withdrawal.status,
-      });
-    }
-
-    const amountMg = Number(withdrawal.amount_mg);
-    let walletInfo: { walletId: string; onezeBalanceMg: number; onezeBalance: number } | null = null;
-
-    if (withdrawal.status === 'RESERVED') {
-      const inrRate = await resolveGoldRate(client, 'INR', {
-        forceRefresh: false,
-      });
-
-      const wallet = await ensureWallet(client, withdrawal.user_id, withdrawal.target_currency);
-      const walletBalanceAfterMg = await applyWalletLedgerDelta(client, {
-        walletId: wallet.id,
-        txId: withdrawal.burn_tx_id ?? createRuntimeId('wdburn'),
-        asset: '1ZE',
-        amount: amountMg,
-        kind: 'WITHDRAWAL_REVERSED',
-        refType: 'withdrawal',
-        refId: withdrawal.id,
-        goldRateInrPerG: inrRate.ratePerGram,
-        metadata: {
-          withdrawalId,
-          reason: payload.reason ?? 'execution_failed',
-          ...(payload.metadata ?? {}),
-        },
-      });
-
-      walletInfo = {
-        walletId: wallet.id,
-        onezeBalanceMg: walletBalanceAfterMg,
-        onezeBalance: mgToOnezeAmount(walletBalanceAfterMg),
-      };
-    }
-
-    const updatedResult = await client.query<WithdrawalRow>(
-      `
-        UPDATE withdrawals
-        SET
-          status = 'FAILED',
-          completed_at = NOW(),
-          metadata = metadata || $2::jsonb
-        WHERE id = $1
-        RETURNING
-          id,
-          user_id,
-          burn_tx_id,
-          amount_mg::text,
-          target_currency,
-          gross_minor::text,
-          spread_minor::text,
-          network_fee_minor::text,
-          net_minor::text,
-          rate_locked::text,
-          rate_expires_at::text,
-          rail,
-          rail_ref,
-          status,
-          payout_destination,
-          metadata,
-          created_at::text,
-          completed_at::text
-      `,
-      [
-        withdrawal.id,
-        toJsonString({
-          failedAt: new Date().toISOString(),
-          reason: payload.reason ?? 'execution_failed',
-          ...(payload.metadata ?? {}),
-        }),
-      ]
-    );
-
-    await client.query('COMMIT');
-    return {
-      ok: true,
-      withdrawal: toWithdrawalPayload(updatedResult.rows[0]),
-      wallet: walletInfo,
-    };
-  } catch (error) {
-    await client.query('ROLLBACK');
-    const apiError = getApiError(error);
-    if (apiError) {
-      reply.code(statusCodeForApiError(apiError.code));
-      return {
-        ok: false,
-        error: apiError.message,
-        details: apiError.details,
-      };
-    }
-
-    request.log.error({ err: error, withdrawalId }, 'Failed to fail/reverse 1ze withdrawal');
-    reply.code(500);
-    return {
-      ok: false,
-      error: 'Unable to fail/reverse 1ze withdrawal',
-    };
-  } finally {
-    client.release();
-  }
+  reply.code(410);
+  return {
+    ok: false,
+    error:
+      'Direct 1ze withdrawal failure/reversal is disabled in closed-loop mode. Withdrawals must be created from completed sale proceeds via payout requests.',
+    code: 'ONEZE_WITHDRAWAL_DISABLED',
+    details: {
+      withdrawalId,
+      reason: payload.reason ?? null,
+    },
+  };
 });
 
 app.get('/wallet/1ze/:userId/withdrawals', async (request, reply) => {
@@ -14121,47 +13351,17 @@ app.get('/wallet/1ze/:userId/withdrawals', async (request, reply) => {
   const { status, limit } = querySchema.parse(request.query);
   resolveAuthenticatedUserId(request, userId);
 
-  if (!(await onezeArchitectureTablesAvailable(db))) {
-    reply.code(503);
-    return {
-      ok: false,
-      error: '1ze wallet architecture tables are unavailable. Run migrations first.',
-    };
-  }
-
-  const result = await db.query<WithdrawalRow>(
-    `
-      SELECT
-        id,
-        user_id,
-        burn_tx_id,
-        amount_mg::text,
-        target_currency,
-        gross_minor::text,
-        spread_minor::text,
-        network_fee_minor::text,
-        net_minor::text,
-        rate_locked::text,
-        rate_expires_at::text,
-        rail,
-        rail_ref,
-        status,
-        payout_destination,
-        metadata,
-        created_at::text,
-        completed_at::text
-      FROM withdrawals
-      WHERE user_id = $1
-        AND ($2 = 'all' OR status = $2)
-      ORDER BY created_at DESC
-      LIMIT $3
-    `,
-    [userId, status, limit]
-  );
-
+  reply.code(410);
   return {
-    ok: true,
-    items: result.rows.map((row) => toWithdrawalPayload(row)),
+    ok: false,
+    error:
+      'Direct 1ze withdrawal history is disabled in closed-loop mode. Use payout request history for sale-proceeds withdrawals.',
+    code: 'ONEZE_WITHDRAWAL_DISABLED',
+    details: {
+      userId,
+      status,
+      limit,
+    },
   };
 });
 
@@ -14201,10 +13401,11 @@ app.get('/wallet/1ze/:userId/balance', async (request, reply) => {
         circulating_mg: string;
         reserve_active_mg: string;
         within_invariant: boolean;
+        metadata: Record<string, unknown>;
         created_at: string;
       }>(
         `
-          SELECT id, circulating_mg::text, reserve_active_mg::text, within_invariant, created_at::text
+          SELECT id, circulating_mg::text, reserve_active_mg::text, within_invariant, metadata, created_at::text
           FROM oneze_reconciliation_snapshots
           ORDER BY created_at DESC
           LIMIT 1
@@ -14215,6 +13416,11 @@ app.get('/wallet/1ze/:userId/balance', async (request, reply) => {
     await client.query('COMMIT');
 
     const latestSnapshot = latestReconciliation.rows[0];
+    const latestSnapshotMetadata = asObject(latestSnapshot?.metadata);
+    const computedSupplyDeltaMg =
+      latestSnapshot
+        ? Number(latestSnapshot.circulating_mg) - Number(latestSnapshot.reserve_active_mg)
+        : null;
     return {
       ok: true,
       userId,
@@ -14224,6 +13430,13 @@ app.get('/wallet/1ze/:userId/balance', async (request, reply) => {
         ? {
             id: latestSnapshot.id,
             circulatingMg: Number(latestSnapshot.circulating_mg),
+            referenceSupplyMg: Number(latestSnapshot.reserve_active_mg),
+            supplyDeltaMg:
+              asFiniteNumber(latestSnapshotMetadata.supplyDeltaMg)
+              ?? computedSupplyDeltaMg,
+            toleranceMg: asFiniteNumber(latestSnapshotMetadata.toleranceMg),
+            operationalLiquidityMg: asFiniteNumber(latestSnapshotMetadata.operationalLiquidityMg),
+            withinSupplyTolerance: latestSnapshot.within_invariant,
             reserveActiveMg: Number(latestSnapshot.reserve_active_mg),
             withinInvariant: latestSnapshot.within_invariant,
             createdAt: latestSnapshot.created_at,
@@ -14430,11 +13643,12 @@ app.get('/wallet/1ze/:userId/position', async (request, reply) => {
       userIze,
       userFiatValue: Number((userIze * quote.ratePerGram).toFixed(2)),
       outstandingIze: reserveSnapshot.outstandingIze,
+      circulatingIze: reserveSnapshot.circulatingIze,
+      supplyDeltaIze: reserveSnapshot.supplyDeltaIze,
+      supplyParityRatio: reserveSnapshot.supplyParityRatio,
+      liquidityBufferGrams: reserveSnapshot.reserveGrams,
       reserveGrams: reserveSnapshot.reserveGrams,
-      reserveCoverageRatio:
-        reserveSnapshot.outstandingIze > 0
-          ? Number((reserveSnapshot.reserveGrams / reserveSnapshot.outstandingIze).toFixed(6))
-          : null,
+      reserveCoverageRatio: reserveSnapshot.supplyParityRatio,
     },
   };
 });
@@ -14455,11 +13669,11 @@ app.post('/wallet/1ze/reconcile', async (request, reply) => {
     };
   }
 
-  if (!(await onezeTablesAvailable(db))) {
+  if (!(await onezeTablesAvailable(db)) || !(await onezeArchitectureTablesAvailable(db))) {
     reply.code(503);
     return {
       ok: false,
-      error: '1ze money-layer tables are unavailable. Run migrations first.',
+      error: '1ze reconciliation tables are unavailable. Run migrations first.',
     };
   }
 
@@ -14468,61 +13682,40 @@ app.post('/wallet/1ze/reconcile', async (request, reply) => {
   try {
     await client.query('BEGIN');
 
-    if (payload.reserveGramsOverride !== undefined) {
-      const currentReserve = await getLedgerAccountBalance(
-        client,
-        'platform',
-        'platform',
-        'gold_reserve_grams',
-        'XAU'
-      );
-
-      const delta = Number((payload.reserveGramsOverride - currentReserve).toFixed(6));
-      if (Math.abs(delta) > 1e-8) {
-        const reserveAccountId = await ensureLedgerAccount(
-          client,
-          'platform',
-          'platform',
-          'gold_reserve_grams',
-          'XAU'
-        );
-
-        await appendLedgerEntry(client, {
-          accountId: reserveAccountId,
-          counterpartyAccountId: reserveAccountId,
-          direction: delta > 0 ? 'credit' : 'debit',
-          amount: Math.abs(delta),
-          currency: 'XAU',
-          sourceType: 'reserve_reconcile',
-          sourceId: createRuntimeId('reserve_adj'),
-          lineType: 'operator_override',
-          metadata: {
-            previousReserveGrams: currentReserve,
-            nextReserveGrams: payload.reserveGramsOverride,
-            ...(payload.metadata ?? {}),
-          },
-        });
-      }
-    }
+    const snapshot = await captureOnezeReconciliationSnapshot(client, 'operator_manual', {
+      source: 'wallet_reconcile_endpoint',
+      reserveGramsOverrideIgnored: payload.reserveGramsOverride ?? null,
+      ...(payload.metadata ?? {}),
+    });
 
     const attestation = await createGoldReserveAttestation(client, {
       attestedBy: 'operator',
-      metadata: payload.metadata,
+      metadata: {
+        source: 'wallet_reconcile_endpoint',
+        snapshotId: snapshot.id,
+        reserveGramsOverrideIgnored: payload.reserveGramsOverride ?? null,
+        ...(payload.metadata ?? {}),
+      },
       thresholdGrams: config.goldReserveDriftThresholdGrams,
     });
 
     await client.query('COMMIT');
     return {
       ok: true,
+      snapshot,
       attestation,
+      warnings:
+        payload.reserveGramsOverride === undefined
+          ? []
+          : ['reserveGramsOverride is deprecated and ignored in closed-loop mode'],
     };
   } catch (error) {
     await client.query('ROLLBACK');
-    request.log.error({ err: error }, 'Failed to reconcile 1ze reserve');
+    request.log.error({ err: error }, 'Failed to reconcile 1ze closed-loop supply');
     reply.code(500);
     return {
       ok: false,
-      error: 'Unable to reconcile 1ze reserve',
+      error: 'Unable to reconcile 1ze closed-loop supply',
     };
   } finally {
     client.release();
@@ -14573,16 +13766,24 @@ app.get('/wallet/1ze/attestations', async (request, reply) => {
 
   return {
     ok: true,
-    items: result.rows.map((row) => ({
-      id: row.id,
-      reserveGrams: Number(row.reserve_grams),
-      outstandingIze: Number(row.outstanding_ize),
-      driftGrams: Number(row.drift_grams),
-      withinThreshold: row.within_threshold,
-      attestedBy: row.attested_by,
-      metadata: row.metadata,
-      createdAt: row.created_at,
-    })),
+    items: result.rows.map((row) => {
+      const metadata = asObject(row.metadata);
+      const supplyDeltaIze = asFiniteNumber(metadata.supplyDeltaIze) ?? Number(row.drift_grams);
+
+      return {
+        id: row.id,
+        reserveGrams: Number(row.reserve_grams),
+        liquidityBufferGrams: Number(row.reserve_grams),
+        outstandingIze: Number(row.outstanding_ize),
+        supplyDeltaIze,
+        driftGrams: Number(row.drift_grams),
+        withinSupplyTolerance: row.within_threshold,
+        withinThreshold: row.within_threshold,
+        attestedBy: row.attested_by,
+        metadata: row.metadata,
+        createdAt: row.created_at,
+      };
+    }),
   };
 });
 
@@ -15135,6 +14336,12 @@ app.get('/payments/gateways', async (request) => {
       {
         id: 'tap_gulf',
         displayName: 'Tap Payments Gulf',
+        type: 'fiat',
+        isActive: true,
+      },
+      {
+        id: 'wise_global',
+        displayName: 'Wise Global',
         type: 'fiat',
         isActive: true,
       },
@@ -17554,7 +16761,9 @@ app.post('/orders/:orderId/pay', async (request, reply) => {
       updatedAt: paidRow.updated_at,
       settlement: {
         buyerChargedGbp: Number(paidRow.total_gbp),
-        sellerPayableCreditedGbp: Number(paidRow.subtotal_gbp),
+        sellerPayableCreditedGbp: 0,
+        sellerEscrowHeldGbp: Number(paidRow.subtotal_gbp),
+        sellerCashoutEligible: false,
         platformCommissionCreditedGbp: platformChargeCreditedGbp,
         platformChargeCreditedGbp,
       },
@@ -17566,6 +16775,256 @@ app.post('/orders/:orderId/pay', async (request, reply) => {
     return {
       ok: false,
       error: 'Unable to settle payment for order',
+    };
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/orders/:orderId/parcel/events', async (request, reply) => {
+  const securityError = ensureSecurityAdminAccess(request, reply);
+  if (securityError) {
+    return securityError;
+  }
+
+  const paramsSchema = z.object({ orderId: z.string().min(4).max(64) });
+  const bodySchema = z.object({
+    provider: z.string().min(2).max(80),
+    eventType: z.enum(PARCEL_EVENT_TYPES),
+    providerEventId: z.string().min(3).max(180).optional(),
+    trackingId: z.string().min(3).max(180).optional(),
+    occurredAt: z.string().datetime().optional(),
+    payload: z.record(z.unknown()).optional(),
+  });
+
+  const { orderId } = paramsSchema.parse(request.params);
+  const payload = bodySchema.parse(request.body);
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    const orderResult = await client.query<{
+      id: string;
+      buyer_id: string;
+      seller_id: string;
+      listing_id: string;
+      subtotal_gbp: number | string;
+      buyer_protection_fee_gbp: number | string;
+      total_gbp: number | string;
+      status: string;
+      address_id: number | null;
+      payment_method_id: number | null;
+      created_at: string;
+      updated_at: string;
+    }>(
+      `
+        SELECT
+          id,
+          buyer_id,
+          seller_id,
+          listing_id,
+          subtotal_gbp,
+          buyer_protection_fee_gbp,
+          total_gbp,
+          status,
+          address_id,
+          payment_method_id,
+          created_at,
+          updated_at
+        FROM orders
+        WHERE id = $1
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [orderId]
+    );
+
+    const order = orderResult.rows[0];
+    if (!order) {
+      await client.query('ROLLBACK');
+      reply.code(404);
+      return {
+        ok: false,
+        error: 'Order not found',
+      };
+    }
+
+    if (order.status === 'created') {
+      await client.query('ROLLBACK');
+      reply.code(409);
+      return {
+        ok: false,
+        error: 'Order has not been paid yet, parcel events cannot be applied',
+      };
+    }
+
+    if (order.status === 'cancelled') {
+      await client.query('ROLLBACK');
+      reply.code(409);
+      return {
+        ok: false,
+        error: 'Order is cancelled and cannot accept parcel events',
+      };
+    }
+
+    let parcelEventRecorded = true;
+    let parcelEventDuplicate = false;
+    if (await orderParcelEventsTableAvailable(client)) {
+      const storedEvent = await client.query<{ id: number }>(
+        `
+          INSERT INTO order_parcel_events (
+            order_id,
+            provider,
+            event_type,
+            provider_event_id,
+            tracking_id,
+            occurred_at,
+            payload
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+          ON CONFLICT (provider, provider_event_id)
+          WHERE provider_event_id IS NOT NULL
+          DO NOTHING
+          RETURNING id
+        `,
+        [
+          orderId,
+          payload.provider,
+          payload.eventType,
+          payload.providerEventId ?? null,
+          payload.trackingId ?? null,
+          payload.occurredAt ?? null,
+          toJsonString(payload.payload ?? {}),
+        ]
+      );
+
+      const insertedEventCount = storedEvent.rowCount ?? 0;
+      parcelEventRecorded = insertedEventCount > 0 || !payload.providerEventId;
+      parcelEventDuplicate = Boolean(payload.providerEventId) && insertedEventCount === 0;
+    }
+
+    let nextStatus = order.status;
+    if (PARCEL_DELIVERY_RELEASE_EVENTS.has(payload.eventType)) {
+      if (order.status === 'paid' || order.status === 'shipped') {
+        nextStatus = 'delivered';
+      }
+    } else if (PARCEL_SHIPPING_PROGRESS_EVENTS.has(payload.eventType)) {
+      if (order.status === 'paid') {
+        nextStatus = 'shipped';
+      }
+    }
+
+    let status = order.status;
+    let updatedAt = order.updated_at;
+    let statusChanged = false;
+
+    if (nextStatus !== order.status) {
+      const updatedOrder = await client.query<{ status: string; updated_at: string }>(
+        `
+          UPDATE orders
+          SET status = $2, updated_at = NOW()
+          WHERE id = $1
+          RETURNING status, updated_at
+        `,
+        [orderId, nextStatus]
+      );
+
+      status = updatedOrder.rows[0]?.status ?? nextStatus;
+      updatedAt = updatedOrder.rows[0]?.updated_at ?? updatedAt;
+      statusChanged = true;
+    }
+
+    let sellerPayableReleasedGbp = 0;
+    let alreadyReleased = false;
+    if (PARCEL_DELIVERY_RELEASE_EVENTS.has(payload.eventType)) {
+      if (order.status !== 'paid' && order.status !== 'shipped' && order.status !== 'delivered') {
+        await client.query('ROLLBACK');
+        reply.code(409);
+        return {
+          ok: false,
+          error: `Order cannot be delivered from status '${order.status}'`,
+        };
+      }
+
+      if (await ledgerTablesAvailable(client)) {
+        const release = await releaseCommerceOrderEscrowToSeller(client, {
+          orderId: order.id,
+          sellerId: order.seller_id,
+          subtotalGbp: Number(order.subtotal_gbp),
+          parcelProvider: payload.provider,
+          parcelEventType: payload.eventType,
+          trackingId: payload.trackingId,
+          providerEventId: payload.providerEventId,
+        });
+
+        sellerPayableReleasedGbp = release.released ? Number(order.subtotal_gbp) : 0;
+        alreadyReleased = release.alreadyReleased;
+      }
+    }
+
+    await client.query('COMMIT');
+
+    const platformChargeGbp = Number(order.buyer_protection_fee_gbp);
+    const sellerEscrowHeldGbp = Number(order.subtotal_gbp);
+    const idempotent =
+      !statusChanged &&
+      !sellerPayableReleasedGbp &&
+      (alreadyReleased || parcelEventDuplicate);
+
+    return {
+      ok: true,
+      idempotent,
+      parcelEvent: {
+        provider: payload.provider,
+        eventType: payload.eventType,
+        providerEventId: payload.providerEventId ?? null,
+        trackingId: payload.trackingId ?? null,
+        occurredAt: payload.occurredAt ?? null,
+        recorded: parcelEventRecorded,
+        duplicate: parcelEventDuplicate,
+      },
+      order: {
+        id: order.id,
+        buyerId: order.buyer_id,
+        sellerId: order.seller_id,
+        listingId: order.listing_id,
+        subtotalGbp: sellerEscrowHeldGbp,
+        buyerProtectionFeeGbp: platformChargeGbp,
+        platformChargeGbp,
+        totalGbp: Number(order.total_gbp),
+        status,
+        addressId: order.address_id,
+        paymentMethodId: order.payment_method_id,
+        createdAt: order.created_at,
+        updatedAt,
+      },
+      settlement: {
+        releasePolicy: 'parcel_delivery_confirmation',
+        sellerEscrowHeldGbp,
+        sellerPayableReleasedGbp,
+        sellerCashoutEligible: status === 'delivered',
+        alreadyReleased,
+      },
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+
+    const apiError = getApiError(error);
+    if (apiError?.code === 'ESCROW_INSUFFICIENT') {
+      reply.code(409);
+      return {
+        ok: false,
+        error: apiError.message,
+        details: apiError.details,
+      };
+    }
+
+    request.log.error({ err: error, orderId }, 'Unable to process parcel event for order');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to process parcel event for order',
     };
   } finally {
     client.release();
@@ -17616,7 +17075,7 @@ app.get('/orders/:orderId/ledger', async (request) => {
         ON account_entry.id = le.account_id
       INNER JOIN ledger_accounts counterparty
         ON counterparty.id = le.counterparty_account_id
-      WHERE le.source_type = 'order_payment'
+      WHERE le.source_type IN ('order_payment', 'order_delivery')
         AND le.source_id = $1
       ORDER BY le.created_at ASC, le.id ASC
     `,

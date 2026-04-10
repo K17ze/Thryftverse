@@ -193,7 +193,7 @@ export default function BalanceScreen({ navigation }: Props) {
         <View style={styles.pegInfoCard}>
           <OnezeCoinIcon size={18} />
           <Text style={styles.pegInfoText}>
-            1 1ze = 1 gram of gold. Live local value: {formatFromIze(1, { displayMode: 'fiat' })} per 1ze.
+            1ze is a closed-loop settlement credit. Live local reference value: {formatFromIze(1, { displayMode: 'fiat' })} per 1ze.
           </Text>
         </View>
 

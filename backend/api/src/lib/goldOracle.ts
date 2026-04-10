@@ -18,6 +18,8 @@ export interface GoldReserveAttestation {
   id: string;
   reserveGrams: number;
   outstandingIze: number;
+  circulatingIze: number;
+  supplyDeltaIze: number;
   driftGrams: number;
   withinThreshold: boolean;
   createdAt: string;
@@ -397,6 +399,30 @@ async function getPlatformLedgerBalance(
   return Number(result.rows[0]?.balance ?? '0');
 }
 
+async function getTotalUserIzeWalletBalance(client: Queryable): Promise<number> {
+  const result = await client.query<{ balance: string }>(
+    `
+      SELECT
+        COALESCE(
+          SUM(
+            CASE
+              WHEN le.direction = 'credit' THEN le.amount
+              ELSE -le.amount
+            END
+          ),
+          0
+        )::text AS balance
+      FROM ledger_entries le
+      INNER JOIN ledger_accounts la ON la.id = le.account_id
+      WHERE la.owner_type = 'user'
+        AND la.account_code = 'ize_wallet'
+        AND la.currency = 'IZE'
+    `
+  );
+
+  return Number(result.rows[0]?.balance ?? '0');
+}
+
 export async function createGoldReserveAttestation(
   client: Queryable,
   options?: {
@@ -407,13 +433,16 @@ export async function createGoldReserveAttestation(
 ): Promise<GoldReserveAttestation> {
   const threshold = options?.thresholdGrams ?? config.goldReserveDriftThresholdGrams;
 
-  const [reserveGrams, outstandingIze] = await Promise.all([
+  const [reserveGrams, outstandingIze, circulatingIze] = await Promise.all([
     getPlatformLedgerBalance(client, 'gold_reserve_grams', 'XAU'),
     getPlatformLedgerBalance(client, 'ize_outstanding', 'IZE'),
+    getTotalUserIzeWalletBalance(client),
   ]);
 
-  const driftGrams = Number((reserveGrams - outstandingIze).toFixed(6));
-  const withinThreshold = driftGrams >= -Math.abs(threshold);
+  const supplyDeltaIze = Number((circulatingIze - outstandingIze).toFixed(6));
+  const driftGrams = supplyDeltaIze;
+  const withinThreshold = Math.abs(supplyDeltaIze) <= Math.abs(threshold);
+  const legacyReserveDriftGrams = Number((reserveGrams - outstandingIze).toFixed(6));
   const attestationId = runtimeId('att');
 
   const inserted = await client.query<{ created_at: string }>(
@@ -437,7 +466,15 @@ export async function createGoldReserveAttestation(
       driftGrams,
       withinThreshold,
       options?.attestedBy ?? null,
-      JSON.stringify(options?.metadata ?? {}),
+      JSON.stringify({
+        model: 'closed_loop_supply_parity',
+        circulatingIze,
+        supplyDeltaIze,
+        toleranceIze: Math.abs(threshold),
+        legacyReserveDriftGrams,
+        operationalLiquidityGrams: reserveGrams,
+        ...(options?.metadata ?? {}),
+      }),
     ]
   );
 
@@ -445,6 +482,8 @@ export async function createGoldReserveAttestation(
     id: attestationId,
     reserveGrams,
     outstandingIze,
+    circulatingIze,
+    supplyDeltaIze,
     driftGrams,
     withinThreshold,
     createdAt: inserted.rows[0]?.created_at ?? new Date().toISOString(),

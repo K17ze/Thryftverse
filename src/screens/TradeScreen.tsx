@@ -235,7 +235,7 @@ export default function TradeScreen() {
         <View style={styles.pegCard}>
           <Ionicons name="sparkles-outline" size={14} color={BRAND} />
           <Text style={styles.pegCardText}>
-            Co-Own trades settle in 1ze only. 1 1ze = 1 gram of gold. Current local value is {formatFromIze(1, { displayMode: 'fiat' })}.
+            Co-Own trades settle in 1ze only. 1ze is closed-loop and locally priced from the live market reference at {formatFromIze(1, { displayMode: 'fiat' })}.
           </Text>
         </View>
 

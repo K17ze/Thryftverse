@@ -111,6 +111,8 @@ export const config = {
   flutterwaveWebhookSecret: process.env.FLUTTERWAVE_WEBHOOK_SECRET,
   tapSecretKey: process.env.TAP_SECRET_KEY,
   tapWebhookSecret: process.env.TAP_WEBHOOK_SECRET,
+  wiseApiKey: process.env.WISE_API_KEY,
+  wiseWebhookSecret: process.env.WISE_WEBHOOK_SECRET,
   goldOracleApiUrl: process.env.GOLD_ORACLE_API_URL ?? 'https://api.metals.dev/v1/latest',
   goldOracleApiKey: process.env.GOLD_ORACLE_API_KEY,
   goldOracleTtlSeconds: asNumber(process.env.GOLD_ORACLE_TTL_SECONDS, 300),

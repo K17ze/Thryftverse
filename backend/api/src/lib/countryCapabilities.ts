@@ -15,6 +15,7 @@ export type CapabilityPaymentGatewayId =
   | 'mollie_eu'
   | 'flutterwave_africa'
   | 'tap_gulf'
+  | 'wise_global'
   | 'mock_fiat_gbp';
 
 export type CapabilityPaymentChannel = 'commerce' | 'co-own' | 'wallet_topup' | 'wallet_withdrawal';
@@ -109,7 +110,7 @@ const CAPABILITY_TEMPLATES: Record<CapabilityCountryCluster, CapabilityTemplate>
     },
     payoutDefaultCurrency: 'INR',
     payoutSupportedCurrencies: ['INR', 'USD'],
-    payoutGatewayPriority: ['razorpay_in', 'stripe_americas'],
+    payoutGatewayPriority: ['razorpay_in', 'stripe_americas', 'wise_global'],
     postageCarriers: [
       { id: 'delhivery', label: 'Delhivery', priceFromGbp: 1.75, etaMinDays: 2, etaMaxDays: 4, tracking: true },
       { id: 'bluedart', label: 'Blue Dart', priceFromGbp: 2.2, etaMinDays: 1, etaMaxDays: 3, tracking: true },
@@ -129,7 +130,7 @@ const CAPABILITY_TEMPLATES: Record<CapabilityCountryCluster, CapabilityTemplate>
     },
     payoutDefaultCurrency: 'USD',
     payoutSupportedCurrencies: ['USD'],
-    payoutGatewayPriority: ['stripe_americas'],
+    payoutGatewayPriority: ['stripe_americas', 'wise_global'],
     postageCarriers: [
       { id: 'usps', label: 'USPS', priceFromGbp: 2.15, etaMinDays: 2, etaMaxDays: 5, tracking: true },
       { id: 'ups', label: 'UPS', priceFromGbp: 3.1, etaMinDays: 1, etaMaxDays: 3, tracking: true },
@@ -149,7 +150,7 @@ const CAPABILITY_TEMPLATES: Record<CapabilityCountryCluster, CapabilityTemplate>
     },
     payoutDefaultCurrency: 'GBP',
     payoutSupportedCurrencies: ['GBP', 'EUR', 'USD'],
-    payoutGatewayPriority: ['stripe_americas', 'mollie_eu'],
+    payoutGatewayPriority: ['stripe_americas', 'mollie_eu', 'wise_global'],
     postageCarriers: [
       { id: 'evri', label: 'Evri', priceFromGbp: 2.89, etaMinDays: 2, etaMaxDays: 3, tracking: true },
       { id: 'royal_mail', label: 'Royal Mail', priceFromGbp: 3.35, etaMinDays: 1, etaMaxDays: 3, tracking: true },
@@ -169,7 +170,7 @@ const CAPABILITY_TEMPLATES: Record<CapabilityCountryCluster, CapabilityTemplate>
     },
     payoutDefaultCurrency: 'EUR',
     payoutSupportedCurrencies: ['EUR', 'GBP', 'USD'],
-    payoutGatewayPriority: ['mollie_eu', 'stripe_americas'],
+    payoutGatewayPriority: ['mollie_eu', 'stripe_americas', 'wise_global'],
     postageCarriers: [
       { id: 'dhl_eu', label: 'DHL Parcel', priceFromGbp: 3.1, etaMinDays: 2, etaMaxDays: 5, tracking: true },
       { id: 'gls', label: 'GLS', priceFromGbp: 2.95, etaMinDays: 2, etaMaxDays: 4, tracking: true },
@@ -189,7 +190,7 @@ const CAPABILITY_TEMPLATES: Record<CapabilityCountryCluster, CapabilityTemplate>
     },
     payoutDefaultCurrency: 'AED',
     payoutSupportedCurrencies: ['AED', 'USD'],
-    payoutGatewayPriority: ['tap_gulf', 'stripe_americas'],
+    payoutGatewayPriority: ['tap_gulf', 'stripe_americas', 'wise_global'],
     postageCarriers: [
       { id: 'aramex', label: 'Aramex', priceFromGbp: 2.75, etaMinDays: 1, etaMaxDays: 3, tracking: true },
       { id: 'dhl_express_me', label: 'DHL Express', priceFromGbp: 3.6, etaMinDays: 1, etaMaxDays: 2, tracking: true },
@@ -209,7 +210,7 @@ const CAPABILITY_TEMPLATES: Record<CapabilityCountryCluster, CapabilityTemplate>
     },
     payoutDefaultCurrency: 'USD',
     payoutSupportedCurrencies: ['USD'],
-    payoutGatewayPriority: ['stripe_americas'],
+    payoutGatewayPriority: ['stripe_americas', 'wise_global'],
     postageCarriers: [
       { id: 'sf_express', label: 'SF Express', priceFromGbp: 2.45, etaMinDays: 1, etaMaxDays: 3, tracking: true },
       { id: 'cainiao', label: 'Cainiao', priceFromGbp: 1.95, etaMinDays: 2, etaMaxDays: 5, tracking: true },
@@ -229,7 +230,7 @@ const CAPABILITY_TEMPLATES: Record<CapabilityCountryCluster, CapabilityTemplate>
     },
     payoutDefaultCurrency: 'USD',
     payoutSupportedCurrencies: ['USD', 'GBP', 'EUR'],
-    payoutGatewayPriority: ['stripe_americas', 'mollie_eu'],
+    payoutGatewayPriority: ['stripe_americas', 'mollie_eu', 'wise_global'],
     postageCarriers: [
       { id: 'dhl_global', label: 'DHL Global', priceFromGbp: 3.75, etaMinDays: 3, etaMaxDays: 6, tracking: true },
       { id: 'standard_intl', label: 'Standard International', priceFromGbp: 2.55, etaMinDays: 4, etaMaxDays: 8, tracking: true },

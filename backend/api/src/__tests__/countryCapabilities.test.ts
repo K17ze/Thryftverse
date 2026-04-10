@@ -74,7 +74,7 @@ test('resolveCountryCapabilities falls back to GLOBAL template for non-target co
 
   assert.equal(capabilities.countryCluster, 'GLOBAL');
   assert.equal(capabilities.currency.defaultCurrency, 'USD');
-  assert.deepEqual(capabilities.payouts.gatewayPriority, ['stripe_americas', 'mollie_eu']);
+  assert.deepEqual(capabilities.payouts.gatewayPriority, ['stripe_americas', 'mollie_eu', 'wise_global']);
 });
 
 test('resolveCountryCapabilities applies channel and payment policy nuances by cluster', () => {
