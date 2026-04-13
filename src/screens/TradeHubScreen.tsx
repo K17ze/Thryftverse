@@ -17,6 +17,7 @@ import { useStore } from '../store/useStore';
 import { RootStackParamList } from '../navigation/types';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { AnimatedCounter } from '../components/AnimatedCounter';
+import { t } from '../i18n';
 
 type TradeHubTab = 'AUCTIONS' | 'CO-OWN';
 type NavT = StackNavigationProp<RootStackParamList>;
@@ -65,20 +66,34 @@ export default function TradeHubScreen() {
 
   const latestActivityText = React.useMemo(() => {
     if (!latestActivity) {
-      return 'No activity yet.';
+      return t('tradeHub.activity.empty');
     }
     if (latestActivity.channel === 'auction' && latestActivity.action === 'bid') {
-      return `Bid ${formatFromFiat(latestActivity.amountGBP, 'GBP', { displayMode: 'fiat' })} on ${latestActivity.referenceId}`;
+      return t('tradeHub.activity.bid', {
+        amount: formatFromFiat(latestActivity.amountGBP, 'GBP', { displayMode: 'fiat' }),
+        referenceId: latestActivity.referenceId,
+      });
     }
     if (latestActivity.channel === 'auction' && latestActivity.action === 'win') {
-      return `Auction settled ${formatFromFiat(latestActivity.amountGBP, 'GBP', { displayMode: 'fiat' })} on ${latestActivity.referenceId}`;
+      return t('tradeHub.activity.win', {
+        amount: formatFromFiat(latestActivity.amountGBP, 'GBP', { displayMode: 'fiat' }),
+        referenceId: latestActivity.referenceId,
+      });
     }
     if (latestActivity.channel === 'co-own' && latestActivity.action === 'sell-units') {
       const units = latestActivity.units ?? 0;
-      return `Sold ${units} unit${units === 1 ? '' : 's'} on ${latestActivity.referenceId}`;
+      return t('tradeHub.activity.soldUnits', {
+        units,
+        plural: units === 1 ? '' : 's',
+        referenceId: latestActivity.referenceId,
+      });
     }
     const units = latestActivity.units ?? 0;
-    return `Bought ${units} unit${units === 1 ? '' : 's'} on ${latestActivity.referenceId}`;
+    return t('tradeHub.activity.boughtUnits', {
+      units,
+      plural: units === 1 ? '' : 's',
+      referenceId: latestActivity.referenceId,
+    });
   }, [formatFromFiat, latestActivity]);
 
   const marketSnapshot = React.useMemo(() => {
@@ -114,7 +129,7 @@ export default function TradeHubScreen() {
         <View>
           <View style={styles.titleRow}>
             <View style={styles.liveDot} />
-            <Text style={styles.headerTitle}>Trade Hub</Text>
+            <Text style={styles.headerTitle}>{t('tradeHub.header.title')}</Text>
             <Ionicons name="sparkles-outline" size={18} color={BRAND} />
           </View>
         </View>
@@ -125,21 +140,21 @@ export default function TradeHubScreen() {
           onPress={() => navigation.navigate('MarketLedger')}
         >
           <Ionicons name="pulse-outline" size={15} color={BRAND} />
-          <Text style={styles.ledgerShortcutText}>Ledger</Text>
+          <Text style={styles.ledgerShortcutText}>{t('tradeHub.ledger.label')}</Text>
         </AnimatedPressable>
       </View>
 
       <View style={styles.snapshotCard}>
         <View style={styles.snapshotMetric}>
           <AnimatedCounter value={marketSnapshot.liveAuctions} style={styles.snapshotValue} duration={700} />
-          <Text style={styles.snapshotLabel}>Auctions</Text>
+          <Text style={styles.snapshotLabel}>{t('tradeHub.snapshot.auctions')}</Text>
         </View>
 
         <View style={styles.snapshotDivider} />
 
         <View style={styles.snapshotMetric}>
           <AnimatedCounter value={marketSnapshot.openPools} style={styles.snapshotValue} duration={700} />
-          <Text style={styles.snapshotLabel}>Open pools</Text>
+          <Text style={styles.snapshotLabel}>{t('tradeHub.snapshot.openPools')}</Text>
         </View>
 
         <View style={styles.snapshotDivider} />
@@ -148,7 +163,7 @@ export default function TradeHubScreen() {
           <Text style={styles.snapshotValueMoney} numberOfLines={1}>
             {formatFromFiat(marketSnapshot.holdingsValue, 'GBP', { displayMode: 'fiat' })}
           </Text>
-          <Text style={styles.snapshotLabel}>Your co-own value</Text>
+          <Text style={styles.snapshotLabel}>{t('tradeHub.snapshot.coOwnValue')}</Text>
         </View>
       </View>
 
@@ -164,7 +179,7 @@ export default function TradeHubScreen() {
             onLayout={(e: LayoutChangeEvent) => handleTabLayout(tab, e)}
           >
             <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
-              {tab === 'AUCTIONS' ? 'Auctions' : 'Co-Own'}
+              {tab === 'AUCTIONS' ? t('tradeHub.tab.auctions') : t('tradeHub.tab.coOwn')}
             </Text>
           </AnimatedPressable>
         ))}
@@ -178,10 +193,15 @@ export default function TradeHubScreen() {
         <View style={styles.activityTopRow}>
           <View style={styles.activityLabelRow}>
             <View style={styles.tapeDot} />
-            <Text style={styles.activityLabel}>Activity</Text>
+            <Text style={styles.activityLabel}>{t('tradeHub.activity.label')}</Text>
           </View>
           <View style={styles.activityRightWrap}>
-            <AnimatedCounter value={marketLedger.length} style={styles.activityCount} duration={600} suffix=" events" />
+            <AnimatedCounter
+              value={marketLedger.length}
+              style={styles.activityCount}
+              duration={600}
+              suffix={t('tradeHub.activity.eventsSuffix')}
+            />
             <Ionicons name="chevron-forward" size={14} color={Colors.textMuted} />
           </View>
         </View>

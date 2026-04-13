@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -7,10 +7,10 @@ import {
   StyleSheet,
   StatusBar,
   TextInput,
-  FlatList,
   ActivityIndicator,
   ScrollView
 } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -19,6 +19,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { RootStackParamList } from '../navigation/types';
 import { MOCK_LISTINGS, MOCK_USERS, Listing } from '../data/mockData';
+import { mockFind, mockArrayOrEmpty } from '../utils/mockGate';
 import type { Poster } from '../data/posters';
 import { useStore } from '../store/useStore';
 import { useToast } from '../context/ToastContext';
@@ -60,7 +61,7 @@ export default function CreatePosterScreen() {
   const uploaderId = currentUser?.id ?? MOCK_USERS[0]?.id ?? 'u1';
 
   const allListingOptions = React.useMemo(
-    () => (listings.length ? listings : MOCK_LISTINGS),
+    () => (listings.length ? listings : mockArrayOrEmpty(MOCK_LISTINGS)),
     [listings]
   );
 
@@ -102,7 +103,7 @@ export default function CreatePosterScreen() {
   );
 
   const selectedListingSeller = React.useMemo(
-    () => MOCK_USERS.find((user) => user.id === selectedListing?.sellerId),
+    () => mockFind(MOCK_USERS, (user) => user.id === selectedListing?.sellerId),
     [selectedListing?.sellerId]
   );
 
@@ -215,7 +216,7 @@ export default function CreatePosterScreen() {
 
   const renderListingCard = ({ item }: { item: Listing }) => {
     const selected = item.id === selectedListingId;
-    const sellerName = MOCK_USERS.find((user) => user.id === item.sellerId)?.username ?? 'seller';
+    const sellerName = mockFind(MOCK_USERS, (user) => user.id === item.sellerId)?.username ?? 'seller';
 
     return (
       <AnimatedPressable
@@ -446,7 +447,7 @@ export default function CreatePosterScreen() {
             <Text style={styles.sectionHint}>{listingOptions.length} items</Text>
           </View>
 
-          <FlatList
+          <FlashList
             data={listingOptions}
             horizontal
             keyExtractor={(item) => item.id}

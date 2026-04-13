@@ -24,6 +24,8 @@ interface Props extends Omit<PressableProps, 'style' | 'children'> {
   activeOpacity?: number;
   disableAnimation?: boolean;
   hapticFeedback?: HapticFeedbackStyle;
+  accessibilityLabel?: string;
+  accessibilityHint?: string;
 }
 
 const AnimatedNativePressable = Reanimated.createAnimatedComponent(Pressable);
@@ -78,6 +80,9 @@ export function AnimatedPressable({
   return (
     <AnimatedNativePressable
       style={[style, animStyle]}
+      accessible={true}
+      accessibilityRole={rest.accessibilityRole ?? 'button'}
+      accessibilityState={{ disabled: !!disabled }}
       onPressIn={(event) => {
         if (!disabled && !disableAnimation) {
           if (reducedMotionEnabled) {

@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -7,8 +7,8 @@ import {
   StyleSheet,
   StatusBar,
   TextInput,
-  FlatList
 } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -198,7 +198,10 @@ export default function CreateAuctionScreen() {
       <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
       <View style={styles.header}>
-        <AnimatedPressable style={styles.closeBtn} onPress={() => navigation.goBack()} activeOpacity={0.85}>
+        <AnimatedPressable style={styles.closeBtn} onPress={() => navigation.goBack()} activeOpacity={0.85}
+          accessibilityLabel="Close auction creation"
+          accessibilityRole="button"
+        >
           <Ionicons name="close" size={20} color={Colors.textPrimary} />
         </AnimatedPressable>
 
@@ -206,7 +209,10 @@ export default function CreateAuctionScreen() {
           <Text style={styles.headerTitle}>Launch Auction</Text>
         </View>
 
-        <AnimatedPressable style={styles.launchBtn} onPress={launchAuction} activeOpacity={0.9}>
+        <AnimatedPressable style={styles.launchBtn} onPress={launchAuction} activeOpacity={0.9}
+          accessibilityLabel="Launch auction"
+          accessibilityRole="button"
+        >
           <Text style={styles.launchBtnText}>Launch</Text>
         </AnimatedPressable>
       </View>
@@ -292,7 +298,7 @@ export default function CreateAuctionScreen() {
             <Text style={styles.sectionHint}>{sellerListings.length} available</Text>
           </View>
 
-          <FlatList
+          <FlashList
             data={sellerListings}
             horizontal
             keyExtractor={(item) => item.id}

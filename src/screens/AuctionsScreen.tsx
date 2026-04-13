@@ -1,15 +1,15 @@
-﻿import React from 'react';
+import React from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
   View,
   Text,
   StyleSheet,
-  FlatList,
   RefreshControl,
   Modal,
   TextInput
 } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { CachedImage } from '../components/CachedImage';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -40,6 +40,7 @@ import {
   sanitizeDecimalInput,
 } from '../utils/currencyAuthoringFlows';
 import { listAuctions, placeAuctionBid as placeAuctionBidRemote } from '../services/marketApi';
+import { t } from '../i18n';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 const IS_LIGHT = ActiveTheme === 'light';
@@ -97,7 +98,7 @@ export default function AuctionsScreen() {
       setRemoteAuctions(mapped);
       setSyncError(null);
     } catch (error) {
-      setSyncError((error as Error).message || 'Unable to sync auctions feed');
+      setSyncError((error as Error).message || t('auctions.sync.unable'));
       // Keep local market state when backend sync is unavailable.
     } finally {
       setIsSyncingAuctions(false);
@@ -188,34 +189,34 @@ export default function AuctionsScreen() {
     if (isSyncingAuctions) {
       return {
         tone: 'syncing' as const,
-        label: 'Syncing',
+        label: t('auctions.status.syncing'),
       };
     }
 
     if (syncError) {
       return {
         tone: 'offline' as const,
-        label: 'Reconnecting',
+        label: t('auctions.status.reconnecting'),
       };
     }
 
     if (remoteAuctions.length > 0) {
       return {
         tone: 'live' as const,
-        label: 'Synced',
+        label: t('auctions.status.synced'),
       };
     }
 
     if (auctions.length > 0) {
       return {
         tone: 'offline' as const,
-        label: 'Local mode',
+        label: t('auctions.status.localMode'),
       };
     }
 
     return {
       tone: 'offline' as const,
-      label: 'No auctions',
+      label: t('auctions.status.none'),
     };
   }, [auctions.length, isSyncingAuctions, remoteAuctions.length, syncError]);
 
@@ -243,7 +244,9 @@ export default function AuctionsScreen() {
     });
 
     show(
-      isWatching ? `Removed ${auction.title} from watchlist` : `Watching ${auction.title}`,
+      isWatching
+        ? t('auctions.watch.removed', { title: auction.title })
+        : t('auctions.watch.added', { title: auction.title }),
       'info'
     );
   };
@@ -276,19 +279,21 @@ export default function AuctionsScreen() {
 
     const amount = Number(bidInput);
     if (!Number.isFinite(amount) || amount <= 0) {
-      show('Enter a valid bid amount', 'error');
+      show(t('auctions.bid.error.invalid'), 'error');
       return;
     }
 
     const amountInGbp = convertDisplayToGbpAmount(amount, currencyCode, goldRates);
     if (!Number.isFinite(amountInGbp) || amountInGbp <= 0) {
-      show('Enter a valid bid amount', 'error');
+      show(t('auctions.bid.error.invalid'), 'error');
       return;
     }
 
     if (amountInGbp <= selectedBidAuction.currentBid) {
       show(
-        `Bid must be above ${formatFromFiat(selectedBidAuction.currentBid, 'GBP', { displayMode: 'fiat' })}`,
+        t('auctions.bid.error.mustBeAbove', {
+          amount: formatFromFiat(selectedBidAuction.currentBid, 'GBP', { displayMode: 'fiat' }),
+        }),
         'error'
       );
       return;
@@ -306,17 +311,20 @@ export default function AuctionsScreen() {
       await syncAuctions();
       setNowTs(Date.now());
       show(
-        `Bid placed on ${selectedBidAuction.title} at ${formatFromFiat(roundedAmount, 'GBP', { displayMode: 'fiat' })}`,
+        t('auctions.bid.success.placed', {
+          title: selectedBidAuction.title,
+          amount: formatFromFiat(roundedAmount, 'GBP', { displayMode: 'fiat' }),
+        }),
         'success'
       );
 
       if (remoteResult.aml?.alertId) {
-        show('Bid is flagged for AML review.', 'info');
+        show(t('auctions.bid.info.aml'), 'info');
       }
 
       closeBidComposer();
     } catch (error) {
-      const parsedError = parseApiError(error, 'Unable to place bid');
+      const parsedError = parseApiError(error, t('auctions.bid.error.unablePlace'));
       show(parsedError.message, 'error');
     } finally {
       setIsSubmittingBid(false);
@@ -337,15 +345,15 @@ export default function AuctionsScreen() {
       });
 
       await syncAuctions();
-      show(`You won ${auction.title}`, 'success');
+      show(t('auctions.buy.success.won', { title: auction.title }), 'success');
 
       if (remoteResult.aml?.alertId) {
-        show('Buy now is flagged for AML review.', 'info');
+        show(t('auctions.buy.info.aml'), 'info');
       }
 
       navigation.navigate('Checkout', { itemId: auction.listingId });
     } catch (error) {
-      const parsedError = parseApiError(error, 'Unable to complete buy now');
+      const parsedError = parseApiError(error, t('auctions.buy.error.unableComplete'));
       show(parsedError.message, 'error');
     } finally {
       setBuyNowAuctionId(null);
@@ -360,10 +368,10 @@ export default function AuctionsScreen() {
     return (
       <View style={styles.sectionWrap}>
         <View style={styles.sectionTitleRow}>
-          <Text style={styles.sectionTitle}>Upcoming Auction Posters</Text>
+          <Text style={styles.sectionTitle}>{t('auctions.section.upcomingPosters')}</Text>
         </View>
 
-        <FlatList
+        <FlashList
           data={adPosters}
           horizontal
           keyExtractor={(item) => item.id}
@@ -378,7 +386,7 @@ export default function AuctionsScreen() {
               <CachedImage uri={item.image} style={styles.posterImage} containerStyle={{ width: 56, height: 56, borderRadius: 10 }} contentFit="cover" />
               <View style={styles.posterOverlay}>
                 <Text style={styles.posterSeller} numberOfLines={1}>
-                  @{item.uploader?.username ?? 'seller'}
+                  @{item.uploader?.username ?? t('auctions.poster.unknownSeller')}
                 </Text>
                 <Text style={styles.posterTime}>{item.remainingHours}h</Text>
               </View>
@@ -397,10 +405,10 @@ export default function AuctionsScreen() {
     return (
       <View style={styles.sectionWrap}>
         <View style={styles.sectionTitleRow}>
-          <Text style={styles.sectionTitle}>Starting Soon</Text>
+          <Text style={styles.sectionTitle}>{t('auctions.section.startingSoon')}</Text>
         </View>
 
-        <FlatList
+        <FlashList
           data={upcomingAuctions}
           horizontal
           keyExtractor={(item) => item.id}
@@ -415,9 +423,13 @@ export default function AuctionsScreen() {
               <CachedImage uri={item.image} style={styles.upcomingImage} containerStyle={{ width: '100%', height: 120, borderRadius: 14 }} contentFit="cover" />
               <View style={styles.upcomingMeta}>
                 <Text style={styles.upcomingTitle} numberOfLines={1}>{item.title}</Text>
-                <Text style={styles.upcomingTimer}>Starts in {formatCountdown(item.msToStart)}</Text>
+                <Text style={styles.upcomingTimer}>
+                  {t('auctions.upcoming.startsIn', { countdown: formatCountdown(item.msToStart) })}
+                </Text>
                 <Text style={styles.upcomingBid}>
-                  Starting bid {formatFromFiat(item.startingBid, 'GBP', { displayMode: 'fiat' })}
+                  {t('auctions.upcoming.startingBid', {
+                    amount: formatFromFiat(item.startingBid, 'GBP', { displayMode: 'fiat' }),
+                  })}
                 </Text>
               </View>
             </AnimatedPressable>
@@ -432,28 +444,28 @@ export default function AuctionsScreen() {
       <View style={styles.heroCard}>
         <View style={styles.heroTitleRow}>
           <Ionicons name="flash-outline" size={16} color={BRAND} />
-          <Text style={styles.heroTitle}>My Auctions</Text>
+          <Text style={styles.heroTitle}>{t('auctions.header.myAuctions')}</Text>
         </View>
       </View>
 
       <View style={styles.metricsRow}>
         <View style={styles.metricCard}>
           <Text style={styles.metricValue}>{liveAuctions.length}</Text>
-          <Text style={styles.metricLabel}>Active</Text>
+          <Text style={styles.metricLabel}>{t('auctions.metric.active')}</Text>
         </View>
         <View style={styles.metricCard}>
           <Text style={styles.metricValue}>{upcomingAuctions.length}</Text>
-          <Text style={styles.metricLabel}>Upcoming</Text>
+          <Text style={styles.metricLabel}>{t('auctions.metric.upcoming')}</Text>
         </View>
         <View style={styles.metricCard}>
           <Text style={styles.metricValue}>{formatCompact(totalLiveBids)}</Text>
-          <Text style={styles.metricLabel}>Bids</Text>
+          <Text style={styles.metricLabel}>{t('auctions.metric.bids')}</Text>
         </View>
       </View>
 
       <View style={styles.launchRow}>
         <View>
-          <Text style={styles.launchTitle}>Create Auction</Text>
+          <Text style={styles.launchTitle}>{t('auctions.cta.createAuction')}</Text>
         </View>
 
         <AnimatedPressable
@@ -462,13 +474,13 @@ export default function AuctionsScreen() {
           onPress={() => navigation.navigate('CreateAuction')}
         >
           <Ionicons name="add" size={15} color={Colors.background} />
-          <Text style={styles.launchBtnText}>Launch</Text>
+          <Text style={styles.launchBtnText}>{t('auctions.cta.launch')}</Text>
         </AnimatedPressable>
       </View>
 
       {syncError ? (
         <SyncRetryBanner
-          message="Auction sync is delayed. Showing cached activity."
+          message={t('auctions.sync.delayed')}
           onRetry={() => void syncAuctions()}
           isRetrying={isSyncingAuctions}
           telemetryContext="auctions_market_sync"
@@ -481,7 +493,7 @@ export default function AuctionsScreen() {
       {renderUpcomingStrip()}
 
       <View style={styles.sectionTitleRow}>
-        <Text style={styles.sectionTitle}>My Auctions</Text>
+        <Text style={styles.sectionTitle}>{t('auctions.header.myAuctions')}</Text>
         <SyncStatusPill tone={marketStatus.tone} label={marketStatus.label} compact />
       </View>
     </View>
@@ -518,16 +530,16 @@ export default function AuctionsScreen() {
         <View style={styles.liveTopRow}>
           <View style={styles.lifecyclePill}>
             <View style={styles.liveDot} />
-            <Text style={styles.lifecycleText}>OPEN</Text>
+            <Text style={styles.lifecycleText}>{t('auctions.lifecycle.open')}</Text>
           </View>
           <Text style={styles.timerText}>{formatCountdown(item.msToEnd)}</Text>
         </View>
 
         <Text style={styles.liveTitle} numberOfLines={1}>{item.title}</Text>
-        <Text style={styles.liveSeller}>by {getUserLabel(item.sellerId)}</Text>
+        <Text style={styles.liveSeller}>{t('auctions.seller.by', { seller: getUserLabel(item.sellerId) })}</Text>
 
         <View style={styles.bidRow}>
-          <Text style={styles.bidLabel}>Current bid</Text>
+          <Text style={styles.bidLabel}>{t('auctions.bid.current')}</Text>
           <Text style={styles.bidValue}>{formatFromFiat(item.currentBid, 'GBP', { displayMode: 'fiat' })}</Text>
         </View>
 
@@ -536,10 +548,12 @@ export default function AuctionsScreen() {
         </View>
 
         <View style={styles.bidRow}>
-          <Text style={styles.bidMeta}>{item.bidCount} bids</Text>
+          <Text style={styles.bidMeta}>{t('auctions.bid.count', { count: item.bidCount })}</Text>
           {item.buyNowPrice ? (
             <Text style={styles.buyNowMeta}>
-              Buy now {formatFromFiat(item.buyNowPrice, 'GBP', { displayMode: 'fiat' })}
+              {t('auctions.buy.nowLabel', {
+                amount: formatFromFiat(item.buyNowPrice, 'GBP', { displayMode: 'fiat' }),
+              })}
             </Text>
           ) : null}
         </View>
@@ -552,7 +566,7 @@ export default function AuctionsScreen() {
             disabled={isSubmittingBid || !!buyNowAuctionId}
           >
             <Ionicons name="hammer-outline" size={14} color={Colors.background} />
-            <Text style={styles.bidBtnText}>Place Bid</Text>
+            <Text style={styles.bidBtnText}>{t('auctions.cta.placeBid')}</Text>
           </AnimatedPressable>
 
           {item.buyNowPrice ? (
@@ -562,7 +576,9 @@ export default function AuctionsScreen() {
               activeOpacity={0.9}
               disabled={buyNowAuctionId === item.id || isSubmittingBid}
             >
-              <Text style={styles.buyBtnText}>{buyNowAuctionId === item.id ? 'Buying...' : 'Buy Now'}</Text>
+              <Text style={styles.buyBtnText}>
+                {buyNowAuctionId === item.id ? t('auctions.cta.buying') : t('auctions.cta.buyNow')}
+              </Text>
             </AnimatedPressable>
           ) : (
             <AnimatedPressable
@@ -571,7 +587,7 @@ export default function AuctionsScreen() {
               activeOpacity={0.9}
             >
               <Text style={[styles.watchBtnText, isWatching && styles.watchBtnTextActive]}>
-                {isWatching ? 'Watching' : 'Watch'}
+                {isWatching ? t('auctions.cta.watching') : t('auctions.cta.watch')}
               </Text>
             </AnimatedPressable>
           )}
@@ -626,7 +642,7 @@ export default function AuctionsScreen() {
 
             <View style={styles.bidModalActions}>
               <AnimatedPressable style={styles.bidCancelBtn} onPress={closeBidComposer} activeOpacity={0.9}>
-                <Text style={styles.bidCancelText}>Cancel</Text>
+                <Text style={styles.bidCancelText}>{t('auctions.modal.cancel')}</Text>
               </AnimatedPressable>
 
               <AnimatedPressable
@@ -635,7 +651,9 @@ export default function AuctionsScreen() {
                 activeOpacity={0.9}
                 disabled={isSubmittingBid}
               >
-                <Text style={styles.bidSubmitText}>{isSubmittingBid ? 'Submitting...' : 'Submit Bid'}</Text>
+                <Text style={styles.bidSubmitText}>
+                  {isSubmittingBid ? t('auctions.modal.submitting') : t('auctions.modal.submitBid')}
+                </Text>
               </AnimatedPressable>
             </View>
           </View>
@@ -646,7 +664,7 @@ export default function AuctionsScreen() {
 
   return (
     <>
-      <FlatList
+      <FlashList
         data={liveAuctions}
         keyExtractor={(item) => item.id}
         renderItem={renderLiveAuction}
@@ -657,7 +675,7 @@ export default function AuctionsScreen() {
           ) : (
             <EmptyState
               icon="hourglass-outline"
-              title="No active auctions yet"
+              title={t('auctions.empty.noActive')}
             />
           )
         }

@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import { View,
@@ -30,6 +30,7 @@ import {
   ThemePreference,
   updateThemePreference,
 } from '../theme/themePreference';
+import { t } from '../i18n';
 
 type Props = StackScreenProps<RootStackParamList, 'Settings'>;
 const ACCENT = '#d7b98f';
@@ -89,7 +90,10 @@ export default function SettingsScreen({ navigation }: Props) {
     () => themeOptions.find((option) => option.toLowerCase() === themePreference),
     [themeOptions, themePreference]
   );
-  const pushNotificationsSubtitle = `${pushEnabledCount}/${pushTotalCount} types enabled`;
+  const pushNotificationsSubtitle = t('settings.push.subtitle', {
+    enabled: pushEnabledCount,
+    total: pushTotalCount,
+  });
 
   React.useEffect(() => {
     getStoredThemePreference().then(setThemePreference).catch(() => {
@@ -115,7 +119,7 @@ export default function SettingsScreen({ navigation }: Props) {
     const reloaded = await updateThemePreference(nextPreference, { reloadApp: true });
 
     if (!reloaded) {
-      show('Theme updated. Restart the app to fully apply this mode.', 'info');
+      show(t('settings.toast.themeUpdatedRestart'), 'info');
     }
   };
 
@@ -136,14 +140,14 @@ export default function SettingsScreen({ navigation }: Props) {
   const handleToggleEmailNotifications = React.useCallback(() => {
     const next = !emailNotificationsEnabled;
     toggleEmailNotifications();
-    show(next ? 'Email notifications enabled' : 'Email notifications paused', next ? 'success' : 'info');
+    show(next ? t('settings.toast.emailEnabled') : t('settings.toast.emailPaused'), next ? 'success' : 'info');
   }, [emailNotificationsEnabled, show, toggleEmailNotifications]);
 
   const handleOpenExternal = React.useCallback(async (url: string) => {
     try {
       await Linking.openURL(url);
     } catch {
-      show('Unable to open link. Please try again in a moment.', 'error');
+      show(t('settings.toast.unableOpenLink'), 'error');
     }
   }, [show]);
 
@@ -157,6 +161,9 @@ export default function SettingsScreen({ navigation }: Props) {
         activeOpacity={0.7}
         onPress={item.onPress}
         disabled={!isInteractive}
+        accessibilityLabel={item.subtitle ? `${item.title}: ${item.subtitle}` : item.title}
+        accessibilityRole={isInteractive ? 'button' : 'text'}
+        accessibilityHint={isInteractive ? `Navigate to ${item.title}` : undefined}
       >
         <View style={[styles.iconSquare, { backgroundColor: item.color + '18', borderColor: item.color + '30' }]}>
           <Ionicons name={item.icon as any} size={20} color={item.color} />
@@ -171,30 +178,54 @@ export default function SettingsScreen({ navigation }: Props) {
   };
 
   const accountItems: SettingItem[] = [
-    { icon: 'person-outline', title: 'Profile Details', subtitle: 'Username, bio, location', color: ACCENT, onPress: () => navigation.navigate('EditProfile') },
-    { icon: 'key-outline', title: 'Account Settings', subtitle: 'Email, password, security', color: '#FFD700', onPress: () => navigation.navigate('AccountSettings') },
-    { icon: 'card-outline', title: 'Payments', subtitle: 'Cards and bank accounts', color: '#BB86FC', onPress: () => navigation.navigate('Payments') },
-    { icon: 'cube-outline', title: 'Postage', subtitle: 'Default carrier and options', color: '#FF6B6B', onPress: () => navigation.navigate('Postage') },
+    {
+      icon: 'person-outline',
+      title: t('settings.item.profileDetails.title'),
+      subtitle: t('settings.item.profileDetails.subtitle'),
+      color: ACCENT,
+      onPress: () => navigation.navigate('EditProfile'),
+    },
+    {
+      icon: 'key-outline',
+      title: t('settings.item.accountSettings.title'),
+      subtitle: t('settings.item.accountSettings.subtitle'),
+      color: '#FFD700',
+      onPress: () => navigation.navigate('AccountSettings'),
+    },
+    {
+      icon: 'card-outline',
+      title: t('settings.item.payments.title'),
+      subtitle: t('settings.item.payments.subtitle'),
+      color: '#BB86FC',
+      onPress: () => navigation.navigate('Payments'),
+    },
+    {
+      icon: 'cube-outline',
+      title: t('settings.item.postage.title'),
+      subtitle: t('settings.item.postage.subtitle'),
+      color: '#FF6B6B',
+      onPress: () => navigation.navigate('Postage'),
+    },
   ];
 
   const profileHubItems: SettingItem[] = [
     {
       icon: 'person-circle-outline',
-      title: 'Account settings',
-      subtitle: 'Security and account access',
+      title: t('settings.item.profileHub.account.title'),
+      subtitle: t('settings.item.profileHub.account.subtitle'),
       color: ACCENT,
       onPress: () => navigation.navigate('AccountSettings'),
     },
     {
       icon: 'notifications-outline',
-      title: 'Notification controls',
+      title: t('settings.item.profileHub.notifications.title'),
       subtitle: pushNotificationsSubtitle,
       color: '#64B5F6',
       onPress: () => navigation.navigate('PushNotifications'),
     },
     {
       icon: 'color-palette-outline',
-      title: 'Theme and profile style',
+      title: t('settings.item.profileHub.themeStyle.title'),
       subtitle: getThemePreferenceLabel(themePreference),
       color: '#BB86FC',
       onPress: () => navigation.navigate('Personalisation'),
@@ -204,15 +235,17 @@ export default function SettingsScreen({ navigation }: Props) {
   const notifItems: SettingItem[] = [
     {
       icon: 'notifications-outline',
-      title: 'Push Notifications',
+      title: t('settings.item.notif.push.title'),
       subtitle: pushNotificationsSubtitle,
       color: ACCENT,
       onPress: () => navigation.navigate('PushNotifications'),
     },
     {
       icon: 'mail-outline',
-      title: 'Email Notifications',
-      subtitle: emailNotificationsEnabled ? 'Enabled for newsletters and updates' : 'Paused',
+      title: t('settings.item.notif.email.title'),
+      subtitle: emailNotificationsEnabled
+        ? t('settings.item.notif.email.enabledSubtitle')
+        : t('settings.item.notif.email.pausedSubtitle'),
       color: '#64B5F6',
       onPress: handleToggleEmailNotifications,
     },
@@ -221,28 +254,28 @@ export default function SettingsScreen({ navigation }: Props) {
   const appItems: SettingItem[] = [
     {
       icon: 'language-outline',
-      title: 'Language',
+      title: t('settings.item.app.language.title'),
       subtitle: selectedLanguage,
       color: '#FFD700',
       onPress: () => setLanguagePickerVisible(true),
     },
     {
       icon: 'swap-horizontal-outline',
-      title: 'Currency Display',
+      title: t('settings.item.app.currencyDisplay.title'),
       subtitle: displayModeLabel,
       color: ACCENT,
       onPress: cycleDisplayMode,
     },
     {
       icon: 'globe-outline',
-      title: 'Local Fiat Currency',
+      title: t('settings.item.app.localFiat.title'),
       subtitle: `${currencyCode} (${CURRENCIES[currencyCode].symbol})`,
       color: '#64B5F6',
       onPress: () => setCurrencyPickerVisible(true),
     },
     {
       icon: 'color-palette-outline',
-      title: 'Theme',
+      title: t('settings.item.app.theme.title'),
       subtitle: getThemePreferenceLabel(themePreference),
       color: '#BB86FC',
       onPress: () => setThemePickerVisible(true),
@@ -250,10 +283,16 @@ export default function SettingsScreen({ navigation }: Props) {
   ];
 
   const supportItems: SettingItem[] = [
-    { icon: 'help-circle-outline', title: 'Help Centre', subtitle: 'FAQs and support', color: ACCENT, onPress: () => navigation.navigate('HelpSupport') },
+    {
+      icon: 'help-circle-outline',
+      title: t('settings.item.support.help.title'),
+      subtitle: t('settings.item.support.help.subtitle'),
+      color: ACCENT,
+      onPress: () => navigation.navigate('HelpSupport'),
+    },
     {
       icon: 'document-text-outline',
-      title: 'Terms & Conditions',
+      title: t('settings.item.support.terms.title'),
       color: '#a0a0a0',
       onPress: () => {
         void handleOpenExternal('https://thryftverse.app/terms');
@@ -261,7 +300,7 @@ export default function SettingsScreen({ navigation }: Props) {
     },
     {
       icon: 'shield-checkmark-outline',
-      title: 'Privacy Policy',
+      title: t('settings.item.support.privacy.title'),
       color: '#a0a0a0',
       onPress: () => {
         void handleOpenExternal('https://thryftverse.app/privacy');
@@ -274,12 +313,17 @@ export default function SettingsScreen({ navigation }: Props) {
       <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
       <View style={styles.header}>
-        <AnimatedPressable onPress={() => navigation.goBack()} style={styles.backBtn}>
+        <AnimatedPressable
+          onPress={() => navigation.goBack()}
+          style={styles.backBtn}
+          accessibilityLabel={t('settings.a11y.goBack')}
+          accessibilityRole="button"
+        >
           <Ionicons name="arrow-back" size={22} color={Colors.textPrimary} />
         </AnimatedPressable>
         <View>
-          <Text style={styles.headerLabel}>PREFERENCES</Text>
-          <Text style={styles.hugeTitle}>Settings</Text>
+          <Text style={styles.headerLabel}>{t('settings.header.preferences')}</Text>
+          <Text style={styles.hugeTitle}>{t('settings.header.title')}</Text>
         </View>
       </View>
 
@@ -287,8 +331,8 @@ export default function SettingsScreen({ navigation }: Props) {
 
         {/* Profile Hub */}
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Profile Hub</Text>
-          <Text style={styles.sectionDesc}>Account, notifications, and profile style controls</Text>
+          <Text style={styles.sectionTitle}>{t('settings.section.profileHub.title')}</Text>
+          <Text style={styles.sectionDesc}>{t('settings.section.profileHub.desc')}</Text>
         </View>
         <View style={styles.pillCard}>
           {profileHubItems.map((item, i) => renderSettingRow(item, i === profileHubItems.length - 1))}
@@ -296,8 +340,8 @@ export default function SettingsScreen({ navigation }: Props) {
 
         {/* Account */}
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Account</Text>
-          <Text style={styles.sectionDesc}>Manage your profile and payment methods</Text>
+          <Text style={styles.sectionTitle}>{t('settings.section.account.title')}</Text>
+          <Text style={styles.sectionDesc}>{t('settings.section.account.desc')}</Text>
         </View>
         <View style={styles.pillCard}>
           {accountItems.map((item, i) => renderSettingRow(item, i === accountItems.length - 1))}
@@ -305,8 +349,8 @@ export default function SettingsScreen({ navigation }: Props) {
 
         {/* Notifications */}
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Notifications</Text>
-          <Text style={styles.sectionDesc}>Choose what you want to hear about</Text>
+          <Text style={styles.sectionTitle}>{t('settings.section.notifications.title')}</Text>
+          <Text style={styles.sectionDesc}>{t('settings.section.notifications.desc')}</Text>
         </View>
         <View style={styles.pillCard}>
           {notifItems.map((item, i) => renderSettingRow(item, i === notifItems.length - 1))}
@@ -314,8 +358,8 @@ export default function SettingsScreen({ navigation }: Props) {
 
         {/* App */}
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>App</Text>
-          <Text style={styles.sectionDesc}>Customise your Thryftverse experience</Text>
+          <Text style={styles.sectionTitle}>{t('settings.section.app.title')}</Text>
+          <Text style={styles.sectionDesc}>{t('settings.section.app.desc')}</Text>
         </View>
         <View style={styles.pillCard}>
           {appItems.map((item, i) => renderSettingRow(item, i === appItems.length - 1))}
@@ -323,8 +367,8 @@ export default function SettingsScreen({ navigation }: Props) {
 
         {/* Support */}
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Support</Text>
-          <Text style={styles.sectionDesc}>Get help and read our policies</Text>
+          <Text style={styles.sectionTitle}>{t('settings.section.support.title')}</Text>
+          <Text style={styles.sectionDesc}>{t('settings.section.support.desc')}</Text>
         </View>
         <View style={styles.pillCard}>
           {supportItems.map((item, i) => renderSettingRow(item, i === supportItems.length - 1))}
@@ -334,6 +378,8 @@ export default function SettingsScreen({ navigation }: Props) {
         <AnimatedPressable 
           style={styles.logoutPill} 
           activeOpacity={0.8}
+          accessibilityLabel={t('settings.a11y.logout')}
+          accessibilityRole="button"
           onPress={async () => {
             await logoutFromSession();
             logout();
@@ -341,18 +387,18 @@ export default function SettingsScreen({ navigation }: Props) {
           }}
         >
           <Ionicons name="log-out-outline" size={20} color={Colors.danger} style={{ marginRight: 8 }} />
-          <Text style={styles.logoutText}>Log out</Text>
+          <Text style={styles.logoutText}>{t('settings.logout')}</Text>
         </AnimatedPressable>
 
         {/* Version */}
-        <Text style={styles.versionText}>Thryftverse v1.0.0</Text>
+        <Text style={styles.versionText}>{t('settings.version', { version: '1.0.0' })}</Text>
 
       </ScrollView>
 
       <BottomSheetPicker
         visible={currencyPickerVisible}
         onClose={() => setCurrencyPickerVisible(false)}
-        title="Choose Local Currency"
+        title={t('settings.picker.currencyTitle')}
         options={currencyOptions}
         selectedValue={selectedCurrencyOption}
         onSelect={handleCurrencySelect}
@@ -362,7 +408,7 @@ export default function SettingsScreen({ navigation }: Props) {
       <BottomSheetPicker
         visible={languagePickerVisible}
         onClose={() => setLanguagePickerVisible(false)}
-        title="Language"
+        title={t('settings.picker.languageTitle')}
         options={languageOptions}
         selectedValue={selectedLanguage}
         onSelect={handleLanguageSelect}
@@ -371,7 +417,7 @@ export default function SettingsScreen({ navigation }: Props) {
       <BottomSheetPicker
         visible={themePickerVisible}
         onClose={() => setThemePickerVisible(false)}
-        title="Theme Mode"
+        title={t('settings.picker.themeTitle')}
         options={themeOptions}
         selectedValue={selectedThemeOption}
         onSelect={handleThemeSelect}

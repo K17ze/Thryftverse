@@ -14,6 +14,7 @@ import {
 } from '@expo-google-fonts/inter';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Linking from 'expo-linking';
+import * as Network from 'expo-network';
 import { View, ActivityIndicator, Text, TextInput, Alert } from 'react-native';
 import { ActiveTheme, Colors } from './src/constants/colors';
 import { ToastProvider } from './src/context/ToastContext';
@@ -34,6 +35,7 @@ import { restoreAuthSession } from './src/services/authApi';
 import { useStore } from './src/store/useStore';
 import { joinGroupByInviteOnApi } from './src/services/chatApi';
 import { parseApiError } from './src/lib/apiClient';
+import { useOfflineQueue } from './src/lib/offlineQueue';
 import { getStoredProfileMedia } from './src/preferences/profileMediaPreferences';
 import { getStoredAuthSnapshot } from './src/preferences/authSnapshot';
 import type { RootStackParamList } from './src/navigation/types';
@@ -184,8 +186,20 @@ export default function App() {
   const fontsReady = fontsLoaded || !!fontLoadError || bootTimedOut;
   const appReady = fontsReady && themeInitialized && !!ThemeReadyNavigator;
 
+  const processedInviteTokensRef = React.useRef<Set<string>>(new Set());
+
   const captureInviteFromUrl = React.useCallback((url: string | null) => {
     if (!url) {
+      return false;
+    }
+
+    // Only accept our registered scheme or HTTPS universal links
+    const lowerUrl = url.toLowerCase();
+    if (
+      !lowerUrl.startsWith('thryftverse://') &&
+      !lowerUrl.startsWith('https://thryftverse.') &&
+      !lowerUrl.startsWith('exp://')
+    ) {
       return false;
     }
 
@@ -198,6 +212,17 @@ export default function App() {
       return false;
     }
 
+    // Validate token length bounds
+    if (inviteToken.length < 8 || inviteToken.length > 260) {
+      return false;
+    }
+
+    // Prevent re-processing the same token across foreground cycles
+    if (processedInviteTokensRef.current.has(inviteToken)) {
+      return false;
+    }
+
+    processedInviteTokensRef.current.add(inviteToken);
     setPendingInviteToken(inviteToken);
     return true;
   }, []);
@@ -274,6 +299,28 @@ export default function App() {
     SplashScreen.hideAsync().catch(() => {
       // Ignore hide failures and continue rendering app.
     });
+
+    // Offline queue listener
+    let networkSub: ReturnType<typeof Network.addNetworkStateListener> | undefined;
+    
+    // Initial flush attempt if we boot up and have network
+    Network.getNetworkStateAsync().then((state) => {
+      if (state.isInternetReachable) {
+        useOfflineQueue.getState().flushQueue(fetch);
+      }
+    });
+
+    networkSub = Network.addNetworkStateListener((state) => {
+      if (state.isInternetReachable) {
+        useOfflineQueue.getState().flushQueue(fetch);
+      }
+    });
+
+    return () => {
+      if (networkSub && typeof networkSub.remove === 'function') {
+        networkSub.remove();
+      }
+    };
   }, [appReady, fontsLoaded]);
 
   if (!appReady) {

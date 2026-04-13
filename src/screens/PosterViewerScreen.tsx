@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -16,6 +16,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { MOCK_LISTINGS } from '../data/mockData';
+import { mockFind } from '../utils/mockGate';
 import { RootStackParamList } from '../navigation/types';
 import { getFreshPosters } from '../data/posters';
 import { useStore } from '../store/useStore';
@@ -133,7 +134,7 @@ export default function PosterViewerScreen() {
 
   const posterImageUri =
     activePoster.image ||
-    MOCK_LISTINGS.find((listing) => listing.id === activePoster.listingId)?.images?.[0] ||
+    mockFind(MOCK_LISTINGS, (listing) => listing.id === activePoster.listingId)?.images?.[0] ||
     'https://picsum.photos/seed/poster-fallback-viewer/900/1400';
 
   return (

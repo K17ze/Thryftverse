@@ -1,0 +1,118 @@
+name: EAS Build & Submit
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - '.github/workflows/ci.yml'
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Platform to build (ios, android, all)'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - ios
+          - android
+          - all
+      profile:
+        description: 'EAS build profile'
+        required: true
+        default: 'preview'
+        type: choice
+        options:
+          - preview
+          - production
+
+concurrency:
+  group: eas-build-${{ github.ref }}
+  cancel-in-progress: false  # Never cancel an in-progress build
+
+jobs:
+  quality-gate:
+    name: Pre-Build Quality Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Unit Tests
+        run: npx vitest run
+
+  eas-build:
+    name: EAS Build (${{ matrix.platform }})
+    needs: quality-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - ${{ github.event.inputs.platform == 'ios' && 'ios' || github.event.inputs.platform == 'android' && 'android' || 'all' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Setup EAS CLI
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Build
+        run: |
+          PROFILE="${{ github.event.inputs.profile || 'preview' }}"
+          PLATFORM="${{ matrix.platform }}"
+
+          if [ "$PLATFORM" = "all" ]; then
+            eas build --platform all --profile "$PROFILE" --non-interactive --no-wait
+          else
+            eas build --platform "$PLATFORM" --profile "$PROFILE" --non-interactive --no-wait
+          fi
+
+  eas-submit:
+    name: Submit to Stores
+    needs: eas-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: github.event.inputs.profile == 'production'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Setup EAS CLI
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Submit to App Store & Play Store
+        run: |
+          eas submit --platform all --profile production --non-interactive --latest

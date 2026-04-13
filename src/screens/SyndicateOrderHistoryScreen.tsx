@@ -6,10 +6,10 @@ import {
   Text,
   StyleSheet,
   StatusBar,
-  FlatList,
   ScrollView,
   RefreshControl,
 } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -440,7 +440,7 @@ export default function CoOwnOrderHistoryScreen() {
         })}
       </ScrollView>
 
-      <FlatList
+      <FlashList
         data={entries}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.content}

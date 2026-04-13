@@ -13,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { MOCK_LISTINGS } from '../data/mockData';
+import { mockFind } from '../utils/mockGate';
 import { RootStackParamList } from '../navigation/types';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useBackendData } from '../context/BackendDataContext';
@@ -35,7 +36,7 @@ export default function ManageListingScreen() {
   const { show } = useToast();
   const { itemId } = route.params;
 
-  const item = listings.find((l) => l.id === itemId) || MOCK_LISTINGS.find((l) => l.id === itemId) || listings[0] || MOCK_LISTINGS[0];
+  const item = listings.find((l) => l.id === itemId) || mockFind(MOCK_LISTINGS, (l) => l.id === itemId) || listings[0] || MOCK_LISTINGS[0];
   const [isSold, setIsSold] = React.useState(Boolean(item.isSold));
   const [hasRecentBoost, setHasRecentBoost] = React.useState(false);
   const bumpFeeLabel = formatFromFiat(1.95, 'GBP', { displayMode: 'fiat' });

@@ -6,10 +6,10 @@ import {
   Text,
   StyleSheet,
   TextInput,
-  FlatList,
   Image,
   StatusBar
 } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -174,7 +174,7 @@ export default function CoOwnHubScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
-      <FlatList
+      <FlashList
         data={filteredAssets}
         keyExtractor={(item) => item.id}
         ListHeaderComponent={

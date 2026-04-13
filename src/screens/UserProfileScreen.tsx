@@ -26,6 +26,7 @@ import { AnimatedPressable } from '../components/AnimatedPressable';
 import { useStore } from '../store/useStore';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { Listing, MOCK_USERS, MY_USER } from '../data/mockData';
+import { mockFind } from '../utils/mockGate';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useBackendData } from '../context/BackendDataContext';
 import { useToast } from '../context/ToastContext';
@@ -99,7 +100,7 @@ export default function UserProfileScreen({ navigation, route }: Props) {
     () =>
       route.params.isMe
         ? MY_USER
-        : MOCK_USERS.find((candidate) => candidate.id === route.params.userId) ?? MY_USER,
+        : mockFind(MOCK_USERS, (candidate) => candidate.id === route.params.userId) ?? MY_USER,
     [route.params.isMe, route.params.userId]
   );
 

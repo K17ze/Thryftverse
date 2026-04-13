@@ -8,9 +8,9 @@ import {
   ScrollView,
   StatusBar,
   Dimensions,
-  FlatList,
   Share
 } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { BlurView } from 'expo-blur';
 import { CachedImage } from '../components/CachedImage';
 import Reanimated, {
@@ -27,6 +27,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { MOCK_LISTINGS, MOCK_USERS, Listing, User } from '../data/mockData';
+import { mockFind, mockFallback } from '../utils/mockGate';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useStore } from '../store/useStore';
 import { ImageViewer } from '../components/ImageViewer';
@@ -57,9 +58,12 @@ export default function ItemDetailScreen() {
   const { listings, source, isSyncing, lastError, refreshListings } = useBackendData();
 
   const { itemId } = route.params || {};
-  const fallbackItem = listings[0] || MOCK_LISTINGS[0];
-  const item: Listing = listings.find(l => l.id === itemId) || fallbackItem;
-  const seller: User = MOCK_USERS.find(u => u.id === item.sellerId) || MOCK_USERS[0];
+  const backendItem = listings.find(l => l.id === itemId);
+  const mockItem = mockFind(MOCK_LISTINGS, l => l.id === itemId);
+  const fallbackItem = listings[0] ?? mockFind(MOCK_LISTINGS, () => true);
+  const item: Listing = backendItem ?? mockItem ?? fallbackItem!;
+  const backendSeller = listings.length > 0 ? undefined : undefined; // placeholder — seller API TBD
+  const seller: User = mockFind(MOCK_USERS, u => u.id === item.sellerId) ?? MOCK_USERS[0];
   const sellerItems = listings.filter(l => l.sellerId === seller.id && l.id !== item.id);
 
   const { show } = useToast();
@@ -163,11 +167,11 @@ export default function ItemDetailScreen() {
           )}
 
           <View style={[styles.floatingHeader, { paddingTop: Math.max(insets.top, 20) }]}>
-            <AnimatedPressable style={styles.blurBtn} onPress={() => navigation.goBack()}>
+            <AnimatedPressable style={styles.blurBtn} onPress={() => navigation.goBack()} accessibilityLabel="Go back">
               <Ionicons name="arrow-back" size={24} color="#fff" />
             </AnimatedPressable>
             <View style={styles.headerRight}>
-              <AnimatedPressable style={styles.blurBtn} onPress={handleShare}>
+              <AnimatedPressable style={styles.blurBtn} onPress={handleShare} accessibilityLabel="Share this listing">
                 <Ionicons name="share-outline" size={24} color="#fff" />
               </AnimatedPressable>
               <View style={styles.blurBtn}>
@@ -222,7 +226,7 @@ export default function ItemDetailScreen() {
           </View>
 
           {/* ── Seller Card ── */}
-          <AnimatedPressable style={styles.sellerCard} onPress={() => navigation.navigate('UserProfile', { userId: seller.id })} activeOpacity={0.8}>
+          <AnimatedPressable style={styles.sellerCard} onPress={() => navigation.navigate('UserProfile', { userId: seller.id })} activeOpacity={0.8} accessibilityLabel={`View ${seller.username}'s profile, ${seller.rating} stars, ${seller.reviewCount} reviews`}>
             <CachedImage uri={seller.avatar} style={styles.sellerAvatar} containerStyle={{ width: 46, height: 46, borderRadius: 23 }} contentFit="cover" />
             <View style={styles.sellerInfo}>
               <Text style={styles.sellerName}>{seller.username}</Text>
@@ -263,6 +267,7 @@ export default function ItemDetailScreen() {
             style={[styles.actionBtn, styles.buyBtn]}
             activeOpacity={0.9}
             onPress={() => navigation.navigate('Checkout', { itemId: item.id })}
+            accessibilityLabel={`Buy ${item.title} for ${formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}`}
           >
             <View style={styles.actionBtnMainRow}>
               <Ionicons name="flash-outline" size={16} color={Colors.textInverse} />
@@ -273,6 +278,7 @@ export default function ItemDetailScreen() {
             style={[styles.actionBtn, styles.offerBtn]}
             activeOpacity={0.9}
             onPress={() => navigation.navigate('MakeOffer', { itemId: item.id, price: item.price, title: item.title })}
+            accessibilityLabel={`Make an offer on ${item.title}`}
           >
             <View style={styles.actionBtnMainRow}>
               <Ionicons name="chatbubbles-outline" size={15} color={Colors.textPrimary} />

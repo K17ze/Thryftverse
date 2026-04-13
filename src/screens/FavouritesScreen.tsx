@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -7,8 +7,8 @@ import {
   StyleSheet,
   StatusBar,
   RefreshControl,
-  FlatList
 } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Reanimated, { FadeInDown, useSharedValue } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
@@ -64,12 +64,11 @@ export default function FavouritesScreen() {
 
       <RefreshIndicator scrollY={scrollY} isRefreshing={refreshing} topInset={20} />
 
-      <FlatList
+      <FlashList
         data={favouriteItems}
         keyExtractor={(item: Listing) => item.id}
         numColumns={2}
         contentContainerStyle={styles.listContent}
-        columnWrapperStyle={styles.columnWrap}
         showsVerticalScrollIndicator={false}
         onScroll={(event) => {
           scrollY.value = event.nativeEvent.contentOffset.y;

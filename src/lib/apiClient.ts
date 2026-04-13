@@ -2,6 +2,8 @@ import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
+import * as Network from 'expo-network';
+import { useOfflineQueue } from './offlineQueue';
 
 const AUTH_SESSION_STORAGE_KEY = 'thryftverse.auth.session.v1';
 
@@ -26,6 +28,10 @@ async function canUseSecureStore() {
     secureStoreAvailable = await SecureStore.isAvailableAsync();
   } catch {
     secureStoreAvailable = false;
+  }
+
+  if (secureStoreAvailable === false && __DEV__) {
+    console.warn('[apiClient] SecureStore unavailable — auth tokens will fall back to unencrypted AsyncStorage');
   }
 
   return secureStoreAvailable;
@@ -254,9 +260,12 @@ export async function getAuthSession() {
   return authSessionState;
 }
 
+let authSessionPersistedAtMs: number | null = null;
+
 export async function setAuthSession(nextSession: AuthSessionState) {
   authSessionState = nextSession;
   authSessionLoaded = true;
+  authSessionPersistedAtMs = Date.now();
   await writeStoredAuthSessionRaw(JSON.stringify(nextSession));
 }
 
@@ -353,6 +362,49 @@ export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T>
   const baseUrl = getApiBaseUrl();
   const url = `${baseUrl}${path.startsWith('/') ? path : `/${path}`}`;
 
+  // Proactively check if the refresh token has expired
+  if (
+    authSessionState?.refreshTokenExpiresAt &&
+    !shouldSkipTokenRefresh(path)
+  ) {
+    const expiresAtMs = new Date(authSessionState.refreshTokenExpiresAt).getTime();
+    if (Number.isFinite(expiresAtMs) && expiresAtMs <= Date.now()) {
+      await clearAuthSession();
+    }
+  }
+
+  // Proactively refresh access token if it is close to expiry
+  if (
+    authSessionState?.accessTokenExpiresInSeconds &&
+    authSessionPersistedAtMs &&
+    !shouldSkipTokenRefresh(path) &&
+    authSessionState.refreshToken
+  ) {
+    const elapsedSincePersistedSec = (Date.now() - authSessionPersistedAtMs) / 1000;
+    const bufferSec = 30;
+    if (elapsedSincePersistedSec >= authSessionState.accessTokenExpiresInSeconds - bufferSec) {
+      await refreshAccessToken(baseUrl);
+    }
+  }
+
+  const isWriteMethod = init && init.method && ['POST', 'PUT', 'DELETE', 'PATCH'].includes(init.method.toUpperCase());
+  
+  if (isWriteMethod) {
+    const networkState = await Network.getNetworkStateAsync();
+    if (!networkState.isInternetReachable) {
+      // 🚨 Offline Silent Queue Path
+      console.log(`[OfflineQueue] Intercepting ${init.method} to ${url}`);
+      useOfflineQueue.getState().pushToQueue(url, init || {});
+      
+      // Return a gracefully mocked success payload so the app continues optimistically.
+      return { 
+        ok: true, 
+        id: `offline-${Date.now()}`,
+        status: 'queued'
+      } as unknown as T;
+    }
+  }
+
   const execute = async (overrideAccessToken?: string) => {
     const headers = new Headers(init?.headers ?? {});
     const token = overrideAccessToken ?? authSessionState?.accessToken;
@@ -369,8 +421,23 @@ export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T>
 
   let response: Response;
   try {
+    const networkState = await Network.getNetworkStateAsync();
+    if (!networkState.isInternetReachable && !isWriteMethod) {
+      throw new ApiRequestError(`Internet connection is offline`);
+    }
+    
     response = await execute();
   } catch (error) {
+    if (isWriteMethod) {
+       // Network dropped exactly during the flight of the execution. Queue it.
+       console.log(`[OfflineQueue] Request failed mid-flight. Queueing ${url}`);
+       useOfflineQueue.getState().pushToQueue(url, init || {});
+       return { 
+          ok: true, 
+          id: `offline-${Date.now()}`,
+          status: 'queued'
+        } as unknown as T;
+    }
     throw new ApiRequestError(`Network request failed for ${url}: ${(error as Error).message}`);
   }
 

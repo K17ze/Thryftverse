@@ -8,6 +8,7 @@ import {
 import { ActiveTheme, Colors } from '../constants/colors';
 import { Typography } from '../constants/typography';
 import { Listing, MOCK_USERS } from '../data/mockData';
+import { mockFind } from '../utils/mockGate';
 import { useStore } from '../store/useStore';
 import { AnimatedHeart } from './AnimatedHeart';
 import { AnimatedPressable } from './AnimatedPressable';
@@ -34,7 +35,7 @@ export function ProductCard({ item, onPress, compact }: Props) {
   const toggleFav = useStore((state) => state.toggleWishlist);
   const { show } = useToast();
   const { formatFromFiat } = useFormattedPrice();
-  const seller = MOCK_USERS.find((u) => u.id === item.sellerId) || MOCK_USERS[0];
+  const seller = mockFind(MOCK_USERS, (u) => u.id === item.sellerId) || MOCK_USERS[0];
   const hasVideoMedia = item.images.some((uri) => isVideoUri(uri));
   const hasMultipleMedia = item.images.length > 1;
 
@@ -51,7 +52,7 @@ export function ProductCard({ item, onPress, compact }: Props) {
     item.condition === 'Good' ? 'GOOD' : undefined;
 
   return (
-    <AnimatedPressable style={[styles.container, compact && styles.containerCompact]} onPress={onPress}>
+    <AnimatedPressable style={[styles.container, compact && styles.containerCompact]} onPress={onPress} accessibilityLabel={`${item.title} by ${item.brand}, ${formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}${item.isSold ? ', sold' : ''}`}>
       <View style={[styles.imageContainer, compact && styles.imageContainerCompact]}>
         <CachedImage
           uri={item.images[0]}

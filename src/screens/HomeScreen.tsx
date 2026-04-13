@@ -176,6 +176,53 @@ type StoryBubble = {
   status: StoryStatus;
 };
 
+interface ExploreGridItemProps {
+  item: ExploreTile;
+  tileWidth: number;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  formatPrice: (...args: any[]) => string;
+  onPress: (routeId: string | undefined) => void;
+  onLongPress: (item: ExploreTile) => void;
+}
+
+const ExploreGridItem = React.memo(function ExploreGridItem({
+  item,
+  tileWidth,
+  formatPrice,
+  onPress,
+  onLongPress,
+}: ExploreGridItemProps) {
+  return (
+    <View style={[styles.exploreItemBox, { width: tileWidth, height: Math.round(tileWidth * item.aspectRatio) }]}>
+      <AnimatedPressable
+        style={styles.exploreMediaWrap}
+        activeOpacity={0.92}
+        onPress={() => onPress(item.routeId)}
+        onLongPress={() => onLongPress(item)}
+        accessibilityLabel={`${item.caption}, ${formatPrice(item.price ?? 0, 'GBP', { displayMode: 'fiat' })}`}
+      >
+        <MediaPreview
+          uri={item.mediaUri}
+          posterUri={item.posterUri}
+          style={styles.exploreImage}
+          autoPlay={item.mediaType === 'video'}
+          loop
+          muted
+          contentFit="cover"
+          isVisible
+        />
+
+        <View style={styles.exploreOverlay}>
+          <View style={styles.exploreTag}>
+            <ThryftCartIcon size={11} color="#fff" />
+            <Text style={styles.exploreTagText}>{formatPrice(item.price ?? 0, 'GBP', { displayMode: 'fiat' })}</Text>
+          </View>
+        </View>
+      </AnimatedPressable>
+    </View>
+  );
+});
+
 export default function HomeScreen() {
   const navigation = useNavigation<NavT>();
   const insets = useSafeAreaInsets();
@@ -394,6 +441,7 @@ export default function HomeScreen() {
           style={styles.posterCard}
           activeOpacity={0.9}
           onPress={() => navigation.navigate('CreatePoster')}
+          accessibilityLabel="Create a new poster"
         >
           <View style={styles.posterCreateTile}>
             <View style={styles.posterCreateIcon}>
@@ -513,40 +561,14 @@ export default function HomeScreen() {
     </View>
   );
 
-  const ExploreGridItem = ({ item }: { item: ExploreTile }) => (
-    <View style={[styles.exploreItemBox, { width: gridTileWidth, height: Math.round(gridTileWidth * item.aspectRatio) }]}>
-      <AnimatedPressable
-        style={styles.exploreMediaWrap}
-        activeOpacity={0.92}
-        onPress={() => {
-          if (!item.routeId) {
-            return;
-          }
+  const handleTilePress = React.useCallback((routeId: string | undefined) => {
+    if (!routeId) return;
+    navigation.navigate('ItemDetail', { itemId: routeId });
+  }, [navigation]);
 
-          navigation.navigate('ItemDetail', { itemId: item.routeId });
-        }}
-        onLongPress={() => setPeekItem(item)}
-      >
-        <MediaPreview
-          uri={item.mediaUri}
-          posterUri={item.posterUri}
-          style={styles.exploreImage}
-          autoPlay={item.mediaType === 'video' && !peekItem}
-          loop
-          muted
-          contentFit="cover"
-          isVisible
-        />
-
-        <View style={styles.exploreOverlay}>
-          <View style={styles.exploreTag}>
-            <ThryftCartIcon size={11} color="#fff" />
-            <Text style={styles.exploreTagText}>{formatFromFiat(item.price ?? 0, 'GBP', { displayMode: 'fiat' })}</Text>
-          </View>
-        </View>
-      </AnimatedPressable>
-    </View>
-  );
+  const handleTileLongPress = React.useCallback((item: ExploreTile) => {
+    setPeekItem(item);
+  }, []);
 
   return (
     <SafeAreaView style={styles.container} edges={['left', 'right']}>
@@ -565,10 +587,10 @@ export default function HomeScreen() {
           </Reanimated.View>
 
           <View style={styles.headerRight}>
-            <AnimatedPressable style={styles.headerBtn} onPress={() => navigation.navigate('GlobalSearch')}>
+            <AnimatedPressable style={styles.headerBtn} onPress={() => navigation.navigate('GlobalSearch')} accessibilityLabel="Search listings">
               <Ionicons name="search" size={22} color={Colors.textPrimary} />
             </AnimatedPressable>
-            <AnimatedPressable style={styles.headerBtn} onPress={() => navigation.navigate('NotificationsList')}>
+            <AnimatedPressable style={styles.headerBtn} onPress={() => navigation.navigate('NotificationsList')} accessibilityLabel={notificationCount > 0 ? `Notifications, ${notificationCount} unread` : 'Notifications'}>
               <Ionicons name="notifications-outline" size={22} color={Colors.textPrimary} />
               <AnimatedBadge count={notificationCount} size={16} />
             </AnimatedPressable>
@@ -600,12 +622,12 @@ export default function HomeScreen() {
           <View style={styles.masonryGrid}>
             <View style={styles.masonryColumn}>
               {masonryColumns[0].map((item) => (
-                <ExploreGridItem key={item.id} item={item} />
+                <ExploreGridItem key={item.id} item={item} tileWidth={gridTileWidth} formatPrice={formatFromFiat} onPress={handleTilePress} onLongPress={handleTileLongPress} />
               ))}
             </View>
             <View style={styles.masonryColumn}>
               {masonryColumns[1].map((item) => (
-                <ExploreGridItem key={item.id} item={item} />
+                <ExploreGridItem key={item.id} item={item} tileWidth={gridTileWidth} formatPrice={formatFromFiat} onPress={handleTilePress} onLongPress={handleTileLongPress} />
               ))}
             </View>
           </View>

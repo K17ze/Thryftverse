@@ -1,12 +1,12 @@
 import React, { useMemo, useState } from 'react';
 import { AnimatedPressable } from '../components/AnimatedPressable';
 import {
-  FlatList,
   StatusBar,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StackScreenProps } from '@react-navigation/stack';
@@ -102,7 +102,7 @@ export default function GroupBotDirectoryScreen({ navigation, route }: Props) {
           subtitle="Open this directory from a group chat to deploy bots."
         />
       ) : (
-        <FlatList
+        <FlashList
           data={bots}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}

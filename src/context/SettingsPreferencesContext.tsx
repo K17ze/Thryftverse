@@ -11,6 +11,7 @@ import {
   setStoredSettingsPreferences,
   SupportedLanguageOption,
 } from '../preferences/settingsPreferences';
+import { mapLanguageOptionToLocale, setI18nLocale } from '../i18n';
 
 interface SettingsPreferencesContextValue {
   language: SupportedLanguageOption;
@@ -70,6 +71,10 @@ export function SettingsPreferencesProvider({ children }: { children: React.Reac
       isMounted = false;
     };
   }, []);
+
+  React.useEffect(() => {
+    setI18nLocale(mapLanguageOptionToLocale(language));
+  }, [language]);
 
   React.useEffect(() => {
     if (!isHydrated) {

@@ -129,6 +129,49 @@ void app.register(rateLimit, {
   nameSpace: 'thryftverse:rate-limit',
 });
 
+// ── CORS & Security Headers ──────────────────────────────────────────
+const ALLOWED_ORIGINS = config.nodeEnv === 'production'
+  ? [
+      'https://thryftverse.app',
+      'https://www.thryftverse.app',
+      'https://admin.thryftverse.app',
+    ]
+  : true; // Allow all origins in development
+
+app.addHook('onRequest', async (_request, reply) => {
+  reply.header('X-Content-Type-Options', 'nosniff');
+  reply.header('X-Frame-Options', 'DENY');
+  reply.header('X-XSS-Protection', '0');
+  reply.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+  if (config.nodeEnv === 'production') {
+    reply.header('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
+  }
+});
+
+app.addHook('onRequest', async (request, reply) => {
+  const origin = request.headers.origin;
+  if (typeof ALLOWED_ORIGINS === 'boolean' && ALLOWED_ORIGINS) {
+    reply.header('Access-Control-Allow-Origin', origin ?? '*');
+  } else if (Array.isArray(ALLOWED_ORIGINS) && origin && ALLOWED_ORIGINS.includes(origin)) {
+    reply.header('Access-Control-Allow-Origin', origin);
+  }
+  reply.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+  reply.header('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Security-Admin-Token');
+  reply.header('Access-Control-Allow-Credentials', 'true');
+  reply.header('Access-Control-Max-Age', '86400');
+
+  if (request.method === 'OPTIONS') {
+    reply.code(204).send();
+  }
+});
+
+// ── Body size limit ──────────────────────────────────────────────────
+app.addContentTypeParser(
+  'application/json',
+  { parseAs: 'string', bodyLimit: 2 * 1024 * 1024 },
+  app.getDefaultJsonParser('error', 'error')
+);
+
 function toJsonString(value: unknown): string {
   return JSON.stringify(value);
 }

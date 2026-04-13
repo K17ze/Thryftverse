@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import { View,
@@ -13,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { MOCK_LISTINGS, MOCK_USERS } from '../data/mockData';
+import { mockFind } from '../utils/mockGate';
 import { RootStackParamList } from '../navigation/types';
 import { useStore } from '../store/useStore';
 import { useToast } from '../context/ToastContext';
@@ -33,6 +34,7 @@ import {
 import { CapabilityCarrier, getUserCountryCapabilities, UserCountryCapabilities } from '../services/capabilitiesApi';
 import { CachedImage } from '../components/CachedImage';
 import { getListingCoverUri } from '../utils/media';
+import { t } from '../i18n';
 
 type RouteT = RouteProp<RootStackParamList, 'Checkout'>;
 const IS_LIGHT = ActiveTheme === 'light';
@@ -49,17 +51,23 @@ interface CheckoutPostageOption {
 }
 
 const DEFAULT_POSTAGE_OPTION: CheckoutPostageOption = {
-  label: 'Standard shipping',
-  etaLabel: '2-3 working days',
+  label: t('checkout.postage.default.label'),
+  etaLabel: t('checkout.postage.default.eta'),
   priceFromGbp: 2.89,
 };
 
 function toEtaLabel(carrier: CapabilityCarrier): string {
   if (carrier.etaMinDays === carrier.etaMaxDays) {
-    return `${carrier.etaMinDays} working day${carrier.etaMinDays === 1 ? '' : 's'}`;
+    return t('checkout.postage.eta.single', {
+      days: carrier.etaMinDays,
+      plural: carrier.etaMinDays === 1 ? '' : 's',
+    });
   }
 
-  return `${carrier.etaMinDays}-${carrier.etaMaxDays} working days`;
+  return t('checkout.postage.eta.range', {
+    min: carrier.etaMinDays,
+    max: carrier.etaMaxDays,
+  });
 }
 
 export default function CheckoutScreen() {
@@ -81,8 +89,8 @@ export default function CheckoutScreen() {
   const { show } = useToast();
   const { formatFromFiat } = useFormattedPrice();
 
-  const item = listings.find((l) => l.id === itemId) || MOCK_LISTINGS.find((l) => l.id === itemId) || listings[0] || MOCK_LISTINGS[0];
-  const seller = MOCK_USERS.find(u => u.id === item.sellerId) || MOCK_USERS[0];
+  const item = listings.find((l) => l.id === itemId) || mockFind(MOCK_LISTINGS, (l) => l.id === itemId) || listings[0] || MOCK_LISTINGS[0];
+  const seller = mockFind(MOCK_USERS, u => u.id === item.sellerId) || MOCK_USERS[0];
 
   const PLATFORM_CHARGE = calculatePlatformChargeGbp(item.price);
   const POSTAGE_FEE = postageOption.priceFromGbp;
@@ -139,27 +147,27 @@ export default function CheckoutScreen() {
     if (isSubmittingPayment) {
       return {
         tone: 'syncing' as const,
-        label: 'Processing payment',
+        label: t('checkout.status.processing'),
       };
     }
 
     if (isHydratingCheckout) {
       return {
         tone: 'syncing' as const,
-        label: 'Syncing details',
+        label: t('checkout.status.syncingDetails'),
       };
     }
 
     if (checkoutReady) {
       return {
         tone: 'live' as const,
-        label: 'Ready to pay',
+        label: t('checkout.status.ready'),
       };
     }
 
     return {
       tone: 'offline' as const,
-      label: 'Incomplete setup',
+      label: t('checkout.status.incomplete'),
     };
   }, [checkoutReady, isHydratingCheckout, isSubmittingPayment]);
 
@@ -220,7 +228,7 @@ export default function CheckoutScreen() {
 
   const handlePay = async () => {
     if (!checkoutReady) {
-      show('Add delivery address and payment method before paying.', 'error');
+      show(t('checkout.toast.addAddressPayment'), 'error');
       return;
     }
 
@@ -240,11 +248,10 @@ export default function CheckoutScreen() {
       });
       await payOrder(order.id);
 
-      show('Payment completed', 'success');
+      show(t('checkout.toast.paymentCompleted'), 'success');
       navigation.replace('Success');
     } catch {
-      show('Backend checkout unavailable. Completed locally.', 'info');
-      navigation.replace('Success');
+      show(t('checkout.toast.paymentFailed'), 'error');
     } finally {
       setIsSubmittingPayment(false);
     }
@@ -255,10 +262,10 @@ export default function CheckoutScreen() {
       <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
       <View style={styles.header}>
-        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()} accessibilityLabel={t('checkout.a11y.close')}>
           <Ionicons name="close" size={24} color={Colors.textPrimary} />
         </AnimatedPressable>
-        <Text style={styles.headerTitle}>Checkout</Text>
+        <Text style={styles.headerTitle}>{t('checkout.header.title')}</Text>
         <View style={{ width: 44 }} />
       </View>
 
@@ -269,44 +276,51 @@ export default function CheckoutScreen() {
           <CachedImage uri={getListingCoverUri(item.images, 'https://picsum.photos/seed/checkout-item-fallback/300/400')} style={styles.itemThumb} contentFit="cover" />
           <View style={styles.itemInfo}>
             <Text style={styles.itemTitle} numberOfLines={1}>{item.title}</Text>
-            <Text style={styles.itemSeller}>from {seller.username}</Text>
+            <Text style={styles.itemSeller}>{t('checkout.header.fromSeller', { seller: seller.username })}</Text>
             <Text style={styles.itemPrice}>{formatFromFiat(item.price, 'GBP')}</Text>
           </View>
         </View>
 
         <View style={styles.readinessCard}>
           <View style={styles.readinessTopRow}>
-            <Text style={styles.readinessTitle}>Checkout readiness</Text>
+            <Text style={styles.readinessTitle}>{t('checkout.readiness.title')}</Text>
             <SyncStatusPill tone={checkoutStatus.tone} label={checkoutStatus.label} compact />
           </View>
 
           <View style={styles.readinessChipsRow}>
             <View style={[styles.readinessChip, savedAddress ? styles.readinessChipReady : styles.readinessChipPending]}>
               <Text style={[styles.readinessChipText, savedAddress ? styles.readinessChipTextReady : styles.readinessChipTextPending]}>
-                Address
+                {t('checkout.readiness.address')}
               </Text>
             </View>
             <View style={[styles.readinessChip, savedPaymentMethod ? styles.readinessChipReady : styles.readinessChipPending]}>
               <Text style={[styles.readinessChipText, savedPaymentMethod ? styles.readinessChipTextReady : styles.readinessChipTextPending]}>
-                Payment
+                {t('checkout.readiness.payment')}
               </Text>
             </View>
             <View style={[styles.readinessChip, checkoutReady ? styles.readinessChipReady : styles.readinessChipPending]}>
               <Text style={[styles.readinessChipText, checkoutReady ? styles.readinessChipTextReady : styles.readinessChipTextPending]}>
-                Confirm
+                {t('checkout.readiness.confirm')}
               </Text>
             </View>
           </View>
         </View>
 
-        <Text style={styles.sectionTitle}>Delivery</Text>
-        <AnimatedPressable style={styles.blockBtn} activeOpacity={0.8} onPress={() => setAddAddressSheetVisible(true)}>
+        <Text style={styles.sectionTitle}>{t('checkout.section.delivery')}</Text>
+        <AnimatedPressable
+          style={styles.blockBtn}
+          activeOpacity={0.8}
+          onPress={() => setAddAddressSheetVisible(true)}
+          accessibilityLabel={savedAddress
+            ? t('checkout.a11y.deliveryAddress', { street: savedAddress.street })
+            : t('checkout.a11y.addDeliveryAddress')}
+        >
           <View style={styles.blockLeft}>
             <Ionicons name="location-outline" size={24} color={Colors.textPrimary} />
             <View style={styles.blockTextCol}>
-              <Text style={styles.blockTitle}>{savedAddress ? savedAddress.street : 'Add delivery address'}</Text>
+              <Text style={styles.blockTitle}>{savedAddress ? savedAddress.street : t('checkout.delivery.addAddress')}</Text>
               <Text style={styles.blockSub}>
-                {savedAddress ? `${savedAddress.city} | ${savedAddress.postcode}` : 'Required for postage'}
+                {savedAddress ? `${savedAddress.city} | ${savedAddress.postcode}` : t('checkout.delivery.required')}
               </Text>
             </View>
           </View>
@@ -324,14 +338,16 @@ export default function CheckoutScreen() {
           <Text style={styles.blockRightPrice}>{formatFromFiat(POSTAGE_FEE, 'GBP')}</Text>
         </AnimatedPressable>
 
-        <Text style={styles.sectionTitle}>Payment</Text>
-        {paymentPolicyLabel ? <Text style={styles.policyHint}>Policy scope: {paymentPolicyLabel}</Text> : null}
+        <Text style={styles.sectionTitle}>{t('checkout.section.payment')}</Text>
+        {paymentPolicyLabel ? (
+          <Text style={styles.policyHint}>{t('checkout.payment.policyScope', { scope: paymentPolicyLabel })}</Text>
+        ) : null}
         <AnimatedPressable
           style={styles.blockBtn}
           activeOpacity={0.8}
           onPress={() => {
             if (!allowCardPayments) {
-              show('Cards are unavailable for your region. Open Payments for supported rails.', 'error');
+              show(t('checkout.toast.cardsUnavailable'), 'error');
               navigation.navigate('Payments');
               return;
             }
@@ -342,35 +358,35 @@ export default function CheckoutScreen() {
           <View style={styles.blockLeft}>
             <Ionicons name="card-outline" size={24} color={Colors.textPrimary} />
             <View style={styles.blockTextCol}>
-              <Text style={styles.blockTitle}>{savedPaymentMethod ? savedPaymentMethod.label : 'Add payment method'}</Text>
+              <Text style={styles.blockTitle}>{savedPaymentMethod ? savedPaymentMethod.label : t('checkout.payment.addMethod')}</Text>
               <Text style={styles.blockSub}>
                 {!allowCardPayments
-                  ? 'Cards unavailable in your policy region'
-                  : (savedPaymentMethod?.details ?? 'Card, Apple Pay, or Google Pay')}
+                  ? t('checkout.payment.cardsUnavailableRegion')
+                  : (savedPaymentMethod?.details ?? t('checkout.payment.cardRailsFallback'))}
               </Text>
             </View>
           </View>
           <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
         </AnimatedPressable>
 
-        <Text style={styles.sectionTitle}>Order Summary</Text>
+        <Text style={styles.sectionTitle}>{t('checkout.section.orderSummary')}</Text>
         <View style={styles.summaryCard}>
-          <SummaryRow label="Item price" value={formatFromFiat(item.price, 'GBP')} />
-          <SummaryRow label="Platform charge" value={formatFromFiat(PLATFORM_CHARGE, 'GBP')} info />
-          <SummaryRow label="Postage" value={formatFromFiat(POSTAGE_FEE, 'GBP')} />
+          <SummaryRow label={t('checkout.summary.itemPrice')} value={formatFromFiat(item.price, 'GBP')} />
+          <SummaryRow label={t('checkout.summary.platformCharge')} value={formatFromFiat(PLATFORM_CHARGE, 'GBP')} info />
+          <SummaryRow label={t('checkout.summary.postage')} value={formatFromFiat(POSTAGE_FEE, 'GBP')} />
           <View style={styles.divider} />
-          <SummaryRow label="Total" value={formatFromFiat(TOTAL, 'GBP')} bold />
+          <SummaryRow label={t('checkout.summary.total')} value={formatFromFiat(TOTAL, 'GBP')} bold />
         </View>
 
         <Text style={styles.termsText}>
-          By tapping "Pay", you agree to our Terms of Sale and Privacy Policy. You have 2 days to report an issue after delivery.
+          {t('checkout.terms')}
         </Text>
 
         {!checkoutReady && (
-          <Text style={styles.requirementText}>Add both delivery details and a payment method to continue.</Text>
+          <Text style={styles.requirementText}>{t('checkout.requirement')}</Text>
         )}
         {isHydratingCheckout && (
-          <Text style={styles.syncText}>Syncing saved checkout details...</Text>
+          <Text style={styles.syncText}>{t('checkout.sync.savedDetails')}</Text>
         )}
 
         <View style={{ height: 100 }} />
@@ -379,7 +395,7 @@ export default function CheckoutScreen() {
       {/* Sticky Bottom Footer */}
       <View style={styles.footer}>
         <View style={styles.footerPriceCol}>
-          <Text style={styles.footerTotalLabel}>Total</Text>
+          <Text style={styles.footerTotalLabel}>{t('checkout.footer.total')}</Text>
           <Text style={styles.footerTotalPrice}>{formatFromFiat(TOTAL, 'GBP')}</Text>
         </View>
         <AnimatedPressable 
@@ -387,8 +403,16 @@ export default function CheckoutScreen() {
           activeOpacity={0.9} 
           onPress={handlePay}
           disabled={!checkoutReady || isSubmittingPayment}
+          accessibilityLabel={isSubmittingPayment
+            ? t('checkout.a11y.processing')
+            : checkoutReady
+              ? t('checkout.a11y.paySecurely', { amount: formatFromFiat(TOTAL, 'GBP') })
+              : t('checkout.a11y.completeDetails')}
+          accessibilityHint={checkoutReady
+            ? t('checkout.a11y.hint.doubleTapConfirm')
+            : t('checkout.a11y.hint.addAddressPayment')}
         >
-          <Text style={styles.payBtnText}>{isSubmittingPayment ? 'Processing...' : 'Pay securely'}</Text>
+          <Text style={styles.payBtnText}>{isSubmittingPayment ? t('checkout.cta.processing') : t('checkout.cta.paySecurely')}</Text>
         </AnimatedPressable>
       </View>
 

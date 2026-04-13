@@ -1,16 +1,16 @@
-﻿import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
   View,
   Text,
-  FlatList,
   StyleSheet,
   StatusBar,
   RefreshControl,
   TextInput,
   ScrollView,
 } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { CachedImage } from '../components/CachedImage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,6 +19,7 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { MOCK_USERS, MOCK_LISTINGS } from '../data/mockData';
 import type { Conversation } from '../data/mockData';
+import { mockFind } from '../utils/mockGate';
 import { RootStackParamList } from '../navigation/types';
 import { Swipeable } from 'react-native-gesture-handler';
 import Reanimated, { FadeInDown, useSharedValue, useAnimatedScrollHandler } from 'react-native-reanimated';
@@ -81,7 +82,7 @@ export default function InboxScreen() {
     setTimeout(() => setRefreshing(false), 400);
   };
 
-  const AnimatedFlatList = Reanimated.createAnimatedComponent(FlatList);
+  const AnimatedFlashList = Reanimated.createAnimatedComponent(FlashList);
 
   const filteredConversations = useMemo(() => {
     const normalizedQuery = searchQuery.trim().toLowerCase();
@@ -104,8 +105,8 @@ export default function InboxScreen() {
       }
 
       const listing = listings.find((item) => item.id === conversation.itemId)
-        || MOCK_LISTINGS.find((item) => item.id === conversation.itemId);
-      const seller = MOCK_USERS.find((user) => user.id === conversation.sellerId);
+        || mockFind(MOCK_LISTINGS, (item) => item.id === conversation.itemId);
+      const seller = mockFind(MOCK_USERS, (user) => user.id === conversation.sellerId);
       const title = conversation.type === 'group'
         ? conversation.title ?? 'group chat'
         : seller?.username ?? 'direct message';
@@ -157,8 +158,8 @@ export default function InboxScreen() {
 
   const renderItem = ({ item, index }: { item: ConvoItem; index: number }) => {
     const isGroup = item.type === 'group';
-    const seller = MOCK_USERS.find((u) => u.id === item.sellerId);
-    const listing = listings.find((l) => l.id === item.itemId) || MOCK_LISTINGS.find((l) => l.id === item.itemId);
+    const seller = mockFind(MOCK_USERS, (u) => u.id === item.sellerId);
+    const listing = listings.find((l) => l.id === item.itemId) || mockFind(MOCK_LISTINGS, (l) => l.id === item.itemId);
     const displayTitle = isGroup ? item.title ?? 'Untitled Group' : seller?.username ?? 'Unknown user';
     const memberCount = item.participantIds?.length ?? 0;
     const deployedBotCount = item.botIds?.length ?? 0;
@@ -179,6 +180,7 @@ export default function InboxScreen() {
               navigation.navigate('Chat', { conversationId: item.id });
             }}
             activeOpacity={0.85}
+            accessibilityLabel={`${displayTitle}${item.unread ? ', unread' : ''}, ${item.lastMessage}`}
           >
             <View style={styles.avatarWrap}>
               {isGroup ? (
@@ -248,6 +250,7 @@ export default function InboxScreen() {
               style={styles.addGroupBtn}
               onPress={() => navigation.navigate('CreateGroupChat')}
               activeOpacity={0.85}
+              accessibilityLabel="Create new group chat"
             >
               <Ionicons name="people-outline" size={18} color={Colors.textPrimary} />
               <Text style={styles.addGroupBtnText}>New Group</Text>
@@ -256,6 +259,7 @@ export default function InboxScreen() {
               style={styles.policiesBtn}
               onPress={() => navigation.navigate('Settings')}
               activeOpacity={0.85}
+              accessibilityLabel="Chat settings and policies"
             >
               <Ionicons name="shield-checkmark-outline" size={18} color={Colors.textPrimary} />
             </AnimatedPressable>
@@ -304,7 +308,7 @@ export default function InboxScreen() {
       <View style={{ flex: 1 }}>
         <RefreshIndicator scrollY={scrollY} isRefreshing={refreshing} topInset={20} />
         
-        <AnimatedFlatList
+        <AnimatedFlashList
           data={visibleConversations}
           keyExtractor={(c: any) => c.id}
           showsVerticalScrollIndicator={false}

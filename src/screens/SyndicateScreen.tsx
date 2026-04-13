@@ -5,11 +5,11 @@ import {
   View,
   Text,
   StyleSheet,
-  FlatList,
   RefreshControl,
   Modal,
   TextInput
 } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { CachedImage } from '../components/CachedImage';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -34,6 +34,7 @@ import { SyncRetryBanner } from '../components/SyncRetryBanner';
 import { formatIzeAmount, toIze } from '../utils/currency';
 import { parseApiError } from '../lib/apiClient';
 import { listCoOwnAssets, placeCoOwnOrder } from '../services/marketApi';
+import { t } from '../i18n';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 type CoOwnView = 'ISSUED' | 'HOLDINGS';
@@ -159,7 +160,7 @@ export default function CoOwnScreen() {
       setRemoteAssets(mapped);
       setSyncError(null);
     } catch (error) {
-      setSyncError((error as Error).message || 'Unable to sync co-own pools');
+      setSyncError((error as Error).message || t('syndicate.sync.unable'));
       // Keep existing local market state when backend sync is unavailable.
     } finally {
       setIsSyncingAssets(false);
@@ -261,41 +262,41 @@ export default function CoOwnScreen() {
     if (isSyncingAssets) {
       return {
         tone: 'syncing' as const,
-        label: 'Syncing',
+        label: t('syndicate.status.syncing'),
       };
     }
 
     if (syncError) {
       return {
         tone: 'offline' as const,
-        label: 'Reconnecting',
+        label: t('syndicate.status.reconnecting'),
       };
     }
 
     if (remoteAssets.length > 0) {
       return {
         tone: 'live' as const,
-        label: 'Synced',
+        label: t('syndicate.status.synced'),
       };
     }
 
     if (marketAssets.length > 0) {
       return {
         tone: 'offline' as const,
-        label: 'Local mode',
+        label: t('syndicate.status.localMode'),
       };
     }
 
     return {
       tone: 'offline' as const,
-      label: 'No pools',
+      label: t('syndicate.status.none'),
     };
   }, [isSyncingAssets, marketAssets.length, remoteAssets.length, syncError]);
 
   const openUnitsComposer = (asset: CoOwnAsset, mode: ComposerMode) => {
     const eligibility = checkCoOwnEligibility(asset.settlementMode);
     if (!eligibility.ok) {
-      show(eligibility.message ?? 'Compliance requirements are incomplete', 'error');
+      show(eligibility.message ?? t('syndicate.compliance.incomplete'), 'error');
       setComplianceModalVisible(true);
       return;
     }
@@ -328,12 +329,12 @@ export default function CoOwnScreen() {
 
     const units = Math.floor(Number(unitsInput));
     if (!Number.isFinite(units) || units <= 0) {
-      show('Units must be at least 1', 'error');
+      show(t('syndicate.units.error.min'), 'error');
       return;
     }
 
     if (units > CO_OWN_MAX_UNITS) {
-      show(`Units must be between 1 and ${CO_OWN_MAX_UNITS}`, 'error');
+      show(t('syndicate.units.error.max', { max: CO_OWN_MAX_UNITS }), 'error');
       return;
     }
 
@@ -351,7 +352,7 @@ export default function CoOwnScreen() {
 
         await syncCoOwnAssets();
       } catch (error) {
-        const parsedError = parseApiError(error, 'Unable to submit order');
+        const parsedError = parseApiError(error, t('syndicate.order.error.unableSubmit'));
         if (!parsedError.isNetworkError) {
           show(parsedError.message, 'error');
           if (shouldOpenComplianceModal(parsedError.message, parsedError.code)) {
@@ -360,32 +361,32 @@ export default function CoOwnScreen() {
           return;
         }
 
-        show('Trading engine unavailable. Please retry once connection is restored.', 'error');
+        show(t('syndicate.order.error.engineUnavailable'), 'error');
         return;
       }
 
       if (remoteOrder) {
         if (remoteOrder.order.status === 'rejected') {
-          show('Order rejected by matching engine.', 'error');
+          show(t('syndicate.order.error.rejected'), 'error');
           return;
         }
 
         closeUnitsComposer();
 
         if (remoteOrder.order.status === 'open' || remoteOrder.order.status === 'partially_filled') {
-          show('Order placed on server order book.', 'info');
+          show(t('syndicate.order.info.placed'), 'info');
         } else {
-          show('Order executed on server market.', 'success');
+          show(t('syndicate.order.success.executed'), 'success');
         }
 
         if (remoteOrder.aml?.alertId) {
-          show('Trade is flagged for AML review.', 'info');
+          show(t('syndicate.order.info.aml'), 'info');
         }
 
         return;
       }
 
-      show('Unable to submit order', 'error');
+      show(t('syndicate.order.error.unableSubmit'), 'error');
     } finally {
       setIsSubmittingOrder(false);
     }
@@ -394,7 +395,7 @@ export default function CoOwnScreen() {
   const renderHeader = () => (
     <View>
       <View style={styles.heroHeader}>
-        <Text style={styles.heroTitle}>My Co-Own</Text>
+        <Text style={styles.heroTitle}>{t('syndicate.header.myCoOwn')}</Text>
       </View>
 
       <View style={styles.heroQuickRow}>
@@ -404,7 +405,7 @@ export default function CoOwnScreen() {
           onPress={() => navigation.navigate('AssetLeaderboard')}
         >
           <Ionicons name="trophy-outline" size={13} color={Colors.textSecondary} />
-          <Text style={styles.heroQuickText}>Leaderboard</Text>
+          <Text style={styles.heroQuickText}>{t('syndicate.quick.leaderboard')}</Text>
         </AnimatedPressable>
 
         <AnimatedPressable
@@ -413,34 +414,34 @@ export default function CoOwnScreen() {
           onPress={() => navigation.navigate('CoOwnOrderHistory')}
         >
           <Ionicons name="time-outline" size={13} color={Colors.textSecondary} />
-          <Text style={styles.heroQuickText}>Recent orders</Text>
+          <Text style={styles.heroQuickText}>{t('syndicate.quick.recentOrders')}</Text>
         </AnimatedPressable>
       </View>
 
       <View style={styles.metricsRow}>
         <View style={styles.metricCard}>
           <Text style={styles.metricValue}>{marketAssets.length}</Text>
-          <Text style={styles.metricLabel}>Issued Pools</Text>
+          <Text style={styles.metricLabel}>{t('syndicate.metrics.issuedPools')}</Text>
         </View>
         <View style={styles.metricCard}>
           <Text style={styles.metricValue}>{formatFromFiat(totalMarketValue, 'GBP', { displayMode: 'fiat' })}</Text>
-          <Text style={styles.metricLabel}>Issued Value</Text>
+          <Text style={styles.metricLabel}>{t('syndicate.metrics.issuedValue')}</Text>
         </View>
         <View style={styles.metricCard}>
           <Text style={styles.metricValue}>{formatMoney(holdingsValue)}</Text>
-          <Text style={styles.metricLabel}>Your Value</Text>
+          <Text style={styles.metricLabel}>{t('syndicate.metrics.yourValue')}</Text>
         </View>
       </View>
 
       <View style={styles.metricsPnlRow}>
         <View style={styles.metricCardWide}>
-          <Text style={styles.metricWideLabel}>Unrealized P/L</Text>
+          <Text style={styles.metricWideLabel}>{t('syndicate.metrics.unrealized')}</Text>
           <Text style={[styles.metricWideValue, unrealizedPnl >= 0 ? styles.pnlUp : styles.pnlDown]}>
             {formatSigned(unrealizedPnl)}
           </Text>
         </View>
         <View style={styles.metricCardWide}>
-          <Text style={styles.metricWideLabel}>Realized P/L</Text>
+          <Text style={styles.metricWideLabel}>{t('syndicate.metrics.realized')}</Text>
           <Text style={[styles.metricWideValue, realizedPnl >= 0 ? styles.pnlUp : styles.pnlDown]}>
             {formatSigned(realizedPnl)}
           </Text>
@@ -450,23 +451,30 @@ export default function CoOwnScreen() {
       <AnimatedPressable style={styles.complianceCard} activeOpacity={0.9} onPress={() => setComplianceModalVisible(true)}>
         <View style={styles.complianceTopRow}>
           <Ionicons name="shield-checkmark-outline" size={16} color={BRAND} />
-          <Text style={styles.complianceTitle}>Compliance</Text>
+          <Text style={styles.complianceTitle}>{t('syndicate.compliance.title')}</Text>
           <Ionicons name="chevron-forward" size={14} color={Colors.textMuted} />
         </View>
         <Text style={styles.complianceText}>
-          Country {coOwnCompliance.countryCode} · KYC {coOwnCompliance.kycVerified ? 'on' : 'off'} ·
-          Disclosure {coOwnCompliance.riskDisclosureAccepted ? 'accepted' : 'pending'}.
+          {t('syndicate.compliance.summary', {
+            country: coOwnCompliance.countryCode,
+            kyc: coOwnCompliance.kycVerified
+              ? t('syndicate.compliance.state.on')
+              : t('syndicate.compliance.state.off'),
+            disclosure: coOwnCompliance.riskDisclosureAccepted
+              ? t('syndicate.compliance.state.accepted')
+              : t('syndicate.compliance.state.pending'),
+          })}
         </Text>
         {!marketEligibility.ok ? (
           <Text style={styles.complianceErrorText}>{marketEligibility.message}</Text>
         ) : (
-          <Text style={styles.complianceOkText}>Eligible to trade co-owned assets.</Text>
+          <Text style={styles.complianceOkText}>{t('syndicate.compliance.eligible')}</Text>
         )}
       </AnimatedPressable>
 
       <View style={styles.issueRow}>
         <View>
-          <Text style={styles.issueTitle}>Issuer Console</Text>
+          <Text style={styles.issueTitle}>{t('syndicate.issue.console')}</Text>
         </View>
 
         <AnimatedPressable
@@ -475,13 +483,13 @@ export default function CoOwnScreen() {
           onPress={() => navigation.navigate('CreateCoOwn')}
         >
           <Ionicons name="add" size={15} color={Colors.background} />
-          <Text style={styles.issueBtnText}>Issue</Text>
+          <Text style={styles.issueBtnText}>{t('syndicate.issue.cta')}</Text>
         </AnimatedPressable>
       </View>
 
       {syncError ? (
         <SyncRetryBanner
-          message="Co-Own pools are delayed. Showing local portfolio state."
+          message={t('syndicate.sync.delayed')}
           onRetry={() => void syncCoOwnAssets()}
           isRetrying={isSyncingAssets}
           telemetryContext="coOwn_market_sync"
@@ -497,7 +505,7 @@ export default function CoOwnScreen() {
           onPress={() => navigation.navigate('Portfolio')}
         >
           <Ionicons name="pie-chart-outline" size={13} color={Colors.textSecondary} />
-          <Text style={styles.quickActionText}>Portfolio</Text>
+          <Text style={styles.quickActionText}>{t('syndicate.quick.portfolio')}</Text>
         </AnimatedPressable>
 
         <AnimatedPressable
@@ -506,7 +514,7 @@ export default function CoOwnScreen() {
           onPress={() => navigation.navigate('CoOwnOrderHistory')}
         >
           <Ionicons name="time-outline" size={13} color={Colors.textSecondary} />
-          <Text style={styles.quickActionText}>Orders</Text>
+          <Text style={styles.quickActionText}>{t('syndicate.quick.orders')}</Text>
         </AnimatedPressable>
       </View>
 
@@ -518,20 +526,27 @@ export default function CoOwnScreen() {
             onPress={() => setActiveView(view)}
             activeOpacity={0.9}
           >
-            <Text style={[styles.switcherText, activeView === view && styles.switcherTextActive]}>{view}</Text>
+            <Text style={[styles.switcherText, activeView === view && styles.switcherTextActive]}>
+              {view === 'ISSUED' ? t('syndicate.switcher.issued') : t('syndicate.switcher.holdings')}
+            </Text>
           </AnimatedPressable>
         ))}
       </View>
 
       <View style={styles.sectionRow}>
-        <Text style={styles.sectionTitle}>{activeView === 'ISSUED' ? 'Your Issued Pools' : 'Your Holdings'}</Text>
+        <Text style={styles.sectionTitle}>
+          {activeView === 'ISSUED' ? t('syndicate.section.issuedPools') : t('syndicate.section.holdings')}
+        </Text>
         <SyncStatusPill tone={poolStatus.tone} label={poolStatus.label} compact />
       </View>
 
       <View style={styles.pegCard}>
         <Ionicons name="sparkles-outline" size={14} color={BRAND} />
         <Text style={styles.pegCardText}>
-          {STABLE_COIN} is a closed-loop settlement credit. Local reference value: {formatFromIze(1, { displayMode: 'fiat' })}.
+          {t('syndicate.peg.text', {
+            coin: STABLE_COIN,
+            value: formatFromIze(1, { displayMode: 'fiat' }),
+          })}
         </Text>
       </View>
     </View>
@@ -572,7 +587,7 @@ export default function CoOwnScreen() {
             </View>
           </View>
 
-          <Text style={styles.assetIssuer}>Issuer {getUserLabel(item.issuerId)}</Text>
+          <Text style={styles.assetIssuer}>{t('syndicate.asset.issuer', { issuer: getUserLabel(item.issuerId) })}</Text>
 
           <View style={styles.assetBadgesRow}>
             <View style={styles.assetBadgePill}>
@@ -586,7 +601,7 @@ export default function CoOwnScreen() {
           </View>
 
           <View style={styles.priceRow}>
-            <Text style={styles.pricePrimary}>{formatIzeAmount(unitPriceIze)} / unit</Text>
+            <Text style={styles.pricePrimary}>{t('syndicate.asset.pricePerUnit', { price: formatIzeAmount(unitPriceIze) })}</Text>
             <Text style={styles.priceSecondary}>{formatFromFiat(item.unitPriceGBP, 'GBP', { displayMode: 'fiat' })}</Text>
           </View>
 
@@ -595,15 +610,17 @@ export default function CoOwnScreen() {
           </View>
 
           <View style={styles.metaRow}>
-            <Text style={styles.metaText}>{item.availableUnits} / {item.totalUnits} units left</Text>
-            <Text style={styles.metaText}>{item.holders} holders</Text>
+            <Text style={styles.metaText}>
+              {t('syndicate.asset.meta.unitsLeft', { available: item.availableUnits, total: item.totalUnits })}
+            </Text>
+            <Text style={styles.metaText}>{t('syndicate.asset.meta.holders', { count: item.holders })}</Text>
           </View>
 
           {item.yourUnits > 0 ? (
             <View style={styles.pnlRow}>
-              <Text style={styles.metaText}>Entry {formatMoney(avgEntry)}</Text>
+              <Text style={styles.metaText}>{t('syndicate.asset.meta.entry', { amount: formatMoney(avgEntry) })}</Text>
               <Text style={[styles.pnlValue, unrealized >= 0 ? styles.pnlUp : styles.pnlDown]}>
-                Unrealized {formatSigned(unrealized)}
+                {t('syndicate.asset.meta.unrealized', { amount: formatSigned(unrealized) })}
               </Text>
             </View>
           ) : null}
@@ -616,12 +633,12 @@ export default function CoOwnScreen() {
                   openUnitsComposer(item, 'sell');
                 } else {
                   if (!item.isOpen || item.availableUnits === 0) {
-                    show('Pool currently closed', 'error');
+                    show(t('syndicate.asset.error.poolClosed'), 'error');
                     return;
                   }
 
                   if (!eligibility.ok) {
-                    show(eligibility.message ?? 'Complete compliance checks to trade', 'error');
+                    show(eligibility.message ?? t('syndicate.asset.error.completeCompliance'), 'error');
                     setComplianceModalVisible(true);
                     return;
                   }
@@ -638,7 +655,7 @@ export default function CoOwnScreen() {
                 color={!(primaryDisabled || isSubmittingOrder) ? Colors.background : Colors.textMuted}
               />
               <Text style={[styles.buyBtnText, (primaryDisabled || isSubmittingOrder) && styles.buyBtnTextDisabled]}>
-                {isHoldingsMode ? 'Book Profit' : 'Buy Units'}
+                {isHoldingsMode ? t('syndicate.asset.cta.bookProfit') : t('syndicate.asset.cta.buyUnits')}
               </Text>
             </AnimatedPressable>
 
@@ -647,7 +664,7 @@ export default function CoOwnScreen() {
               onPress={() => navigation.navigate('AssetDetail', { assetId: item.id })}
               activeOpacity={0.9}
             >
-              <Text style={styles.detailsBtnText}>Asset</Text>
+              <Text style={styles.detailsBtnText}>{t('syndicate.asset.cta.details')}</Text>
             </AnimatedPressable>
           </View>
         </View>
@@ -681,16 +698,16 @@ export default function CoOwnScreen() {
           <AnimatedPressable style={styles.unitsModalDismissLayer} activeOpacity={1} onPress={closeUnitsComposer} />
 
           <View style={styles.unitsModalCard}>
-            <Text style={styles.unitsModalLabel}>UNITS COMPOSER</Text>
+            <Text style={styles.unitsModalLabel}>{t('syndicate.units.modal.label')}</Text>
             <Text style={styles.unitsModalTitle} numberOfLines={1}>{selectedAsset.title}</Text>
             <Text style={styles.unitsModalHint}>
               {composerMode === 'buy'
-                ? `Available ${selectedAsset.availableUnits} units`
-                : `Holdings ${selectedAsset.yourUnits} units`}
+                ? t('syndicate.units.modal.available', { count: selectedAsset.availableUnits })
+                : t('syndicate.units.modal.holdings', { count: selectedAsset.yourUnits })}
             </Text>
 
             <View style={styles.unitsInputWrap}>
-              <Text style={styles.unitsInputPrefix}>Units</Text>
+              <Text style={styles.unitsInputPrefix}>{t('syndicate.units.modal.prefix')}</Text>
               <TextInput
                 style={styles.unitsInput}
                 value={unitsInput}
@@ -729,12 +746,18 @@ export default function CoOwnScreen() {
             </View>
 
             <Text style={styles.unitsSpendText}>
-              {composerMode === 'buy' ? 'Estimated spend' : 'Estimated receive'} {formatIzeAmount(estimatedIze)}
+              {composerMode === 'buy'
+                ? t('syndicate.units.modal.estimatedSpend', { amount: formatIzeAmount(estimatedIze) })
+                : t('syndicate.units.modal.estimatedReceive', { amount: formatIzeAmount(estimatedIze) })}
             </Text>
-            <Text style={styles.unitsSpendSubText}>Approx. {formatFromFiat(estimatedQuote, 'GBP', { displayMode: 'fiat' })}</Text>
+            <Text style={styles.unitsSpendSubText}>
+              {t('syndicate.units.modal.approxFiat', {
+                amount: formatFromFiat(estimatedQuote, 'GBP', { displayMode: 'fiat' }),
+              })}
+            </Text>
             {composerMode === 'sell' ? (
               <Text style={[styles.unitsSpendSubText, estimatedRealized >= 0 ? styles.pnlUp : styles.pnlDown]}>
-                Realized P/L preview {formatSigned(estimatedRealized)}
+                {t('syndicate.units.modal.realizedPreview', { amount: formatSigned(estimatedRealized) })}
               </Text>
             ) : null}
 
@@ -745,7 +768,7 @@ export default function CoOwnScreen() {
                 activeOpacity={0.9}
                 disabled={isSubmittingOrder}
               >
-                <Text style={styles.unitsCancelText}>Cancel</Text>
+                <Text style={styles.unitsCancelText}>{t('syndicate.units.modal.cancel')}</Text>
               </AnimatedPressable>
 
               <AnimatedPressable
@@ -755,7 +778,11 @@ export default function CoOwnScreen() {
                 disabled={isSubmittingOrder}
               >
                 <Text style={styles.unitsSubmitText}>
-                  {isSubmittingOrder ? 'Submitting...' : composerMode === 'buy' ? 'Buy Units' : 'Sell Units'}
+                  {isSubmittingOrder
+                    ? t('syndicate.units.modal.submitting')
+                    : composerMode === 'buy'
+                      ? t('syndicate.units.modal.buy')
+                      : t('syndicate.units.modal.sell')}
                 </Text>
               </AnimatedPressable>
             </View>
@@ -780,9 +807,9 @@ export default function CoOwnScreen() {
         />
 
         <View style={styles.complianceModalCard}>
-          <Text style={styles.complianceModalTitle}>Jurisdiction & KYC</Text>
+          <Text style={styles.complianceModalTitle}>{t('syndicate.compliance.modal.title')}</Text>
 
-          <Text style={styles.complianceFieldLabel}>Country</Text>
+          <Text style={styles.complianceFieldLabel}>{t('syndicate.compliance.modal.country')}</Text>
           <View style={styles.countryChipsWrap}>
             {COUNTRY_OPTIONS.map((country) => {
               const active = coOwnCompliance.countryCode === country.code;
@@ -800,20 +827,20 @@ export default function CoOwnScreen() {
           </View>
 
           <View style={styles.complianceToggleRow}>
-            <Text style={styles.complianceToggleText}>KYC verified</Text>
+            <Text style={styles.complianceToggleText}>{t('syndicate.compliance.modal.kycVerified')}</Text>
             <AnimatedPressable
               style={[styles.complianceToggleBtn, coOwnCompliance.kycVerified && styles.complianceToggleBtnActive]}
               onPress={() => updateCoOwnCompliance({ kycVerified: !coOwnCompliance.kycVerified })}
               activeOpacity={0.9}
             >
               <Text style={[styles.complianceToggleBtnText, coOwnCompliance.kycVerified && styles.complianceToggleBtnTextActive]}>
-                {coOwnCompliance.kycVerified ? 'ON' : 'OFF'}
+                {coOwnCompliance.kycVerified ? t('syndicate.compliance.modal.toggleOn') : t('syndicate.compliance.modal.toggleOff')}
               </Text>
             </AnimatedPressable>
           </View>
 
           <View style={styles.complianceToggleRow}>
-            <Text style={styles.complianceToggleText}>Risk disclosure accepted</Text>
+            <Text style={styles.complianceToggleText}>{t('syndicate.compliance.modal.riskDisclosure')}</Text>
             <AnimatedPressable
               style={[styles.complianceToggleBtn, coOwnCompliance.riskDisclosureAccepted && styles.complianceToggleBtnActive]}
               onPress={() =>
@@ -827,13 +854,15 @@ export default function CoOwnScreen() {
                   coOwnCompliance.riskDisclosureAccepted && styles.complianceToggleBtnTextActive,
                 ]}
               >
-                {coOwnCompliance.riskDisclosureAccepted ? 'ON' : 'OFF'}
+                {coOwnCompliance.riskDisclosureAccepted
+                  ? t('syndicate.compliance.modal.toggleOn')
+                  : t('syndicate.compliance.modal.toggleOff')}
               </Text>
             </AnimatedPressable>
           </View>
 
           <View style={styles.complianceToggleRow}>
-            <Text style={styles.complianceToggleText}>{STABLE_COIN} wallet connected</Text>
+            <Text style={styles.complianceToggleText}>{t('syndicate.compliance.modal.walletConnected', { coin: STABLE_COIN })}</Text>
             <AnimatedPressable
               style={[styles.complianceToggleBtn, coOwnCompliance.stableCoinWalletConnected && styles.complianceToggleBtnActive]}
               onPress={() =>
@@ -847,14 +876,16 @@ export default function CoOwnScreen() {
                   coOwnCompliance.stableCoinWalletConnected && styles.complianceToggleBtnTextActive,
                 ]}
               >
-                {coOwnCompliance.stableCoinWalletConnected ? 'ON' : 'OFF'}
+                {coOwnCompliance.stableCoinWalletConnected
+                  ? t('syndicate.compliance.modal.toggleOn')
+                  : t('syndicate.compliance.modal.toggleOff')}
               </Text>
             </AnimatedPressable>
           </View>
 
           <View style={[styles.complianceStatusBanner, marketEligibility.ok ? styles.complianceStatusOk : styles.complianceStatusError]}>
             <Text style={[styles.complianceStatusText, marketEligibility.ok ? styles.complianceStatusTextOk : styles.complianceStatusTextError]}>
-              {marketEligibility.ok ? 'Eligible for co-own trading' : marketEligibility.message}
+              {marketEligibility.ok ? t('syndicate.compliance.modal.eligible') : marketEligibility.message}
             </Text>
           </View>
 
@@ -863,7 +894,7 @@ export default function CoOwnScreen() {
             onPress={() => setComplianceModalVisible(false)}
             activeOpacity={0.9}
           >
-            <Text style={styles.complianceDoneBtnText}>Done</Text>
+            <Text style={styles.complianceDoneBtnText}>{t('syndicate.compliance.modal.done')}</Text>
           </AnimatedPressable>
         </View>
       </View>
@@ -898,20 +929,22 @@ export default function CoOwnScreen() {
 
   return (
     <>
-      <FlatList
+      <FlashList
         data={visibleAssets}
         keyExtractor={(item) => item.id}
-        renderItem={renderAssetCard}
+        contentContainerStyle={styles.contentContainer}
+        ItemSeparatorComponent={() => <View style={{ height: 16 }} />}
         ListHeaderComponent={renderHeader}
-        ItemSeparatorComponent={() => <View style={styles.separator} />}
+        renderItem={renderAssetCard}
+        showsVerticalScrollIndicator={false}
         ListEmptyComponent={
           isSyncingAssets ? (
             renderLoadingState()
           ) : (
             <EmptyState
               icon="pie-chart-outline"
-              title={activeView === 'HOLDINGS' ? 'No holdings yet' : 'No issued pools yet'}
-              ctaLabel={activeView === 'HOLDINGS' ? 'View Issued Pools' : 'Issue Co-Own'}
+              title={activeView === 'HOLDINGS' ? t('syndicate.empty.noHoldings') : t('syndicate.empty.noPools')}
+              ctaLabel={activeView === 'HOLDINGS' ? t('syndicate.empty.cta.viewIssued') : t('syndicate.empty.cta.issue')}
               onCtaPress={() =>
                 activeView === 'HOLDINGS'
                   ? setActiveView('ISSUED')
@@ -920,8 +953,6 @@ export default function CoOwnScreen() {
             />
           )
         }
-        contentContainerStyle={styles.contentContainer}
-        showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}

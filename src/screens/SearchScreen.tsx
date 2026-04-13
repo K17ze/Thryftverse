@@ -1,17 +1,17 @@
-﻿import React, { useState } from 'react';
+import React, { useState } from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
   View,
   Text,
   StyleSheet,
-  FlatList,
   StatusBar,
   TextInput,
   ScrollView,
   Dimensions,
   RefreshControl
 } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { CachedImage } from '../components/CachedImage';
 import Reanimated, { useSharedValue, useAnimatedScrollHandler, FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -222,7 +222,7 @@ export default function SearchScreen() {
     setTimeout(() => setRefreshing(false), 400);
   };
 
-  const AnimatedFlatList = Reanimated.createAnimatedComponent(FlatList);
+  const AnimatedFlashList = Reanimated.createAnimatedComponent(FlashList);
 
   const filteredWishlist = wishlistItems.filter(l =>
     !searchQuery || l.title.toLowerCase().includes(searchQuery.toLowerCase()) || l.brand?.toLowerCase().includes(searchQuery.toLowerCase())
@@ -400,7 +400,7 @@ export default function SearchScreen() {
         
         {activeTab === 'SAVED' ? (
           filteredLooks.length > 0 ? (
-            <AnimatedFlatList
+            <AnimatedFlashList
               key="saved-looks"
               data={filteredLooks}
               keyExtractor={(item: any) => item.id}
@@ -448,13 +448,12 @@ export default function SearchScreen() {
           showWishlistLoadingState ? (
             renderWishlistLoadingState()
           ) : filteredWishlist.length > 0 ? (
-            <AnimatedFlatList
+            <AnimatedFlashList
               key="wishlist-items"
               data={filteredWishlist}
               keyExtractor={(item: any) => item.id}
               numColumns={2}
               contentContainerStyle={styles.gridContent}
-              columnWrapperStyle={styles.gridRow}
               showsVerticalScrollIndicator={false}
               onScroll={scrollHandler}
               scrollEventThrottle={16}

@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -27,6 +27,7 @@ import { RootStackParamList } from '../navigation/types';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { MOCK_USERS } from '../data/mockData';
+import { mockArrayOrEmpty } from '../utils/mockGate';
 import { useStore } from '../store/useStore';
 import {
   createGroupInviteLinkOnApi,
@@ -128,7 +129,7 @@ export default function ChatScreen({ navigation, route }: Props) {
 
   const userLookup = useMemo(() => {
     const map = new Map<string, string>();
-    for (const user of MOCK_USERS) {
+    for (const user of mockArrayOrEmpty(MOCK_USERS)) {
       map.set(user.id, user.username);
     }
     map.set('me', currentUser?.username ?? 'you');

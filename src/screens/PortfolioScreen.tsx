@@ -6,9 +6,9 @@ import {
   Text,
   StyleSheet,
   StatusBar,
-  FlatList,
   Image
 } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -125,7 +125,7 @@ export default function PortfolioScreen() {
         </AnimatedPressable>
       </View>
 
-      <FlatList
+      <FlashList
         data={holdings}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.content}

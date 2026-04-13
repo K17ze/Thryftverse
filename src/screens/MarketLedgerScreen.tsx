@@ -5,10 +5,10 @@ import {
   View,
   Text,
   StyleSheet,
-  FlatList,
   StatusBar,
   RefreshControl,
 } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
@@ -336,7 +336,7 @@ export default function MarketLedgerScreen() {
         })}
       </View>
 
-      <FlatList
+      <FlashList
         data={filteredEntries}
         keyExtractor={(item) => item.id}
         renderItem={renderLedgerRow}

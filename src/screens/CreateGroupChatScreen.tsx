@@ -1,13 +1,13 @@
 import React, { useMemo, useState } from 'react';
 import { AnimatedPressable } from '../components/AnimatedPressable';
 import {
-  FlatList,
   StatusBar,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StackScreenProps } from '@react-navigation/stack';
@@ -115,7 +115,10 @@ export default function CreateGroupChatScreen({ navigation }: Props) {
       />
 
       <View style={styles.header}>
-        <AnimatedPressable style={styles.headerBtn} onPress={() => navigation.goBack()}>
+        <AnimatedPressable style={styles.headerBtn} onPress={() => navigation.goBack()}
+          accessibilityLabel="Go back"
+          accessibilityRole="button"
+        >
           <Ionicons name="arrow-back" size={22} color={Colors.textPrimary} />
         </AnimatedPressable>
         <Text style={styles.headerTitle}>Create Group Chat</Text>
@@ -163,7 +166,7 @@ export default function CreateGroupChatScreen({ navigation }: Props) {
           <Text style={styles.sectionMeta}>{selectedIds.length} selected</Text>
         </View>
 
-        <FlatList
+        <FlashList
           data={members}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => {
@@ -206,6 +209,8 @@ export default function CreateGroupChatScreen({ navigation }: Props) {
             void handleCreateGroup();
           }}
           disabled={!title.trim() || isCreating}
+          accessibilityLabel={isCreating ? 'Creating group chat' : 'Create group chat'}
+          accessibilityRole="button"
         >
           <Text style={styles.createBtnText}>{isCreating ? 'Creating...' : 'Create Group'}</Text>
         </AnimatedPressable>

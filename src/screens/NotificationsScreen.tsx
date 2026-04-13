@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import {
   View,
   Text,
@@ -133,11 +133,11 @@ export default function NotificationsScreen() {
 
       {/* Header */}
       <View style={styles.header}>
-        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()} accessibilityLabel="Go back">
           <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
         </AnimatedPressable>
         <Text style={styles.headerTitle}>Notifications</Text>
-        <AnimatedPressable style={styles.backBtn} onPress={handleMarkAllAsRead}>
+        <AnimatedPressable style={styles.backBtn} onPress={handleMarkAllAsRead} accessibilityLabel={hasUnread ? 'Mark all notifications as read' : 'All caught up'}>
           <Ionicons
             name="checkmark-done-outline"
             size={22}
@@ -163,6 +163,7 @@ export default function NotificationsScreen() {
                 style={[styles.notifCard, !item.read && styles.notifCardUnread]}
                 activeOpacity={0.8}
                 onPress={() => handleOpenNotification(item.id)}
+                accessibilityLabel={`${item.read ? '' : 'Unread: '}${item.text}, ${item.time}`}
               >
                 {/* Unread dot */}
                 {!item.read && <View style={styles.unreadDot} />}

@@ -4,12 +4,12 @@ import {
 import { View,
   Text,
   StyleSheet,
-  FlatList,
   StatusBar,
   Dimensions,
   ScrollView,
   RefreshControl
 } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CachedImage } from '../components/CachedImage';
 import Reanimated, { useSharedValue, useAnimatedStyle, withSpring, withSequence, withDelay, useAnimatedScrollHandler, FadeInDown, runOnJS } from 'react-native-reanimated';
@@ -140,6 +140,7 @@ const BrowseGridItem = ({ item, index, navigation, wishlist, toggleWishlist, sho
           <AnimatedPressable
             style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' }}
             activeOpacity={0.8}
+            accessibilityLabel={isWishlisted ? 'Remove from wishlist' : 'Add to wishlist'}
             onPress={() => {
               haptic.light();
               toggleWishlist(item.id);
@@ -310,7 +311,7 @@ export default function BrowseScreen() {
     </View>
   );
 
-  const AnimatedFlatList = Reanimated.createAnimatedComponent(FlatList);
+  const AnimatedFlashList = Reanimated.createAnimatedComponent(FlashList);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -318,10 +319,10 @@ export default function BrowseScreen() {
       
       {/* Heavy Typography Header */}
       <View style={styles.header}>
-        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.8}>
+        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.8} accessibilityLabel="Go back">
           <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
         </AnimatedPressable>
-        <AnimatedPressable style={styles.searchBtn} activeOpacity={0.8} onPress={() => navigation.navigate('GlobalSearch')}>
+        <AnimatedPressable style={styles.searchBtn} activeOpacity={0.8} onPress={() => navigation.navigate('GlobalSearch')} accessibilityLabel="Search listings">
           <Ionicons name="search" size={20} color={Colors.textPrimary} />
         </AnimatedPressable>
       </View>
@@ -391,14 +392,13 @@ export default function BrowseScreen() {
       <View style={{ flex: 1 }}>
         <RefreshIndicator scrollY={scrollY} isRefreshing={refreshing} topInset={40} />
         
-        <AnimatedFlatList
+        <AnimatedFlashList
           ref={scrollRef}
           data={dataToRender}
           keyExtractor={(item: any) => item.id}
           numColumns={2}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.gridContent}
-          columnWrapperStyle={styles.rowWrapper}
           onScroll={scrollHandler}
           scrollEventThrottle={16}
           refreshControl={

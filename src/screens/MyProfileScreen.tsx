@@ -305,6 +305,8 @@ export default function MyProfileScreen() {
             style={styles.topUtilityIconBtn}
             activeOpacity={0.9}
             onPress={() => navigation.navigate('Personalisation')}
+            accessibilityLabel="Open personalisation settings"
+            accessibilityRole="button"
           >
             <Ionicons name="apps-outline" size={18} color="#fff" />
           </AnimatedPressable>
@@ -315,6 +317,9 @@ export default function MyProfileScreen() {
               style={styles.topUtilityPillBtn}
               activeOpacity={0.9}
               hitSlop={8}
+              accessibilityLabel="Change cover photo"
+              accessibilityRole="button"
+              accessibilityHint="Opens photo picker to update your cover photo"
             >
               <Ionicons name="camera" size={16} color="#fff" />
               <Text style={styles.topUtilityPillText}>Cover</Text>
@@ -332,7 +337,11 @@ export default function MyProfileScreen() {
         {/* Profile Hero */}
         <View style={styles.heroSection}>
           <View style={styles.heroTop}>
-            <AnimatedPressable style={styles.avatarWrap} onPress={pickAvatar} activeOpacity={0.85}>
+            <AnimatedPressable style={styles.avatarWrap} onPress={pickAvatar} activeOpacity={0.85}
+          accessibilityLabel="Change profile photo"
+          accessibilityRole="button"
+          accessibilityHint="Opens photo picker to update your avatar"
+        >
               <CachedImage
                 uri={displayAvatar}
                 style={styles.heroAvatar}
@@ -359,6 +368,8 @@ export default function MyProfileScreen() {
               activeOpacity={0.85}
               style={styles.profileActionPrimary}
               onPress={() => navigation.navigate('EditProfile')}
+              accessibilityLabel="Edit your profile"
+              accessibilityRole="button"
             >
               <Text style={styles.profileActionPrimaryText}>Edit profile</Text>
             </AnimatedPressable>
@@ -367,6 +378,8 @@ export default function MyProfileScreen() {
               activeOpacity={0.85}
               style={styles.profileActionSecondary}
               onPress={handleShare}
+              accessibilityLabel="Share your profile"
+              accessibilityRole="button"
             >
               <Text style={styles.profileActionSecondaryText}>Share profile</Text>
             </AnimatedPressable>
@@ -375,6 +388,8 @@ export default function MyProfileScreen() {
               style={styles.profileActionIcon}
               onPress={() => navigation.navigate('Settings')}
               activeOpacity={0.8}
+              accessibilityLabel="Open settings"
+              accessibilityRole="button"
             >
               <Ionicons name="settings-outline" size={18} color={Colors.textPrimary} />
             </AnimatedPressable>
@@ -385,6 +400,8 @@ export default function MyProfileScreen() {
               style={styles.statItem}
               onPress={() => navigation.navigate('UserProfile', { userId: MY_USER.id, isMe: true })}
               activeOpacity={0.8}
+              accessibilityLabel={`${MY_USER.listingCount} listings. Tap to view full profile.`}
+              accessibilityRole="button"
             >
               <AnimatedCounter value={MY_USER.listingCount} style={styles.statNumber} duration={900} />
               <Text style={styles.statLabel}>LISTED</Text>

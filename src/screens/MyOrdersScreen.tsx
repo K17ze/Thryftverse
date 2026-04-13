@@ -15,6 +15,7 @@ import { ActiveTheme, Colors } from '../constants/colors';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { MOCK_LISTINGS, MOCK_USERS, Listing, User } from '../data/mockData';
+import { mockArrayOrEmpty, mockFind } from '../utils/mockGate';
 import { RefreshIndicator } from '../components/RefreshIndicator';
 import { EmptyState } from '../components/EmptyState';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
@@ -55,7 +56,7 @@ export default function MyOrdersScreen() {
     }>
   >([]);
 
-  const listingPool = React.useMemo(() => (listings.length ? listings : MOCK_LISTINGS), [listings]);
+  const listingPool = React.useMemo(() => (listings.length ? listings : mockArrayOrEmpty(MOCK_LISTINGS)), [listings]);
 
   const syncOrders = React.useCallback(async () => {
     try {
@@ -87,10 +88,10 @@ export default function MyOrdersScreen() {
 
     return [
       ...(awaitingDispatchItem
-        ? [{ id: 'o3', item: awaitingDispatchItem, status: 'Awaiting Dispatch', isDone: false, buyer: MOCK_USERS[1] }]
+        ? [{ id: 'o3', item: awaitingDispatchItem, status: 'Awaiting Dispatch', isDone: false, buyer: mockArrayOrEmpty(MOCK_USERS)[1] }]
         : []),
       ...(completedItem
-        ? [{ id: 'o4', item: completedItem, status: 'Completed', isDone: true, buyer: MOCK_USERS[2] }]
+        ? [{ id: 'o4', item: completedItem, status: 'Completed', isDone: true, buyer: mockArrayOrEmpty(MOCK_USERS)[2] }]
         : []),
     ];
   }, [listingPool]);
@@ -127,7 +128,7 @@ export default function MyOrdersScreen() {
         item: fallbackListing,
         status: statusLabelByState[order.status] ?? 'In progress',
         isDone: order.status === 'delivered' || order.status === 'cancelled',
-        buyer: MOCK_USERS.find((user) => user.id === order.buyerId),
+        buyer: mockFind(MOCK_USERS, (user) => user.id === order.buyerId),
       };
     });
   }, [backendOrders, listingPool]);

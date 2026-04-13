@@ -1,4 +1,6 @@
 import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Poster } from '../data/posters';
 import type { AuctionMarketItem, AuctionViewModel, CoOwnAsset } from '../data/tradeHub';
 import type { ChatBot, Conversation, Message as ConversationMessage } from '../data/mockData';
@@ -225,7 +227,9 @@ interface StoreState {
   updateUserCover: (uri: string) => void;
 }
 
-export const useStore = create<StoreState>((set, get) => ({
+export const useStore = create<StoreState>()(
+  persist(
+    (set, get) => ({
   currentUser: null, // Note: For a real app, load this from secure storage initially
   isAuthenticated: false,
   login: (user) => {
@@ -949,4 +953,26 @@ export const useStore = create<StoreState>((set, get) => ({
         profileMediaOverrides: nextOverrides,
       };
     }),
-}));
+}),
+    {
+      name: 'thryftverse-store',
+      storage: createJSONStorage(() => AsyncStorage),
+      version: 1,
+      partialize: (state) => ({
+        // Only persist user-critical data, not transient UI state
+        wishlist: state.wishlist,
+        seenPosterIds: state.seenPosterIds,
+        customPosters: state.customPosters,
+        conversations: state.conversations,
+        savedAddress: state.savedAddress,
+        savedPaymentMethod: state.savedPaymentMethod,
+        twoFactorEnabled: state.twoFactorEnabled,
+        notificationCount: state.notificationCount,
+        userAvatar: state.userAvatar,
+        userCover: state.userCover,
+        profileMediaOverrides: state.profileMediaOverrides,
+        sellDraft: state.sellDraft,
+      }),
+    },
+  ),
+);

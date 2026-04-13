@@ -15,6 +15,7 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { RootStackParamList } from '../navigation/types';
 import { MOCK_LISTINGS, MOCK_USERS } from '../data/mockData';
+import { mockFind, mockArrayOrEmpty } from '../utils/mockGate';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useBackendData } from '../context/BackendDataContext';
 import { getOrder } from '../services/commerceApi';
@@ -198,17 +199,17 @@ export default function OrderDetailScreen() {
     };
   }, [orderId]);
 
-  const listingPool = listings.length > 0 ? listings : MOCK_LISTINGS;
+  const listingPool = listings.length > 0 ? listings : mockArrayOrEmpty(MOCK_LISTINGS);
   const listingId = backendOrder?.listingId;
   const listing =
     (listingId
-      ? listingPool.find((item) => item.id === listingId) ?? MOCK_LISTINGS.find((item) => item.id === listingId)
+      ? listingPool.find((item) => item.id === listingId) ?? mockFind(MOCK_LISTINGS, (item) => item.id === listingId)
       : undefined) ??
     listingPool[0] ??
     MOCK_LISTINGS[0];
 
   const seller =
-    MOCK_USERS.find((item) => item.id === (backendOrder?.sellerId ?? listing.sellerId)) ??
+    mockFind(MOCK_USERS, (item) => item.id === (backendOrder?.sellerId ?? listing.sellerId)) ??
     MOCK_USERS[0];
 
   const subtotal = backendOrder?.subtotalGbp ?? listing.price;

@@ -13,6 +13,7 @@ import { ActiveTheme, Colors } from '../constants/colors';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { MOCK_CATEGORIES } from '../data/mockData';
+import { mockFind } from '../utils/mockGate';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useBackendData } from '../context/BackendDataContext';
 import { CachedImage } from '../components/CachedImage';
@@ -29,7 +30,7 @@ export default function CategoryDetailScreen() {
   const { listings } = useBackendData();
   const { categoryId } = route.params || {};
   
-  const category = MOCK_CATEGORIES.find((c) => c.id === categoryId) || MOCK_CATEGORIES[0];
+  const category = mockFind(MOCK_CATEGORIES, (c) => c.id === categoryId) || MOCK_CATEGORIES[0];
   // Filter listings based on the selected category for the grid preview.
   const gridData = listings.filter(l => l.category.toLowerCase() === category.name.toLowerCase() || categoryId === 'cat1');
 

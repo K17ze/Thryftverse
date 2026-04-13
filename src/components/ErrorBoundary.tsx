@@ -2,6 +2,7 @@ import React, { ErrorInfo, ReactNode } from 'react';
 import { View, StyleSheet, Text } from 'react-native';
 import { RetryState } from './RetryState';
 import { Colors } from '../constants/colors';
+import { trackTelemetryEvent } from '../lib/telemetry';
 
 interface Props {
   children: ReactNode;
@@ -23,8 +24,11 @@ export class ErrorBoundary extends React.Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    // In a real app, log to Sentry / Crashlytics here
-    console.warn('ErrorBoundary caught an error:', error, errorInfo);
+    trackTelemetryEvent('error_boundary_crash', {
+      error_name: error.name,
+      error_message: error.message,
+      component_stack: errorInfo.componentStack ?? '',
+    });
   }
 
   handleRetry = () => {

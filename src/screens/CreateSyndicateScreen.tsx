@@ -7,9 +7,9 @@ import {
   StyleSheet,
   StatusBar,
   TextInput,
-  FlatList,
   ScrollView
 } from 'react-native';
+import { FlashList } from '@shopify/flash-list';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
@@ -225,7 +225,10 @@ export default function CreateCoOwnScreen() {
       <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
       <View style={styles.header}>
-        <AnimatedPressable style={styles.closeBtn} onPress={() => navigation.goBack()} activeOpacity={0.85}>
+        <AnimatedPressable style={styles.closeBtn} onPress={() => navigation.goBack()} activeOpacity={0.85}
+          accessibilityLabel="Close co-own creation"
+          accessibilityRole="button"
+        >
           <Ionicons name="close" size={20} color={Colors.textPrimary} />
         </AnimatedPressable>
 
@@ -234,7 +237,10 @@ export default function CreateCoOwnScreen() {
           <Text style={styles.headerTitle}>Create Co-Own</Text>
         </View>
 
-        <AnimatedPressable style={styles.issueBtn} onPress={issueCoOwn} activeOpacity={0.9}>
+        <AnimatedPressable style={styles.issueBtn} onPress={issueCoOwn} activeOpacity={0.9}
+          accessibilityLabel="Issue co-own asset"
+          accessibilityRole="button"
+        >
           <Text style={styles.issueBtnText}>Issue</Text>
         </AnimatedPressable>
       </View>
@@ -395,7 +401,7 @@ export default function CreateCoOwnScreen() {
             <Text style={styles.sectionHint}>{issuerListings.length} available</Text>
           </View>
 
-          <FlatList
+          <FlashList
             data={issuerListings}
             horizontal
             keyExtractor={(item) => item.id}
