@@ -23,6 +23,8 @@ import {
   convertGbpToDisplayAmount,
   sanitizeDecimalInput,
 } from '../utils/currencyAuthoringFlows';
+import { AppButton } from '../components/ui/AppButton';
+import { AppCard } from '../components/ui/AppCard';
 
 type Props = StackScreenProps<RootStackParamList, 'MakeOffer'>;
 
@@ -95,7 +97,7 @@ export default function MakeOfferScreen({ navigation, route }: Props) {
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {/* Item Info Context */}
-        <View style={styles.itemCard}>
+        <AppCard style={styles.itemCard}>
           <View style={styles.itemThumb}>
             <Ionicons name="shirt-outline" size={24} color={MUTED} />
           </View>
@@ -103,7 +105,7 @@ export default function MakeOfferScreen({ navigation, route }: Props) {
             <Text style={styles.itemTitle} numberOfLines={1}>{title}</Text>
             <Text style={styles.itemListingPrice}>Listed at {formatFromFiat(price, 'GBP')}</Text>
           </View>
-        </View>
+        </AppCard>
 
         {/* Floating Input Block */}
         <View style={styles.section}>
@@ -124,7 +126,7 @@ export default function MakeOfferScreen({ navigation, route }: Props) {
 
         {/* Spaced Anti-list Platform Charge */}
         <Text style={styles.sectionLabel}>Summary</Text>
-        <View style={styles.protectionCard}>
+        <AppCard style={styles.protectionCard}>
           <View style={styles.protectionRow}>
             <Ionicons name="shield-checkmark" size={18} color={BRAND} />
             <Text style={styles.protectionLabel}>Platform charge</Text>
@@ -139,31 +141,34 @@ export default function MakeOfferScreen({ navigation, route }: Props) {
           <Text style={styles.protectionNote}>
             Includes our platform charge for secure settlement and support.
           </Text>
-        </View>
+        </AppCard>
 
         {/* Tip Pill */}
-        <View style={styles.tipCard}>
+        <AppCard style={styles.tipCard} variant="tint">
           <View style={styles.tipIconBox}>
             <Ionicons name="bulb" size={16} color={Colors.textInverse} />
           </View>
           <Text style={styles.tipText}>
             Offers within 10% of the listing price are <Text style={{ fontFamily: 'Inter_700Bold', color: TEXT }}>3x</Text> more likely to be accepted.
           </Text>
-        </View>
+        </AppCard>
 
         {!!errorMsg && <Text style={styles.errorText}>{errorMsg}</Text>}
       </ScrollView>
 
       {/* Floating CTA matches CheckoutScreen */}
       <View style={styles.footer}>
-        <AnimatedPressable
-          style={[styles.sendBtn, numericOffer <= 0 && { opacity: 0.5 }]}
-          disabled={numericOffer <= 0}
+        <AppButton
+          style={styles.sendBtn}
+          title="Send offer"
+          subtitle={formatFromFiat(total, 'GBP')}
+          icon={<Ionicons name="paper-plane-outline" size={16} color={Colors.textInverse} />}
+          variant="primary"
+          size="lg"
           onPress={handleSendOffer}
-          activeOpacity={0.9}
-        >
-          <Text style={styles.sendBtnText}>Send offer | {formatFromFiat(total, 'GBP')}</Text>
-        </AnimatedPressable>
+          disabled={numericOffer <= 0}
+          accessibilityLabel={`Send offer totaling ${formatFromFiat(total, 'GBP')}`}
+        />
       </View>
     </SafeAreaView>
   );
@@ -297,18 +302,6 @@ const styles = StyleSheet.create({
     borderTopColor: BORDER,
     backgroundColor: FOOTER_BG,
   },
-  sendBtn: {
-    backgroundColor: Colors.accent,
-    borderRadius: 30,
-    height: 64,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  sendBtnText: { 
-    fontSize: 18, 
-    fontFamily: 'Inter_700Bold', 
-    color: Colors.textInverse,
-    letterSpacing: -0.5,
-  },
+  sendBtn: { width: '100%' },
 });
 

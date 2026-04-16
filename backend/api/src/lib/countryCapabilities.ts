@@ -42,6 +42,11 @@ interface CapabilityTemplate {
   postageCarriers: CapabilityCarrier[];
 }
 
+type GatewayFallbackContext = {
+  cluster: CapabilityCountryCluster;
+  channel?: CapabilityPaymentChannel;
+};
+
 export interface UserCountryCapabilities {
   policyVersion: string;
   generatedAt: string;
@@ -75,6 +80,7 @@ export interface ResolveCountryCapabilitiesInput {
 }
 
 const POLICY_VERSION = '2026-04-country-capabilities-v1';
+const warnedGatewayFallbacks = new Set<string>();
 
 const EUROPE_COUNTRIES = new Set<string>([
   'AL', 'AD', 'AT', 'BA', 'BE', 'BG', 'BY', 'CH', 'CY', 'CZ', 'DE', 'DK', 'EE', 'ES', 'FI', 'FO',
@@ -231,10 +237,9 @@ const CAPABILITY_TEMPLATES: Record<CapabilityCountryCluster, CapabilityTemplate>
     payoutDefaultCurrency: 'USD',
     payoutSupportedCurrencies: ['USD', 'GBP', 'EUR'],
     payoutGatewayPriority: ['stripe_americas', 'mollie_eu', 'wise_global'],
-    postageCarriers: [
-      { id: 'dhl_global', label: 'DHL Global', priceFromGbp: 3.75, etaMinDays: 3, etaMaxDays: 6, tracking: true },
-      { id: 'standard_intl', label: 'Standard International', priceFromGbp: 2.55, etaMinDays: 4, etaMaxDays: 8, tracking: true },
-    ],
+    // GLOBAL fallback intentionally has no default carriers.
+    // Unsupported countries should show an explicit shipping-unavailable state.
+    postageCarriers: [],
   },
 };
 
@@ -302,6 +307,105 @@ function resolveCountryCluster(countryCode: string): CapabilityCountryCluster {
   return 'GLOBAL';
 }
 
+export function isGatewayConfigured(gatewayId: string): boolean {
+  const hasEnvValue = (name: string): boolean => Boolean(process.env[name]?.trim());
+  const isProduction = (process.env.NODE_ENV ?? 'development').toLowerCase() === 'production';
+
+  switch (gatewayId) {
+    case 'stripe_americas':
+      return hasEnvValue('STRIPE_SECRET_KEY');
+    case 'razorpay_in':
+      return hasEnvValue('RAZORPAY_KEY_ID') && hasEnvValue('RAZORPAY_KEY_SECRET');
+    case 'mollie_eu':
+      return hasEnvValue('MOLLIE_API_KEY');
+    case 'flutterwave_africa':
+      return hasEnvValue('FLUTTERWAVE_SECRET_KEY');
+    case 'tap_gulf':
+      return hasEnvValue('TAP_SECRET_KEY');
+    case 'wise_global':
+      return hasEnvValue('WISE_API_KEY');
+    case 'mock_fiat_gbp':
+    case 'mock_tvusd':
+      return !isProduction;
+    default:
+      return false;
+  }
+}
+
+function warnGatewayFallbackOnce(
+  originalGateways: CapabilityPaymentGatewayId[],
+  resolvedGateways: CapabilityPaymentGatewayId[],
+  context?: GatewayFallbackContext
+): void {
+  if (!context || originalGateways.length === 0) {
+    return;
+  }
+
+  const originalPrimary = originalGateways[0];
+  const resolvedPrimary = resolvedGateways[0] ?? 'none';
+
+  if (originalPrimary === resolvedPrimary) {
+    return;
+  }
+
+  const fallbackKey = `${context.cluster}:${context.channel ?? 'unknown'}:${originalPrimary}->${resolvedPrimary}`;
+  if (warnedGatewayFallbacks.has(fallbackKey)) {
+    return;
+  }
+
+  warnedGatewayFallbacks.add(fallbackKey);
+  console.warn(
+    `[countryCapabilities] gateway fallback applied for ${context.cluster}/${context.channel ?? 'unknown'}: ${originalPrimary} -> ${resolvedPrimary}`
+  );
+}
+
+function filterToConfiguredGateways(
+  gateways: CapabilityPaymentGatewayId[],
+  context?: GatewayFallbackContext
+): CapabilityPaymentGatewayId[] {
+  const configured = gateways.filter((gatewayId) => isGatewayConfigured(gatewayId));
+  if (configured.length > 0) {
+    warnGatewayFallbackOnce(gateways, configured, context);
+    return configured;
+  }
+
+  if (isGatewayConfigured('stripe_americas')) {
+    const fallback = ['stripe_americas'] as CapabilityPaymentGatewayId[];
+    warnGatewayFallbackOnce(gateways, fallback, context);
+    return fallback;
+  }
+
+  if ((process.env.NODE_ENV ?? 'development').toLowerCase() !== 'production') {
+    const fallback = ['mock_fiat_gbp'] as CapabilityPaymentGatewayId[];
+    warnGatewayFallbackOnce(gateways, fallback, context);
+    return fallback;
+  }
+
+  warnGatewayFallbackOnce(gateways, [], context);
+  return [];
+}
+
+export function getConfiguredClusters(): Array<{
+  cluster: CapabilityCountryCluster;
+  primaryGateway: string | null;
+  carrierCount: number;
+  configured: boolean;
+}> {
+  const clusters = Object.keys(CAPABILITY_TEMPLATES) as CapabilityCountryCluster[];
+
+  return clusters.map((cluster) => {
+    const template = CAPABILITY_TEMPLATES[cluster];
+    const configuredGateways = filterToConfiguredGateways(template.gatewaysByChannel.commerce);
+
+    return {
+      cluster,
+      primaryGateway: configuredGateways[0] ?? null,
+      carrierCount: template.postageCarriers.length,
+      configured: configuredGateways.length > 0,
+    };
+  });
+}
+
 export function resolveCountryCapabilities(input: ResolveCountryCapabilitiesInput): UserCountryCapabilities {
   const profileCountryCode = normalizeCountryCode(input.countryCode);
   const residencyCountryCode = input.residencyCountryCode
@@ -325,6 +429,29 @@ export function resolveCountryCapabilities(input: ResolveCountryCapabilitiesInpu
     template.payoutSupportedCurrencies.unshift(template.payoutDefaultCurrency);
   }
 
+  const filteredGatewaysByChannel: Record<CapabilityPaymentChannel, CapabilityPaymentGatewayId[]> = {
+    commerce: filterToConfiguredGateways(template.gatewaysByChannel.commerce, {
+      cluster: countryCluster,
+      channel: 'commerce',
+    }),
+    'co-own': filterToConfiguredGateways(template.gatewaysByChannel['co-own'], {
+      cluster: countryCluster,
+      channel: 'co-own',
+    }),
+    wallet_topup: filterToConfiguredGateways(template.gatewaysByChannel.wallet_topup, {
+      cluster: countryCluster,
+      channel: 'wallet_topup',
+    }),
+    wallet_withdrawal: filterToConfiguredGateways(template.gatewaysByChannel.wallet_withdrawal, {
+      cluster: countryCluster,
+      channel: 'wallet_withdrawal',
+    }),
+  };
+
+  const filteredPayoutGatewayPriority = template.payoutGatewayPriority.filter((gatewayId) =>
+    isGatewayConfigured(gatewayId)
+  );
+
   return {
     policyVersion: POLICY_VERSION,
     generatedAt: new Date().toISOString(),
@@ -340,12 +467,12 @@ export function resolveCountryCapabilities(input: ResolveCountryCapabilitiesInpu
     payments: {
       stableCoinEnabled: template.stableCoinEnabled,
       methodTypes: template.paymentMethodTypes,
-      gatewaysByChannel: template.gatewaysByChannel,
+      gatewaysByChannel: filteredGatewaysByChannel,
     },
     payouts: {
       defaultCurrency: template.payoutDefaultCurrency,
       supportedCurrencies: template.payoutSupportedCurrencies,
-      gatewayPriority: template.payoutGatewayPriority,
+      gatewayPriority: filteredPayoutGatewayPriority,
     },
     postage: {
       carriers: template.postageCarriers,

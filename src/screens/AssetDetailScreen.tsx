@@ -21,11 +21,18 @@ import { useStore } from '../store/useStore';
 import { resolveAssetMarketState, getOrderBookSnapshot, getPriceSeries, ChartRange } from '../data/mockSyndicateData';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { EmptyState } from '../components/EmptyState';
+import { AppButton } from '../components/ui/AppButton';
+import { AppSegmentControl } from '../components/ui/AppSegmentControl';
 
 type RouteT = RouteProp<RootStackParamList, 'AssetDetail'>;
 type NavT = StackNavigationProp<RootStackParamList>;
 
 const RANGE_OPTIONS: ChartRange[] = ['1H', '1D', '1W', '1M', 'ALL'];
+const RANGE_SEGMENT_OPTIONS: Array<{ value: ChartRange; label: string; accessibilityLabel: string }> = RANGE_OPTIONS.map((option) => ({
+  value: option,
+  label: option,
+  accessibilityLabel: `Set chart range to ${option}`,
+}));
 const IS_LIGHT = ActiveTheme === 'light';
 const BRAND = IS_LIGHT ? '#2f251b' : '#d7b98f';
 const PANEL_BG = IS_LIGHT ? '#ffffff' : '#121212';
@@ -191,21 +198,16 @@ export default function AssetDetailScreen() {
           </Text>
         </View>
 
-        <View style={styles.rangeRow}>
-          {RANGE_OPTIONS.map((option) => {
-            const active = option === range;
-            return (
-              <AnimatedPressable
-                key={option}
-                style={[styles.rangeChip, active && styles.rangeChipActive]}
-                onPress={() => setRange(option)}
-                activeOpacity={0.9}
-              >
-                <Text style={[styles.rangeChipText, active && styles.rangeChipTextActive]}>{option}</Text>
-              </AnimatedPressable>
-            );
-          })}
-        </View>
+        <AppSegmentControl
+          style={styles.rangeRow}
+          options={RANGE_SEGMENT_OPTIONS}
+          value={range}
+          onChange={setRange}
+          optionStyle={styles.rangeChip}
+          optionActiveStyle={styles.rangeChipActive}
+          optionTextStyle={styles.rangeChipText}
+          optionTextActiveStyle={styles.rangeChipTextActive}
+        />
 
         <View style={styles.chartCard}>
           <View style={styles.chartBarsRow}>
@@ -291,28 +293,37 @@ export default function AssetDetailScreen() {
       </ScrollView>
 
       <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 14) }]}>
-        <AnimatedPressable
+        <AppButton
           style={[styles.ctaBtn, styles.ctaBuy]}
-          activeOpacity={0.9}
+          variant="gold"
+          size="sm"
+          align="center"
+          title="Buy"
           onPress={() => navigation.navigate('Trade', { assetId: asset.id, side: 'buy' })}
-        >
-          <Text style={styles.ctaBuyText}>Buy</Text>
-        </AnimatedPressable>
-        <AnimatedPressable
+          accessibilityLabel={`Buy shares of ${asset.title}`}
+          accessibilityHint="Opens the trade ticket with buy selected."
+        />
+        <AppButton
           style={[styles.ctaBtn, styles.ctaSell]}
-          activeOpacity={0.9}
+          variant="secondary"
+          size="sm"
+          align="center"
+          title="Sell"
           onPress={() => navigation.navigate('Trade', { assetId: asset.id, side: 'sell' })}
-        >
-          <Text style={styles.ctaSellText}>Sell</Text>
-        </AnimatedPressable>
-        <AnimatedPressable
+          accessibilityLabel={`Sell shares of ${asset.title}`}
+          accessibilityHint="Opens the trade ticket with sell selected."
+        />
+        <AppButton
           style={[styles.ctaBtn, styles.ctaBuyout]}
-          activeOpacity={0.9}
+          variant="secondary"
+          size="sm"
+          align="center"
+          title="Buyout"
+          icon={<Ionicons name="diamond-outline" size={15} color={Colors.textPrimary} />}
           onPress={() => navigation.navigate('Buyout', { assetId: asset.id })}
-        >
-          <Ionicons name="diamond-outline" size={15} color={Colors.textPrimary} />
-          <Text style={styles.ctaSellText}>Buyout</Text>
-        </AnimatedPressable>
+          accessibilityLabel={`Start buyout flow for ${asset.title}`}
+          accessibilityHint="Opens buyout request and terms for this asset."
+        />
       </View>
     </SafeAreaView>
   );
@@ -581,35 +592,15 @@ const styles = StyleSheet.create({
   },
   ctaBtn: {
     flex: 1,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    flexDirection: 'row',
-    gap: 5,
   },
   ctaBuy: {
-    backgroundColor: Colors.accentGold,
+    backgroundColor: 'transparent',
   },
   ctaSell: {
-    backgroundColor: PANEL_SOFT_BG,
-    borderWidth: 1,
-    borderColor: PANEL_BORDER,
+    backgroundColor: 'transparent',
   },
   ctaBuyout: {
-    backgroundColor: PANEL_TINT_BG,
-    borderWidth: 1,
-    borderColor: PANEL_TINT_BORDER,
-  },
-  ctaBuyText: {
-    color: Colors.textInverse,
-    fontSize: 13,
-    fontFamily: 'Inter_700Bold',
-  },
-  ctaSellText: {
-    color: Colors.textPrimary,
-    fontSize: 13,
-    fontFamily: 'Inter_700Bold',
+    backgroundColor: 'transparent',
   },
 });
 

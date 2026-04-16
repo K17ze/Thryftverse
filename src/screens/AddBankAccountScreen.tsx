@@ -1,6 +1,7 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
+import { AppButton } from '../components/ui/AppButton';
 import {
   View,
   Text,
@@ -145,7 +146,12 @@ export default function AddBankAccountScreen({ navigation }: Props) {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={BG} />
       <View style={styles.header}>
-        <AnimatedPressable onPress={() => navigation.goBack()}>
+        <AnimatedPressable
+          onPress={() => navigation.goBack()}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+          accessibilityHint="Returns to the previous screen"
+        >
           <Ionicons name="arrow-back" size={24} color={TEXT} />
         </AnimatedPressable>
         <Text style={styles.headerTitle}>Add bank account</Text>
@@ -179,6 +185,8 @@ export default function AddBankAccountScreen({ navigation }: Props) {
                 placeholderTextColor={MUTED}
                 autoCapitalize="words"
                 selectionColor={BRAND}
+                accessibilityLabel="Account holder name"
+                accessibilityHint="Enter the full legal name on the bank account"
               />
             </View>
             <View style={styles.divider} />
@@ -193,6 +201,8 @@ export default function AddBankAccountScreen({ navigation }: Props) {
                 keyboardType="number-pad"
                 selectionColor={BRAND}
                 maxLength={8}
+                accessibilityLabel="Account number"
+                accessibilityHint="Enter your 8-digit account number"
               />
             </View>
             <View style={styles.divider} />
@@ -207,6 +217,8 @@ export default function AddBankAccountScreen({ navigation }: Props) {
                 keyboardType="number-pad"
                 selectionColor={BRAND}
                 maxLength={8}
+                accessibilityLabel="Sort code"
+                accessibilityHint="Enter the 6-digit sort code"
               />
             </View>
           </View>
@@ -225,13 +237,14 @@ export default function AddBankAccountScreen({ navigation }: Props) {
         </ScrollView>
 
         <View style={styles.footer}>
-          <AnimatedPressable
-            style={[styles.saveBtn, (!isComplete || isSaving || !bankAllowed) && { opacity: 0.4 }]}
-            disabled={!isComplete || isSaving || !bankAllowed}
+          <AppButton
+            title={isSaving ? 'Saving...' : 'Save bank account'}
             onPress={handleSaveBank}
-          >
-            <Text style={styles.saveBtnText}>{isSaving ? 'Saving...' : 'Save bank account'}</Text>
-          </AnimatedPressable>
+            disabled={!isComplete || isSaving || !bankAllowed}
+            style={styles.saveBtn}
+            accessibilityLabel={isSaving ? 'Saving bank account' : 'Save bank account'}
+            accessibilityHint="Saves this bank account for withdrawals"
+          />
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -279,7 +292,6 @@ const styles = StyleSheet.create({
   },
   infoText: { flex: 1, fontSize: 12, color: MUTED, lineHeight: 18 },
   footer: { padding: 20, borderTopWidth: 1, borderTopColor: BORDER },
-  saveBtn: { backgroundColor: Colors.accent, borderRadius: 30, paddingVertical: 16, alignItems: 'center' },
-  saveBtnText: { fontSize: 16, fontWeight: '700', color: Colors.textInverse },
+  saveBtn: { borderRadius: 30 },
 });
 

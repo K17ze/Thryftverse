@@ -32,6 +32,7 @@ import { useBackendData } from '../context/BackendDataContext';
 import { getBackendSyncStatus } from '../utils/syncStatus';
 import { useToast } from '../context/ToastContext';
 import { ENABLE_RUNTIME_MOCKS } from '../constants/runtimeFlags';
+import { AppButton } from '../components/ui/AppButton';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -363,23 +364,31 @@ export default function SearchScreen() {
       <View style={styles.tabsContainer}>
         <View style={styles.tabsWrapper}>
           {closetTabs.map(tab => (
-            <AnimatedPressable
+            <AppButton
               key={tab.key}
+              title={tab.label}
+              icon={
+                <Ionicons
+                  name={tab.icon}
+                  size={14}
+                  color={activeTab === tab.key ? Colors.textInverse : Colors.textSecondary}
+                />
+              }
+              trailingIcon={
+                <Text style={[styles.tabCount, activeTab === tab.key && styles.tabCountActive]}>
+                  {tab.key === 'SAVED' ? filteredLooks.length : filteredWishlist.length}
+                </Text>
+              }
               style={[styles.tab, activeTab === tab.key && styles.activeTab]}
+              variant="secondary"
+              size="sm"
+              titleStyle={[styles.tabText, activeTab === tab.key && styles.activeTabText]}
+              iconContainerStyle={styles.tabIconWrap}
+              trailingIconContainerStyle={styles.tabCountWrap}
               onPress={() => setActiveTab(tab.key)}
               activeOpacity={0.8}
-            >
-              <Ionicons
-                name={tab.icon}
-                size={14}
-                color={activeTab === tab.key ? Colors.textInverse : Colors.textSecondary}
-                style={{ marginRight: 6 }}
-              />
-              <Text style={[styles.tabText, activeTab === tab.key && styles.activeTabText]}>{tab.label}</Text>
-              <Text style={[styles.tabCount, activeTab === tab.key && styles.tabCountActive]}>
-                {tab.key === 'SAVED' ? filteredLooks.length : filteredWishlist.length}
-              </Text>
-            </AnimatedPressable>
+              accessibilityLabel={`Show ${tab.label.toLowerCase()} tab`}
+            />
           ))}
         </View>
       </View>
@@ -650,15 +659,29 @@ const styles = StyleSheet.create({
   tabsWrapper: { flexDirection: 'row', backgroundColor: PANEL_BG, borderRadius: 30, padding: 4 },
   tab: {
     flex: 1,
-    flexDirection: 'row',
-    paddingVertical: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
     borderRadius: 26,
+    minHeight: 44,
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    paddingHorizontal: 10,
   },
   activeTab: { backgroundColor: Colors.accent },
+  tabIconWrap: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: 'transparent',
+  },
   tabText: { fontSize: 11, fontFamily: Typography.family.semibold, color: Colors.textSecondary, letterSpacing: 0.2 },
   activeTabText: { color: Colors.textInverse },
+  tabCountWrap: {
+    width: 'auto',
+    height: 'auto',
+    borderRadius: 0,
+    backgroundColor: 'transparent',
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+  },
   tabCount: {
     marginLeft: 6,
     minWidth: 20,

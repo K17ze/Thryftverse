@@ -21,6 +21,7 @@ import { useToast } from '../context/ToastContext';
 import { AnimatedPressable } from '../components/AnimatedPressable';
 import { CachedImage } from '../components/CachedImage';
 import { BottomSheetPicker } from '../components/BottomSheetPicker';
+import { AppButton } from '../components/ui/AppButton';
 import {
   setStoredUserAvatar,
   setStoredUserAvatarForUser,
@@ -187,14 +188,16 @@ export default function EditProfileScreen() {
           </View>
 
           {/* Save Button */}
-          <AnimatedPressable 
-            style={[styles.saveBtn, isSaving && styles.saveBtnDisabled]} 
-            activeOpacity={0.85} 
-            onPress={handleSave}
+          <AppButton
+            title={isSaving ? 'Saving...' : 'Save Changes'}
+            onPress={() => void handleSave()}
             disabled={isSaving}
-          >
-            <Text style={styles.saveText}>{isSaving ? 'Saving...' : 'Save Changes'}</Text>
-          </AnimatedPressable>
+            variant="primary"
+            size="md"
+            style={[styles.saveBtn, isSaving && styles.saveBtnDisabled]}
+            titleStyle={styles.saveText}
+            accessibilityLabel="Save profile changes"
+          />
 
           <View style={{ height: 40 }} />
         </ScrollView>
@@ -271,8 +274,11 @@ const styles = StyleSheet.create({
   },
 
   saveBtn: { 
-    backgroundColor: Colors.accent, borderRadius: 28, height: 56, 
-    alignItems: 'center', justifyContent: 'center', marginTop: 8 
+    backgroundColor: Colors.accent,
+    borderRadius: 28,
+    minHeight: 56,
+    borderWidth: 0,
+    marginTop: 8,
   },
   saveBtnDisabled: { opacity: 0.6 },
   saveText: { color: Colors.textInverse, fontSize: 16, fontFamily: 'Inter_700Bold' },

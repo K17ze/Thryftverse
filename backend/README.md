@@ -153,12 +153,15 @@ Commerce and checkout:
 - `POST /users/:userId/payment-methods`
 - `DELETE /users/:userId/payment-methods/:paymentMethodId`
 - `POST /orders`
-- `POST /orders/:orderId/pay`
+- `POST /payments/intents`
+- `GET /payments/intents/:intentId`
+- `POST /payments/intents/:intentId/confirm`
+- `POST /orders/:orderId/pay` (admin-maintenance route)
 - `GET /orders/:orderId`
 - `GET /users/:userId/orders`
 - `GET /users/:userId/market-history`
 
-Note: `POST /orders/:orderId/pay` should be sent with `Content-Type: application/json` (an empty `{}` body is valid).
+Note: checkout should initiate payment with `POST /payments/intents` using `orderId`; `POST /orders/:orderId/pay` is reserved for admin-maintenance workflows.
 
 Trade Hub market:
 

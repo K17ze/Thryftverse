@@ -94,7 +94,13 @@ export default function PersonalisationScreen() {
       <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
       <View style={styles.header}>
-        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <AnimatedPressable
+          style={styles.backBtn}
+          onPress={() => navigation.goBack()}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+          accessibilityHint="Returns to the previous screen"
+        >
           <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
         </AnimatedPressable>
         <Text style={styles.hugeTitle}>Personalisation</Text>
@@ -114,6 +120,10 @@ export default function PersonalisationScreen() {
               key={g}
               style={[styles.genderPill, genderFilter.includes(g) && styles.genderPillActive]}
               onPress={() => toggleGender(g)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: genderFilter.includes(g) }}
+              accessibilityLabel={`Toggle ${g} preference`}
+              accessibilityHint="Adds or removes this preference from your feed filters"
             >
               <Text style={[styles.genderPillText, genderFilter.includes(g) && styles.genderPillTextActive]}>
                 {g}
@@ -149,6 +159,9 @@ export default function PersonalisationScreen() {
               <AnimatedPressable
                 style={styles.prefRow}
                 onPress={row.onPress}
+                accessibilityRole="button"
+                accessibilityLabel={`Edit ${row.label.toLowerCase()} preference`}
+                accessibilityHint="Opens picker options"
               >
                 <View style={styles.prefIcon}>
                   <Ionicons name={row.icon as any} size={20} color={Colors.textPrimary} />

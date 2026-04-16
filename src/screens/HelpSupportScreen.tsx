@@ -100,7 +100,11 @@ export default function HelpSupportScreen({ navigation }: Props) {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={BG} />
       <View style={styles.header}>
-        <AnimatedPressable onPress={() => navigation.goBack()}>
+        <AnimatedPressable
+          onPress={() => navigation.goBack()}
+          accessibilityLabel="Go back"
+          accessibilityHint="Returns to the previous screen."
+        >
           <Ionicons name="arrow-back" size={24} color={TEXT} />
         </AnimatedPressable>
         <Text style={styles.headerTitle}>Help & Support</Text>
@@ -111,11 +115,35 @@ export default function HelpSupportScreen({ navigation }: Props) {
         {/* Quick Actions */}
         <View style={styles.quickRow}>
           {[
-            { icon: 'chatbubble-outline', label: 'Live Chat', onPress: handleOpenLiveChat },
-            { icon: 'mail-outline', label: 'Email Us', onPress: handleOpenEmail },
-            { icon: 'document-text-outline', label: 'My Tickets', onPress: handleOpenTickets },
+            {
+              icon: 'chatbubble-outline',
+              label: 'Live Chat',
+              onPress: handleOpenLiveChat,
+              accessibilityLabel: 'Open live chat support',
+              accessibilityHint: 'Starts a support conversation in chat.',
+            },
+            {
+              icon: 'mail-outline',
+              label: 'Email Us',
+              onPress: handleOpenEmail,
+              accessibilityLabel: 'Email support',
+              accessibilityHint: 'Opens your email app with a prefilled support address.',
+            },
+            {
+              icon: 'document-text-outline',
+              label: 'My Tickets',
+              onPress: handleOpenTickets,
+              accessibilityLabel: 'View support tickets',
+              accessibilityHint: 'Scrolls to the message form to create a new support ticket.',
+            },
           ].map(a => (
-            <AnimatedPressable key={a.label} style={styles.quickBtn} onPress={a.onPress}>
+            <AnimatedPressable
+              key={a.label}
+              style={styles.quickBtn}
+              onPress={a.onPress}
+              accessibilityLabel={a.accessibilityLabel}
+              accessibilityHint={a.accessibilityHint}
+            >
               <View style={styles.quickIcon}>
                 <Ionicons name={a.icon as any} size={22} color={ACCENT} />
               </View>
@@ -132,6 +160,9 @@ export default function HelpSupportScreen({ navigation }: Props) {
               <AnimatedPressable
                 style={styles.faqRow}
                 onPress={() => setExpanded(prev => prev === faq.q ? null : faq.q)}
+                accessibilityLabel={`FAQ: ${faq.q}`}
+                accessibilityHint={expanded === faq.q ? 'Collapses this answer.' : 'Expands this answer.'}
+                accessibilityState={{ expanded: expanded === faq.q }}
               >
                 <Text style={styles.faqQ}>{faq.q}</Text>
                 <Ionicons
@@ -162,11 +193,15 @@ export default function HelpSupportScreen({ navigation }: Props) {
             numberOfLines={5}
             textAlignVertical="top"
             selectionColor={Colors.accent}
+            accessibilityLabel="Support message"
+            accessibilityHint="Type details about your issue so support can help you."
           />
           <AnimatedPressable
             style={[styles.sendBtn, !message.trim() && { opacity: 0.4 }]}
             disabled={!message.trim()}
             onPress={handleSendMessage}
+            accessibilityLabel="Send support message"
+            accessibilityHint="Sends your message to the support team."
           >
             <Ionicons name="send" size={16} color={Colors.textInverse} />
             <Text style={styles.sendBtnText}>Send message</Text>
@@ -181,7 +216,12 @@ export default function HelpSupportScreen({ navigation }: Props) {
             { icon: 'globe-outline', label: 'Thryftverse Blog', url: 'https://thryftverse.app/blog' },
           ].map((l, idx) => (
             <View key={l.label}>
-              <AnimatedPressable style={styles.linkRow} onPress={() => void handleOpenExternal(l.url)}>
+              <AnimatedPressable
+                style={styles.linkRow}
+                onPress={() => void handleOpenExternal(l.url)}
+                accessibilityLabel={`Open ${l.label}`}
+                accessibilityHint="Opens this link in your browser."
+              >
                 <Ionicons name={l.icon as any} size={18} color={MUTED} />
                 <Text style={styles.linkText}>{l.label}</Text>
                 <Ionicons name="open-outline" size={14} color={MUTED} />

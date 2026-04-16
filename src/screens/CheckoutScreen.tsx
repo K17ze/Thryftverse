@@ -6,6 +6,7 @@ import { View,
   StyleSheet,
   ScrollView,
   StatusBar,
+  Linking,
   Platform
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
@@ -26,13 +27,17 @@ import { SyncStatusPill } from '../components/SyncStatusPill';
 import { AddCardSheet } from '../components/checkout/AddCardSheet';
 import { AddAddressSheet } from '../components/checkout/AddAddressSheet';
 import {
+  createCommercePaymentIntent,
   createOrder,
+  getPaymentIntentStatus,
+  getShippingQuote,
   listUserAddresses,
   listUserPaymentMethods,
-  payOrder,
 } from '../services/commerceApi';
 import { CapabilityCarrier, getUserCountryCapabilities, UserCountryCapabilities } from '../services/capabilitiesApi';
 import { CachedImage } from '../components/CachedImage';
+import { AppButton } from '../components/ui/AppButton';
+import { AppCard } from '../components/ui/AppCard';
 import { getListingCoverUri } from '../utils/media';
 import { t } from '../i18n';
 
@@ -45,29 +50,83 @@ const PANEL_BORDER = IS_LIGHT ? '#d8d1c6' : '#2a2a2a';
 const FOOTER_BG = IS_LIGHT ? 'rgba(236,234,230,0.97)' : 'rgba(10,10,10,0.95)';
 
 interface CheckoutPostageOption {
+  carrierId: string | null;
   label: string;
   etaLabel: string;
   priceFromGbp: number;
+  liveQuote: boolean;
 }
 
 const DEFAULT_POSTAGE_OPTION: CheckoutPostageOption = {
+  carrierId: null,
   label: t('checkout.postage.default.label'),
   etaLabel: t('checkout.postage.default.eta'),
   priceFromGbp: 2.89,
+  liveQuote: false,
 };
 
-function toEtaLabel(carrier: CapabilityCarrier): string {
-  if (carrier.etaMinDays === carrier.etaMaxDays) {
+const UNAVAILABLE_REGION_POSTAGE_OPTION: CheckoutPostageOption = {
+  carrierId: null,
+  label: 'Shipping quote not available for your region',
+  etaLabel: 'Unavailable',
+  priceFromGbp: 0,
+  liveQuote: false,
+};
+
+function toEtaLabelFromRange(etaMinDays: number, etaMaxDays: number): string {
+  if (etaMinDays === etaMaxDays) {
     return t('checkout.postage.eta.single', {
-      days: carrier.etaMinDays,
-      plural: carrier.etaMinDays === 1 ? '' : 's',
+      days: etaMinDays,
+      plural: etaMinDays === 1 ? '' : 's',
     });
   }
 
   return t('checkout.postage.eta.range', {
-    min: carrier.etaMinDays,
-    max: carrier.etaMaxDays,
+    min: etaMinDays,
+    max: etaMaxDays,
   });
+}
+
+function toEtaLabel(carrier: CapabilityCarrier): string {
+  return toEtaLabelFromRange(carrier.etaMinDays, carrier.etaMaxDays);
+}
+
+const PAYMENT_INTENT_POLL_ATTEMPTS = 12;
+const PAYMENT_INTENT_POLL_INTERVAL_MS = 1_500;
+
+type CheckoutPaymentSettlementStatus = 'succeeded' | 'failed' | 'pending';
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function waitForPaymentIntentSettlement(
+  intentId: string
+): Promise<CheckoutPaymentSettlementStatus> {
+  for (let attempt = 0; attempt < PAYMENT_INTENT_POLL_ATTEMPTS; attempt += 1) {
+    try {
+      const latestIntent = await getPaymentIntentStatus(intentId);
+      const normalizedStatus = latestIntent.status.trim().toLowerCase();
+
+      if (normalizedStatus === 'succeeded') {
+        return 'succeeded';
+      }
+
+      if (normalizedStatus === 'failed' || normalizedStatus === 'cancelled') {
+        return 'failed';
+      }
+    } catch {
+      // Continue polling until timeout to absorb transient API/network failures.
+    }
+
+    if (attempt < PAYMENT_INTENT_POLL_ATTEMPTS - 1) {
+      await wait(PAYMENT_INTENT_POLL_INTERVAL_MS);
+    }
+  }
+
+  return 'pending';
 }
 
 export default function CheckoutScreen() {
@@ -119,15 +178,53 @@ export default function CheckoutScreen() {
 
         const primaryCarrier = capabilities.postage.carriers[0];
         if (!primaryCarrier) {
-          setPostageOption(DEFAULT_POSTAGE_OPTION);
+          setPostageOption(UNAVAILABLE_REGION_POSTAGE_OPTION);
           return;
         }
 
-        setPostageOption({
+        const fallbackOption: CheckoutPostageOption = {
+          carrierId: primaryCarrier.id,
           label: primaryCarrier.label,
           etaLabel: toEtaLabel(primaryCarrier),
           priceFromGbp: primaryCarrier.priceFromGbp,
-        });
+          liveQuote: false,
+        };
+
+        setPostageOption(fallbackOption);
+
+        if (!savedAddress?.id && !savedAddress?.postcode) {
+          return;
+        }
+
+        try {
+          const quoteResponse = await getShippingQuote({
+            buyerId: currentUser.id,
+            listingId: item.id,
+            addressId: savedAddress?.id,
+            destinationPostcode: savedAddress?.postcode,
+            preferredCarrierId: primaryCarrier.id,
+            declaredValueGbp: item.price,
+          });
+
+          if (cancelled) {
+            return;
+          }
+
+          const selectedQuote = quoteResponse.recommendedQuote ?? quoteResponse.quotes[0];
+          if (!selectedQuote) {
+            return;
+          }
+
+          setPostageOption({
+            carrierId: selectedQuote.carrierId,
+            label: selectedQuote.label,
+            etaLabel: toEtaLabelFromRange(selectedQuote.etaMinDays, selectedQuote.etaMaxDays),
+            priceFromGbp: selectedQuote.priceFromGbp,
+            liveQuote: selectedQuote.live,
+          });
+        } catch {
+          // Keep fallback carrier pricing when quote API is unavailable.
+        }
       } catch {
         if (!cancelled) {
           setPostageOption(DEFAULT_POSTAGE_OPTION);
@@ -141,7 +238,7 @@ export default function CheckoutScreen() {
     return () => {
       cancelled = true;
     };
-  }, [currentUser?.id]);
+  }, [currentUser?.id, savedAddress?.id, savedAddress?.postcode, item.id, item.price]);
 
   const checkoutStatus = React.useMemo(() => {
     if (isSubmittingPayment) {
@@ -245,11 +342,31 @@ export default function CheckoutScreen() {
         addressId: savedAddress?.id,
         paymentMethodId: savedPaymentMethod?.id,
         platformChargeGbp: PLATFORM_CHARGE,
+        postageFeeGbp: POSTAGE_FEE,
+        shippingCarrierId: postageOption.carrierId ?? undefined,
       });
-      await payOrder(order.id);
 
-      show(t('checkout.toast.paymentCompleted'), 'success');
-      navigation.replace('Success');
+      const intent = await createCommercePaymentIntent({ orderId: order.id });
+
+      if (intent.nextActionUrl) {
+        await Linking.openURL(intent.nextActionUrl);
+        show(t('checkout.toast.paymentActionRequired'), 'info');
+      }
+
+      const settlementStatus = await waitForPaymentIntentSettlement(intent.intentId);
+      if (settlementStatus === 'succeeded') {
+        show(t('checkout.toast.paymentCompleted'), 'success');
+        navigation.replace('Success');
+        return;
+      }
+
+      if (settlementStatus === 'pending') {
+        show(t('checkout.toast.paymentPending'), 'info');
+        navigation.replace('OrderDetail', { orderId: order.id });
+        return;
+      }
+
+      throw new Error('payment-intent-failed');
     } catch {
       show(t('checkout.toast.paymentFailed'), 'error');
     } finally {
@@ -272,16 +389,16 @@ export default function CheckoutScreen() {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         
         {/* Item Summary Card */}
-        <View style={styles.itemCard}>
+        <AppCard style={styles.itemCard}>
           <CachedImage uri={getListingCoverUri(item.images, 'https://picsum.photos/seed/checkout-item-fallback/300/400')} style={styles.itemThumb} contentFit="cover" />
           <View style={styles.itemInfo}>
             <Text style={styles.itemTitle} numberOfLines={1}>{item.title}</Text>
             <Text style={styles.itemSeller}>{t('checkout.header.fromSeller', { seller: seller.username })}</Text>
             <Text style={styles.itemPrice}>{formatFromFiat(item.price, 'GBP')}</Text>
           </View>
-        </View>
+        </AppCard>
 
-        <View style={styles.readinessCard}>
+        <AppCard style={styles.readinessCard}>
           <View style={styles.readinessTopRow}>
             <Text style={styles.readinessTitle}>{t('checkout.readiness.title')}</Text>
             <SyncStatusPill tone={checkoutStatus.tone} label={checkoutStatus.label} compact />
@@ -304,7 +421,7 @@ export default function CheckoutScreen() {
               </Text>
             </View>
           </View>
-        </View>
+        </AppCard>
 
         <Text style={styles.sectionTitle}>{t('checkout.section.delivery')}</Text>
         <AnimatedPressable
@@ -332,7 +449,11 @@ export default function CheckoutScreen() {
             <Ionicons name="cube-outline" size={24} color={Colors.textPrimary} />
             <View style={styles.blockTextCol}>
               <Text style={styles.blockTitle}>{postageOption.label}</Text>
-              <Text style={styles.blockSub}>{postageOption.etaLabel}</Text>
+              <Text style={styles.blockSub}>
+                {postageOption.liveQuote
+                  ? postageOption.etaLabel
+                  : `${postageOption.etaLabel} (${t('checkout.postage.estimated')})`}
+              </Text>
             </View>
           </View>
           <Text style={styles.blockRightPrice}>{formatFromFiat(POSTAGE_FEE, 'GBP')}</Text>
@@ -370,13 +491,20 @@ export default function CheckoutScreen() {
         </AnimatedPressable>
 
         <Text style={styles.sectionTitle}>{t('checkout.section.orderSummary')}</Text>
-        <View style={styles.summaryCard}>
+        <AppCard style={styles.summaryCard}>
           <SummaryRow label={t('checkout.summary.itemPrice')} value={formatFromFiat(item.price, 'GBP')} />
           <SummaryRow label={t('checkout.summary.platformCharge')} value={formatFromFiat(PLATFORM_CHARGE, 'GBP')} info />
-          <SummaryRow label={t('checkout.summary.postage')} value={formatFromFiat(POSTAGE_FEE, 'GBP')} />
+          <SummaryRow
+            label={
+              postageOption.liveQuote
+                ? t('checkout.summary.postage')
+                : `${t('checkout.summary.postage')} (${t('checkout.postage.estimated')})`
+            }
+            value={formatFromFiat(POSTAGE_FEE, 'GBP')}
+          />
           <View style={styles.divider} />
           <SummaryRow label={t('checkout.summary.total')} value={formatFromFiat(TOTAL, 'GBP')} bold />
-        </View>
+        </AppCard>
 
         <Text style={styles.termsText}>
           {t('checkout.terms')}
@@ -398,9 +526,12 @@ export default function CheckoutScreen() {
           <Text style={styles.footerTotalLabel}>{t('checkout.footer.total')}</Text>
           <Text style={styles.footerTotalPrice}>{formatFromFiat(TOTAL, 'GBP')}</Text>
         </View>
-        <AnimatedPressable 
-          style={[styles.payBtn, (!checkoutReady || isSubmittingPayment) && styles.payBtnDisabled]} 
-          activeOpacity={0.9} 
+        <AppButton
+          style={styles.payBtn}
+          variant="primary"
+          size="md"
+          align="center"
+          title={isSubmittingPayment ? t('checkout.cta.processing') : t('checkout.cta.paySecurely')}
           onPress={handlePay}
           disabled={!checkoutReady || isSubmittingPayment}
           accessibilityLabel={isSubmittingPayment
@@ -411,9 +542,7 @@ export default function CheckoutScreen() {
           accessibilityHint={checkoutReady
             ? t('checkout.a11y.hint.doubleTapConfirm')
             : t('checkout.a11y.hint.addAddressPayment')}
-        >
-          <Text style={styles.payBtnText}>{isSubmittingPayment ? t('checkout.cta.processing') : t('checkout.cta.paySecurely')}</Text>
-        </AnimatedPressable>
+        />
       </View>
 
       <AddCardSheet visible={addCardSheetVisible} onDismiss={() => setAddCardSheetVisible(false)} />
@@ -576,8 +705,6 @@ const styles = StyleSheet.create({
   footerPriceCol: { flex: 1 },
   footerTotalLabel: { fontSize: 13, fontFamily: 'Inter_400Regular', color: Colors.textSecondary },
   footerTotalPrice: { fontSize: 24, fontFamily: 'Inter_700Bold', color: Colors.textPrimary },
-  payBtn: { backgroundColor: Colors.accent, height: 56, borderRadius: 28, paddingHorizontal: 48, alignItems: 'center', justifyContent: 'center' },
-  payBtnDisabled: { opacity: 0.45 },
-  payBtnText: { color: Colors.textInverse, fontSize: 16, fontFamily: 'Inter_700Bold' }
+  payBtn: { minWidth: 186, marginLeft: 16 },
 });
 

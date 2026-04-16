@@ -48,6 +48,7 @@ import { SkeletonLoader } from '../components/SkeletonLoader';
 import { ThryftCartIcon } from '../components/icons/ThryftCartIcon';
 import { getBackendSyncStatus } from '../utils/syncStatus';
 import { isVideoUri } from '../utils/media';
+import { AppButton } from '../components/ui/AppButton';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 
@@ -200,6 +201,8 @@ const ExploreGridItem = React.memo(function ExploreGridItem({
         onPress={() => onPress(item.routeId)}
         onLongPress={() => onLongPress(item)}
         accessibilityLabel={`${item.caption}, ${formatPrice(item.price ?? 0, 'GBP', { displayMode: 'fiat' })}`}
+        accessibilityRole="button"
+        accessibilityHint="Opens item details. Long press to preview this listing"
       >
         <MediaPreview
           uri={item.mediaUri}
@@ -442,6 +445,8 @@ export default function HomeScreen() {
           activeOpacity={0.9}
           onPress={() => navigation.navigate('CreatePoster')}
           accessibilityLabel="Create a new poster"
+          accessibilityRole="button"
+          accessibilityHint="Opens poster creator for auction or promotion posts"
         >
           <View style={styles.posterCreateTile}>
             <View style={styles.posterCreateIcon}>
@@ -457,6 +462,9 @@ export default function HomeScreen() {
             style={styles.posterCard}
             activeOpacity={0.9}
             onPress={() => navigation.navigate('PosterViewer', { posterId: poster.id })}
+            accessibilityRole="button"
+            accessibilityLabel={`Open poster from @${poster.uploader?.username ?? 'seller'}`}
+            accessibilityHint="Opens poster details with countdown and listing context"
           >
             <View style={[styles.posterTile, hasSeenPoster(poster.id) ? styles.posterTileSeen : styles.posterTileUnseen]}>
               <CachedImage
@@ -520,18 +528,23 @@ export default function HomeScreen() {
 
     return (
       <View style={styles.newListingsBannerWrap}>
-        <AnimatedPressable
+        <AppButton
+          title={`${newListingIds.size} new ${newListingIds.size === 1 ? 'drop' : 'drops'} ready`}
+          variant="primary"
+          size="sm"
+          align="center"
           style={styles.newListingsBanner}
-          activeOpacity={0.9}
-          onPress={acknowledgeNewListings}
+          contentStyle={styles.newListingsBannerContent}
+          titleStyle={styles.newListingsBannerText}
+          icon={<Ionicons name="sparkles-outline" size={13} color={Colors.textInverse} />}
+          trailingIcon={<Ionicons name="arrow-up" size={13} color={Colors.textInverse} />}
+          iconContainerStyle={styles.newListingsBannerIconWrap}
+          trailingIconContainerStyle={styles.newListingsBannerIconWrap}
           hapticFeedback="selection"
-        >
-          <Ionicons name="sparkles-outline" size={13} color={Colors.textInverse} />
-          <Text style={styles.newListingsBannerText}>
-            {newListingIds.size} new {newListingIds.size === 1 ? 'drop' : 'drops'} ready
-          </Text>
-          <Ionicons name="arrow-up" size={13} color={Colors.textInverse} />
-        </AnimatedPressable>
+          onPress={acknowledgeNewListings}
+          accessibilityLabel="Jump to new listings"
+          accessibilityHint="Scrolls feed focus to newly added listings"
+        />
       </View>
     );
   };
@@ -587,10 +600,22 @@ export default function HomeScreen() {
           </Reanimated.View>
 
           <View style={styles.headerRight}>
-            <AnimatedPressable style={styles.headerBtn} onPress={() => navigation.navigate('GlobalSearch')} accessibilityLabel="Search listings">
+            <AnimatedPressable
+              style={styles.headerBtn}
+              onPress={() => navigation.navigate('GlobalSearch')}
+              accessibilityLabel="Search listings"
+              accessibilityRole="button"
+              accessibilityHint="Opens global search"
+            >
               <Ionicons name="search" size={22} color={Colors.textPrimary} />
             </AnimatedPressable>
-            <AnimatedPressable style={styles.headerBtn} onPress={() => navigation.navigate('NotificationsList')} accessibilityLabel={notificationCount > 0 ? `Notifications, ${notificationCount} unread` : 'Notifications'}>
+            <AnimatedPressable
+              style={styles.headerBtn}
+              onPress={() => navigation.navigate('NotificationsList')}
+              accessibilityLabel={notificationCount > 0 ? `Notifications, ${notificationCount} unread` : 'Notifications'}
+              accessibilityRole="button"
+              accessibilityHint="Opens notifications center"
+            >
               <Ionicons name="notifications-outline" size={22} color={Colors.textPrimary} />
               <AnimatedBadge count={notificationCount} size={16} />
             </AnimatedPressable>
@@ -661,23 +686,36 @@ export default function HomeScreen() {
                 <Text style={styles.peekTitle} numberOfLines={1}>{peekItem.caption}</Text>
 
                 <View style={styles.peekActionsRow}>
-                  <AnimatedPressable style={styles.peekGhostBtn} onPress={closePeek} activeOpacity={0.9}>
-                    <Text style={styles.peekGhostText}>Close</Text>
-                  </AnimatedPressable>
+                  <AppButton
+                    title="Close"
+                    variant="secondary"
+                    size="sm"
+                    align="center"
+                    style={styles.peekGhostBtn}
+                    titleStyle={styles.peekGhostText}
+                    onPress={closePeek}
+                    accessibilityLabel="Close preview"
+                    accessibilityHint="Closes the quick listing preview"
+                  />
 
-                  <AnimatedPressable
+                  <AppButton
+                    title="View Listing"
+                    variant="primary"
+                    size="sm"
+                    align="center"
                     style={styles.peekPrimaryBtn}
-                    activeOpacity={0.9}
+                    titleStyle={styles.peekPrimaryText}
+                    icon={<Ionicons name="arrow-forward" size={14} color={Colors.textInverse} />}
+                    iconContainerStyle={styles.peekPrimaryIconWrap}
                     onPress={() => {
                       if (peekItem.routeId) {
                         navigation.navigate('ItemDetail', { itemId: peekItem.routeId });
                       }
                       closePeek();
                     }}
-                  >
-                    <Text style={styles.peekPrimaryText}>View Listing</Text>
-                    <Ionicons name="arrow-forward" size={14} color={Colors.textInverse} />
-                  </AnimatedPressable>
+                    accessibilityLabel="Open listing details"
+                    accessibilityHint="Navigates to full listing details"
+                  />
                 </View>
               </View>
             </Pressable>
@@ -752,9 +790,7 @@ const styles = StyleSheet.create({
   },
   newListingsBanner: {
     alignSelf: 'center',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
+    minHeight: 40,
     paddingHorizontal: 14,
     paddingVertical: 9,
     borderRadius: 999,
@@ -765,6 +801,15 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.22,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 6 },
+  },
+  newListingsBannerContent: {
+    gap: 7,
+  },
+  newListingsBannerIconWrap: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: 'transparent',
   },
   newListingsBannerText: {
     fontSize: 12,
@@ -1264,11 +1309,7 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 44,
     borderRadius: 22,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: Colors.surface,
+    backgroundColor: 'transparent',
   },
   peekGhostText: {
     fontSize: 13,
@@ -1279,11 +1320,13 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 44,
     borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 6,
-    backgroundColor: Colors.accent,
+    backgroundColor: 'transparent',
+  },
+  peekPrimaryIconWrap: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: 'transparent',
   },
   peekPrimaryText: {
     fontSize: 13,

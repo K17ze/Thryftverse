@@ -66,6 +66,7 @@ Then restore previous known-good image tags and redeploy.
 
 Before public traffic, confirm:
 - Typecheck and test gates are green.
+- Phase 8 launch runbook passes (`npm run launch:phase8`).
 - Payment provider keys are live and webhook secrets match deployed endpoints.
 - Sentry DSN points to self-hosted production project.
 - KYC vendor is production (non-sandbox).

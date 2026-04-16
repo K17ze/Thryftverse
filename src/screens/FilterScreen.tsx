@@ -1,7 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import {
-  AnimatedPressable } from '../components/AnimatedPressable';
-import {
   View,
   Text,
   StyleSheet,
@@ -32,6 +30,8 @@ import { SyncStatusPill } from '../components/SyncStatusPill';
 import { SkeletonLoader } from '../components/SkeletonLoader';
 import { SyncRetryBanner } from '../components/SyncRetryBanner';
 import { getBackendSyncStatus } from '../utils/syncStatus';
+import { AppButton } from '../components/ui/AppButton';
+import { AppSegmentControl } from '../components/ui/AppSegmentControl';
 
 const { height, width } = Dimensions.get('window');
 const SNAP_HALF = height * 0.5;
@@ -51,6 +51,21 @@ const APPLY_DISABLED_BG = IS_LIGHT ? Colors.borderLight : '#333';
 type SortOption = 'Recommended' | 'Newest' | 'Price: Low to High' | 'Price: High to Low';
 type ConditionOption = 'Any' | 'New with tags' | 'Very good' | 'Good' | 'Satisfactory';
 type FilterRoute = RouteProp<RootStackParamList, 'Filter'>;
+
+const SORT_OPTIONS: Array<{ value: SortOption; label: string; accessibilityLabel: string }> = [
+  { value: 'Recommended', label: 'Recommended', accessibilityLabel: 'Sort by recommended' },
+  { value: 'Newest', label: 'Newest', accessibilityLabel: 'Sort by newest items' },
+  { value: 'Price: Low to High', label: 'Price: Low to High', accessibilityLabel: 'Sort by price low to high' },
+  { value: 'Price: High to Low', label: 'Price: High to Low', accessibilityLabel: 'Sort by price high to low' },
+];
+
+const CONDITION_OPTIONS: Array<{ value: ConditionOption; label: string; accessibilityLabel: string }> = [
+  { value: 'Any', label: 'Any', accessibilityLabel: 'Filter any condition' },
+  { value: 'New with tags', label: 'New with tags', accessibilityLabel: 'Filter new with tags' },
+  { value: 'Very good', label: 'Very good', accessibilityLabel: 'Filter very good condition' },
+  { value: 'Good', label: 'Good', accessibilityLabel: 'Filter good condition' },
+  { value: 'Satisfactory', label: 'Satisfactory', accessibilityLabel: 'Filter satisfactory condition' },
+];
 
 const toKey = (value: string) => value.trim().toLowerCase();
 
@@ -142,7 +157,6 @@ export default function FilterScreen() {
 
   const MOCK_BRANDS = ['Nike', 'Adidas', 'Stussy', 'Carhartt', 'Arc\'teryx', 'Levi\'s', 'Off-White', 'Zara'];
   const MOCK_SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
-  const MOCK_CONDITIONS: ConditionOption[] = ['Any', 'New with tags', 'Very good', 'Good', 'Satisfactory'];
 
   const brandOptions = React.useMemo(() => {
     const derived = Array.from(
@@ -306,9 +320,15 @@ export default function FilterScreen() {
 
           <View style={styles.header}>
             <Text style={styles.headerTitle}>Filter & Sort</Text>
-            <AnimatedPressable hitSlop={15} onPress={handleClear} activeOpacity={0.8}>
-              <Text style={styles.clearText}>Clear</Text>
-            </AnimatedPressable>
+            <AppButton
+              title="Clear"
+              onPress={handleClear}
+              variant="secondary"
+              size="sm"
+              style={styles.clearBtn}
+              titleStyle={styles.clearText}
+              accessibilityLabel="Clear selected filters"
+            />
           </View>
 
           <View style={styles.statusRow}>
@@ -335,16 +355,15 @@ export default function FilterScreen() {
                 {/* Sort Section */}
                 <Text style={styles.sectionHeading}>Sort By</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.hScroll}>
-                  {(['Recommended', 'Newest', 'Price: Low to High', 'Price: High to Low'] as SortOption[]).map((s) => (
-                    <AnimatedPressable 
-                      key={s} 
-                      style={[styles.chip, activeSort === s && styles.chipActive]}
-                      activeOpacity={0.8}
-                      onPress={() => setActiveSort(s)}
-                    >
-                      <Text style={[styles.chipText, activeSort === s && styles.chipTextActive]}>{s}</Text>
-                    </AnimatedPressable>
-                  ))}
+                  <AppSegmentControl
+                    options={SORT_OPTIONS}
+                    value={activeSort}
+                    onChange={setActiveSort}
+                    optionStyle={styles.chip}
+                    optionActiveStyle={styles.chipActive}
+                    optionTextStyle={styles.chipText}
+                    optionTextActiveStyle={styles.chipTextActive}
+                  />
                 </ScrollView>
 
                 <View style={styles.sectionDivider} />
@@ -353,23 +372,31 @@ export default function FilterScreen() {
                 <View style={styles.sectionHeaderRow}>
                   <Text style={styles.sectionHeading}>Brand</Text>
                   {brandOptions.length > 8 ? (
-                    <AnimatedPressable activeOpacity={0.7} onPress={() => setShowAllBrands((current) => !current)}>
-                      <Text style={styles.seeAllText}>{showAllBrands ? 'Show less' : 'See all'}</Text>
-                    </AnimatedPressable>
+                    <AppButton
+                      title={showAllBrands ? 'Show less' : 'See all'}
+                      onPress={() => setShowAllBrands((current) => !current)}
+                      variant="secondary"
+                      size="sm"
+                      style={styles.seeAllBtn}
+                      titleStyle={styles.seeAllText}
+                      accessibilityLabel={showAllBrands ? 'Show fewer brand options' : 'Show all brand options'}
+                    />
                   ) : null}
                 </View>
                 <View style={styles.wrapContainer}>
                   {visibleBrandOptions.map(b => {
                     const isActive = selectedBrands.includes(b);
                     return (
-                      <AnimatedPressable
+                      <AppButton
                         key={b}
+                        title={b}
+                        variant="secondary"
+                        size="sm"
                         style={[styles.chip, isActive && styles.chipActive]}
-                        activeOpacity={0.8}
+                        titleStyle={[styles.chipText, isActive && styles.chipTextActive]}
                         onPress={() => toggleBrand(b)}
-                      >
-                        <Text style={[styles.chipText, isActive && styles.chipTextActive]}>{b}</Text>
-                      </AnimatedPressable>
+                        accessibilityLabel={`Toggle brand filter ${b}`}
+                      />
                     );
                   })}
                 </View>
@@ -382,14 +409,16 @@ export default function FilterScreen() {
                   {sizeOptions.map(s => {
                     const isActive = selectedSizes.includes(s);
                     return (
-                      <AnimatedPressable
+                      <AppButton
                         key={s}
+                        title={s}
+                        variant="secondary"
+                        size="sm"
                         style={[styles.chip, styles.sizeChip, isActive && styles.chipActive]}
-                        activeOpacity={0.8}
+                        titleStyle={[styles.chipText, isActive && styles.chipTextActive]}
                         onPress={() => toggleSize(s)}
-                      >
-                        <Text style={[styles.chipText, isActive && styles.chipTextActive]}>{s}</Text>
-                      </AnimatedPressable>
+                        accessibilityLabel={`Toggle size filter ${s}`}
+                      />
                     );
                   })}
                 </View>
@@ -399,25 +428,32 @@ export default function FilterScreen() {
                 {/* Condition Section */}
                 <Text style={styles.sectionHeading}>Condition</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.hScroll}>
-                  {MOCK_CONDITIONS.map(c => (
-                    <AnimatedPressable 
-                      key={c} 
-                      style={[styles.chip, selectedCondition === c && styles.chipActive]}
-                      activeOpacity={0.8}
-                      onPress={() => setSelectedCondition(c)}
-                    >
-                      <Text style={[styles.chipText, selectedCondition === c && styles.chipTextActive]}>{c}</Text>
-                    </AnimatedPressable>
-                  ))}
+                  <AppSegmentControl
+                    options={CONDITION_OPTIONS}
+                    value={selectedCondition}
+                    onChange={setSelectedCondition}
+                    optionStyle={styles.chip}
+                    optionActiveStyle={styles.chipActive}
+                    optionTextStyle={styles.chipText}
+                    optionTextActiveStyle={styles.chipTextActive}
+                  />
                 </ScrollView>
               </>
             )}
 
             {/* Sticky Bottom Action */}
             <View style={styles.footer}>
-              <AnimatedPressable style={[styles.applyBtn, showFilterLoadingState && styles.applyBtnDisabled]} onPress={handleApply} activeOpacity={0.9} disabled={showFilterLoadingState}>
-                <Text style={[styles.applyBtnText, showFilterLoadingState && styles.applyBtnTextDisabled]}>{applyLabel}</Text>
-              </AnimatedPressable>
+              <AppButton
+                style={[styles.applyBtn, showFilterLoadingState && styles.applyBtnDisabled]}
+                title={applyLabel}
+                titleStyle={[styles.applyBtnText, showFilterLoadingState && styles.applyBtnTextDisabled]}
+                onPress={handleApply}
+                disabled={showFilterLoadingState}
+                variant="contrast"
+                size="lg"
+                align="center"
+                accessibilityLabel={applyLabel}
+              />
             </View>
           </ScrollView>
         </Reanimated.View>
@@ -461,6 +497,13 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
   },
   headerTitle: { fontSize: Typography.size.heading, fontFamily: Typography.family.bold, color: Colors.textPrimary, letterSpacing: Typography.tracking.tight },
+  clearBtn: {
+    minHeight: 34,
+    borderRadius: 17,
+    paddingHorizontal: 8,
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+  },
   clearText: { color: Colors.accent, fontSize: Typography.size.body, fontFamily: Typography.family.semibold },
   statusRow: {
     paddingHorizontal: 24,
@@ -517,6 +560,13 @@ const styles = StyleSheet.create({
     paddingRight: 20,
     marginBottom: 16,
   },
+  seeAllBtn: {
+    minHeight: 32,
+    borderRadius: 16,
+    paddingHorizontal: 8,
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+  },
   seeAllText: { color: Colors.accent, fontSize: Typography.size.body, fontFamily: Typography.family.semibold },
 
   hScroll: { paddingHorizontal: 20, gap: 10 },
@@ -529,9 +579,9 @@ const styles = StyleSheet.create({
   },
 
   chip: {
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 24,
+    minHeight: 42,
+    paddingHorizontal: 16,
+    borderRadius: 21,
     backgroundColor: CHIP_BG,
     borderWidth: 1,
     borderColor: CHIP_BORDER,
@@ -560,17 +610,15 @@ const styles = StyleSheet.create({
     borderTopColor: DIVIDER_COLOR,
   },
   applyBtn: {
-    backgroundColor: Colors.textPrimary,
-    height: 60,
+    width: '100%',
+    minHeight: 60,
     borderRadius: 30,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   applyBtnDisabled: {
-    backgroundColor: APPLY_DISABLED_BG,
+    opacity: 0.6,
   },
   applyBtnText: {
-    color: Colors.background,
+    color: Colors.textInverse,
     fontSize: Typography.size.bodyLarge,
     fontFamily: Typography.family.bold,
     letterSpacing: Typography.tracking.wide,

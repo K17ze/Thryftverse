@@ -40,7 +40,13 @@ export default function CategoryDetailScreen() {
       
       {/* Heavy Typography Header */}
       <View style={styles.header}>
-        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <AnimatedPressable
+          style={styles.backBtn}
+          onPress={() => navigation.goBack()}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+          accessibilityHint="Returns to the previous screen"
+        >
           <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
         </AnimatedPressable>
         <Text style={styles.hugeTitle}>{category.name}</Text>
@@ -53,6 +59,9 @@ export default function CategoryDetailScreen() {
             <AnimatedPressable 
               key={idx} style={styles.chip}
               onPress={() => navigation.navigate('Browse', { categoryId: category.id, subcategoryId: sub.id, title: sub.name })}
+              accessibilityRole="button"
+              accessibilityLabel={`Open ${sub.name} subcategory`}
+              accessibilityHint="Shows listings for this subcategory"
             >
               <Text style={styles.chipText}>{sub.name}</Text>
             </AnimatedPressable>
@@ -67,6 +76,9 @@ export default function CategoryDetailScreen() {
               style={styles.gridItem} 
               activeOpacity={0.9}
               onPress={() => navigation.navigate('ItemDetail', { itemId: item.id })}
+              accessibilityRole="button"
+              accessibilityLabel={`Open ${item.title}`}
+              accessibilityHint={`View listing details priced at ${formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}`}
             >
               <CachedImage uri={getListingCoverUri(item.images, 'https://picsum.photos/seed/category-grid-fallback/400/500')} style={styles.gridImage} contentFit="cover" />
               <View style={styles.pricePill}>

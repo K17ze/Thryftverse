@@ -1,6 +1,7 @@
 ﻿import React, { useEffect, useMemo, useState } from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
+import { AppButton } from '../components/ui/AppButton';
 import {
   View,
   Text,
@@ -162,7 +163,12 @@ export default function AddCardScreen({ navigation }: Props) {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={BG} />
       <View style={styles.header}>
-        <AnimatedPressable onPress={() => navigation.goBack()}>
+        <AnimatedPressable
+          onPress={() => navigation.goBack()}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+          accessibilityHint="Returns to the previous screen"
+        >
           <Ionicons name="arrow-back" size={24} color={TEXT} />
         </AnimatedPressable>
         <Text style={styles.headerTitle}>Add card</Text>
@@ -211,6 +217,8 @@ export default function AddCardScreen({ navigation }: Props) {
                 keyboardType="number-pad"
                 selectionColor={BRAND}
                 maxLength={19}
+                accessibilityLabel="Card number"
+                accessibilityHint="Enter the 16-digit card number"
               />
             </View>
             <View style={styles.divider} />
@@ -226,6 +234,8 @@ export default function AddCardScreen({ navigation }: Props) {
                   keyboardType="number-pad"
                   selectionColor={BRAND}
                   maxLength={5}
+                  accessibilityLabel="Expiry date"
+                  accessibilityHint="Enter expiry in month and year format"
                 />
               </View>
               <View style={styles.halfDivider} />
@@ -241,6 +251,8 @@ export default function AddCardScreen({ navigation }: Props) {
                   selectionColor={BRAND}
                   secureTextEntry
                   maxLength={4}
+                  accessibilityLabel="Card security code"
+                  accessibilityHint="Enter the CVV security code"
                 />
               </View>
             </View>
@@ -255,6 +267,8 @@ export default function AddCardScreen({ navigation }: Props) {
                 placeholderTextColor={MUTED}
                 autoCapitalize="words"
                 selectionColor={BRAND}
+                accessibilityLabel="Name on card"
+                accessibilityHint="Enter the cardholder name exactly as printed on the card"
               />
             </View>
           </View>
@@ -266,13 +280,14 @@ export default function AddCardScreen({ navigation }: Props) {
         </ScrollView>
 
         <View style={styles.footer}>
-          <AnimatedPressable
-            style={[styles.saveBtn, (!isComplete || isSaving || !cardAllowed) && { opacity: 0.4 }]}
-            disabled={!isComplete || isSaving || !cardAllowed}
+          <AppButton
+            title={isSaving ? 'Saving...' : 'Save card'}
             onPress={handleSaveCard}
-          >
-            <Text style={styles.saveBtnText}>{isSaving ? 'Saving...' : 'Save card'}</Text>
-          </AnimatedPressable>
+            disabled={!isComplete || isSaving || !cardAllowed}
+            style={styles.saveBtn}
+            accessibilityLabel={isSaving ? 'Saving card' : 'Save card'}
+            accessibilityHint="Saves this card as a payment method"
+          />
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -325,7 +340,6 @@ const styles = StyleSheet.create({
   secureRow: { flexDirection: 'row', alignItems: 'center', gap: 6, justifyContent: 'center' },
   secureText: { fontSize: 12, color: MUTED },
   footer: { padding: 20, borderTopWidth: 1, borderTopColor: BORDER },
-  saveBtn: { backgroundColor: Colors.accent, borderRadius: 30, paddingVertical: 16, alignItems: 'center' },
-  saveBtnText: { fontSize: 16, fontWeight: '700', color: Colors.textInverse },
+  saveBtn: { borderRadius: 30 },
 });
 

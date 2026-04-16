@@ -3,6 +3,15 @@ import test from 'node:test';
 
 import { resolveCountryCapabilities } from '../lib/countryCapabilities.js';
 
+process.env.NODE_ENV ??= 'test';
+process.env.STRIPE_SECRET_KEY ??= 'test-stripe-secret';
+process.env.RAZORPAY_KEY_ID ??= 'test-razorpay-key-id';
+process.env.RAZORPAY_KEY_SECRET ??= 'test-razorpay-key-secret';
+process.env.MOLLIE_API_KEY ??= 'test-mollie-api-key';
+process.env.FLUTTERWAVE_SECRET_KEY ??= 'test-flutterwave-secret-key';
+process.env.TAP_SECRET_KEY ??= 'test-tap-secret-key';
+process.env.WISE_API_KEY ??= 'test-wise-api-key';
+
 test('resolveCountryCapabilities maps target countries to expected clusters and defaults', () => {
   const testCases = [
     {
@@ -74,6 +83,8 @@ test('resolveCountryCapabilities falls back to GLOBAL template for non-target co
 
   assert.equal(capabilities.countryCluster, 'GLOBAL');
   assert.equal(capabilities.currency.defaultCurrency, 'USD');
+  assert.deepEqual(capabilities.postage.carriers, []);
+  assert.deepEqual(capabilities.payments.gatewaysByChannel.commerce, ['stripe_americas']);
   assert.deepEqual(capabilities.payouts.gatewayPriority, ['stripe_americas', 'mollie_eu', 'wise_global']);
 });
 

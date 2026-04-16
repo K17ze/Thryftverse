@@ -28,6 +28,8 @@ import { getCreateCoOwnInitialState } from '../utils/syndicatePrefill';
 import { useBackendData } from '../context/BackendDataContext';
 import { CachedImage } from '../components/CachedImage';
 import { getListingCoverUri } from '../utils/media';
+import { AppButton } from '../components/ui/AppButton';
+import { AppSegmentControl } from '../components/ui/AppSegmentControl';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 type RouteT = RouteProp<RootStackParamList, 'CreateCoOwn'>;
@@ -45,6 +47,11 @@ const SETTLEMENT_MODES: Array<{ key: 'GBP' | 'TVUSD' | 'HYBRID' }> = [
   { key: 'GBP' },
   { key: 'TVUSD' },
   { key: 'HYBRID' },
+];
+
+const TOGGLE_OPTIONS: Array<{ value: 'off' | 'on'; label: string; accessibilityLabel: string }> = [
+  { value: 'off', label: 'OFF', accessibilityLabel: 'Set off' },
+  { value: 'on', label: 'ON', accessibilityLabel: 'Set on' },
 ];
 
 export default function CreateCoOwnScreen() {
@@ -237,12 +244,15 @@ export default function CreateCoOwnScreen() {
           <Text style={styles.headerTitle}>Create Co-Own</Text>
         </View>
 
-        <AnimatedPressable style={styles.issueBtn} onPress={issueCoOwn} activeOpacity={0.9}
+        <AppButton
+          title="Issue"
+          style={styles.issueBtn}
+          titleStyle={styles.issueBtnText}
+          variant="gold"
+          size="sm"
+          onPress={issueCoOwn}
           accessibilityLabel="Issue co-own asset"
-          accessibilityRole="button"
-        >
-          <Text style={styles.issueBtnText}>Issue</Text>
-        </AnimatedPressable>
+        />
       </View>
 
       <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer} showsVerticalScrollIndicator={false}>
@@ -276,61 +286,64 @@ export default function CreateCoOwnScreen() {
             {COUNTRY_OPTIONS.map((countryCode) => {
               const active = coOwnCompliance.countryCode === countryCode;
               return (
-                <AnimatedPressable
+                <AppButton
                   key={countryCode}
+                  title={countryCode}
                   style={[styles.chipBtn, active && styles.chipBtnActive]}
+                  titleStyle={[styles.chipBtnText, active && styles.chipBtnTextActive]}
+                  variant="secondary"
+                  size="sm"
                   onPress={() => updateCoOwnCompliance({ countryCode })}
-                  activeOpacity={0.9}
-                >
-                  <Text style={[styles.chipBtnText, active && styles.chipBtnTextActive]}>{countryCode}</Text>
-                </AnimatedPressable>
+                  accessibilityLabel={`Set compliance country to ${countryCode}`}
+                />
               );
             })}
           </View>
 
           <View style={styles.toggleRow}>
             <Text style={styles.toggleLabel}>KYC verified</Text>
-            <AnimatedPressable
-              style={[styles.toggleBtn, coOwnCompliance.kycVerified && styles.toggleBtnActive]}
-              onPress={() => updateCoOwnCompliance({ kycVerified: !coOwnCompliance.kycVerified })}
-              activeOpacity={0.9}
-            >
-              <Text style={[styles.toggleText, coOwnCompliance.kycVerified && styles.toggleTextActive]}>
-                {coOwnCompliance.kycVerified ? 'ON' : 'OFF'}
-              </Text>
-            </AnimatedPressable>
+            <AppSegmentControl
+              style={styles.toggleControl}
+              options={TOGGLE_OPTIONS}
+              value={coOwnCompliance.kycVerified ? 'on' : 'off'}
+              onChange={(next) => updateCoOwnCompliance({ kycVerified: next === 'on' })}
+              optionStyle={styles.toggleBtn}
+              optionActiveStyle={styles.toggleBtnActive}
+              optionTextStyle={styles.toggleText}
+              optionTextActiveStyle={styles.toggleTextActive}
+            />
           </View>
 
           <View style={styles.toggleRow}>
             <Text style={styles.toggleLabel}>Risk disclosure accepted</Text>
-            <AnimatedPressable
-              style={[styles.toggleBtn, coOwnCompliance.riskDisclosureAccepted && styles.toggleBtnActive]}
-              onPress={() =>
-                updateCoOwnCompliance({ riskDisclosureAccepted: !coOwnCompliance.riskDisclosureAccepted })
-              }
-              activeOpacity={0.9}
-            >
-              <Text style={[styles.toggleText, coOwnCompliance.riskDisclosureAccepted && styles.toggleTextActive]}>
-                {coOwnCompliance.riskDisclosureAccepted ? 'ON' : 'OFF'}
-              </Text>
-            </AnimatedPressable>
+            <AppSegmentControl
+              style={styles.toggleControl}
+              options={TOGGLE_OPTIONS}
+              value={coOwnCompliance.riskDisclosureAccepted ? 'on' : 'off'}
+              onChange={(next) => updateCoOwnCompliance({ riskDisclosureAccepted: next === 'on' })}
+              optionStyle={styles.toggleBtn}
+              optionActiveStyle={styles.toggleBtnActive}
+              optionTextStyle={styles.toggleText}
+              optionTextActiveStyle={styles.toggleTextActive}
+            />
           </View>
 
           <View style={styles.toggleRow}>
             <Text style={styles.toggleLabel}>{STABLE_COIN} wallet connected</Text>
-            <AnimatedPressable
-              style={[styles.toggleBtn, coOwnCompliance.stableCoinWalletConnected && styles.toggleBtnActive]}
-              onPress={() =>
+            <AppSegmentControl
+              style={styles.toggleControl}
+              options={TOGGLE_OPTIONS}
+              value={coOwnCompliance.stableCoinWalletConnected ? 'on' : 'off'}
+              onChange={(next) =>
                 updateCoOwnCompliance({
-                  stableCoinWalletConnected: !coOwnCompliance.stableCoinWalletConnected,
+                  stableCoinWalletConnected: next === 'on',
                 })
               }
-              activeOpacity={0.9}
-            >
-              <Text style={[styles.toggleText, coOwnCompliance.stableCoinWalletConnected && styles.toggleTextActive]}>
-                {coOwnCompliance.stableCoinWalletConnected ? 'ON' : 'OFF'}
-              </Text>
-            </AnimatedPressable>
+              optionStyle={styles.toggleBtn}
+              optionActiveStyle={styles.toggleBtnActive}
+              optionTextStyle={styles.toggleText}
+              optionTextActiveStyle={styles.toggleTextActive}
+            />
           </View>
         </View>
 
@@ -348,14 +361,16 @@ export default function CreateCoOwnScreen() {
                     ? `${STABLE_COIN} only`
                     : `Hybrid (${currencyCode} + ${STABLE_COIN})`;
               return (
-                <AnimatedPressable
+                <AppButton
                   key={mode.key}
+                  title={modeLabel}
                   style={[styles.chipBtn, active && styles.chipBtnActive]}
+                  titleStyle={[styles.chipBtnText, active && styles.chipBtnTextActive]}
+                  variant="secondary"
+                  size="sm"
                   onPress={() => setSettlementMode(mode.key)}
-                  activeOpacity={0.9}
-                >
-                  <Text style={[styles.chipBtnText, active && styles.chipBtnTextActive]}>{modeLabel}</Text>
-                </AnimatedPressable>
+                  accessibilityLabel={`Set settlement mode to ${modeLabel}`}
+                />
               );
             })}
           </View>
@@ -456,8 +471,9 @@ const styles = StyleSheet.create({
   issueBtn: {
     backgroundColor: Colors.accentGold,
     borderRadius: 16,
+    minHeight: 36,
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    borderWidth: 0,
   },
   issueBtnText: {
     color: Colors.textInverse,
@@ -554,8 +570,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: PANEL_BORDER,
     backgroundColor: PANEL_SOFT_BG,
+    minHeight: 32,
     paddingHorizontal: 10,
-    paddingVertical: 6,
   },
   chipBtnActive: {
     borderColor: BRAND,
@@ -591,8 +607,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: PANEL_BORDER,
     backgroundColor: PANEL_BG,
+    minHeight: 28,
     paddingHorizontal: 10,
-    paddingVertical: 4,
+  },
+  toggleControl: {
+    minWidth: 118,
   },
   toggleBtnActive: {
     borderColor: BRAND,

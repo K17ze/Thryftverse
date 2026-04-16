@@ -27,14 +27,34 @@ import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useBackendData } from '../context/BackendDataContext';
 import { CachedImage } from '../components/CachedImage';
 import { getListingCoverUri } from '../utils/media';
+import { AppButton } from '../components/ui/AppButton';
+import { AppSegmentControl, AppSegmentOption } from '../components/ui/AppSegmentControl';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 type ListingSource = 'mine' | 'marketplace';
 type StoryPosition = 'top' | 'center' | 'bottom';
 
-const EXPIRY_OPTIONS = [6, 12, 24, 48];
-const STORY_COLORS = ['#ffffff', '#d7b98f', '#ff8fab', '#8dd3ff'];
+const EXPIRY_OPTIONS = [6, 12, 24, 48] as const;
 const STORY_POSITIONS: StoryPosition[] = ['top', 'center', 'bottom'];
+type ExpiryOption = `${typeof EXPIRY_OPTIONS[number]}h`;
+
+const LISTING_SOURCE_OPTIONS: AppSegmentOption<ListingSource>[] = [
+  { value: 'mine', label: 'Mine', accessibilityLabel: 'Show my listings' },
+  { value: 'marketplace', label: 'Marketplace', accessibilityLabel: 'Show marketplace listings' },
+];
+
+const STORY_POSITION_OPTIONS: AppSegmentOption<StoryPosition>[] = STORY_POSITIONS.map((position) => ({
+  value: position,
+  label: position.toUpperCase(),
+  accessibilityLabel: `Set story text position to ${position}`,
+}));
+
+const EXPIRY_SEGMENT_OPTIONS: AppSegmentOption<ExpiryOption>[] = EXPIRY_OPTIONS.map((hours) => ({
+  value: `${hours}h` as ExpiryOption,
+  label: `${hours}h`,
+  accessibilityLabel: `Set poster expiry to ${hours} hours`,
+}));
+
 const IS_LIGHT = ActiveTheme === 'light';
 const TRADE_ACCENT = Colors.accentGold;
 const HEADER_BORDER = Colors.border;
@@ -45,8 +65,6 @@ const CHIP_BG = Colors.card;
 const CHIP_BORDER = Colors.border;
 const CHIP_ACTIVE_BG = IS_LIGHT ? '#ede4d3' : '#2f291f';
 const CHIP_ACTIVE_TEXT = TRADE_ACCENT;
-const COLOR_CHIP_BORDER = Colors.borderLight;
-const COLOR_CHIP_ACTIVE_BORDER = Colors.textEmphasis;
 const IMAGE_BTN_DISABLED_BG = IS_LIGHT ? Colors.cardAlt : '#101010';
 const IMAGE_BTN_DISABLED_BORDER = IS_LIGHT ? Colors.border : '#252525';
 
@@ -84,8 +102,16 @@ export default function CreatePosterScreen() {
   const [posterImageUri, setPosterImageUri] = React.useState<string | null>(null);
   const [isPickingImage, setIsPickingImage] = React.useState(false);
   const [storyText, setStoryText] = React.useState('');
-  const [storyColor, setStoryColor] = React.useState('#ffffff');
   const [storyPosition, setStoryPosition] = React.useState<StoryPosition>('bottom');
+
+  const expiryOptionValue = `${expiryHours}h` as ExpiryOption;
+
+  const handleExpiryOptionChange = (next: ExpiryOption) => {
+    const parsed = Number(next.replace('h', ''));
+    if (Number.isFinite(parsed)) {
+      setExpiryHours(parsed);
+    }
+  };
 
   React.useEffect(() => {
     if (!listingOptions.length) {
@@ -203,7 +229,7 @@ export default function CreatePosterScreen() {
       storyOverlay: trimmedStoryText
         ? {
             text: trimmedStoryText,
-            color: storyColor,
+            color: '#ffffff',
             position: storyPosition,
           }
         : undefined,
@@ -255,9 +281,16 @@ export default function CreatePosterScreen() {
           <Text style={styles.headerTitle}>Create Poster</Text>
         </View>
 
-        <AnimatedPressable style={styles.publishBtn} activeOpacity={0.9} onPress={handlePublish}>
-          <Text style={styles.publishBtnText}>Publish</Text>
-        </AnimatedPressable>
+        <AppButton
+          title="Publish"
+          variant="primary"
+          size="sm"
+          align="center"
+          style={styles.publishBtn}
+          titleStyle={styles.publishBtnText}
+          onPress={handlePublish}
+          accessibilityLabel="Publish poster"
+        />
       </View>
 
       <ScrollView
@@ -281,7 +314,7 @@ export default function CreatePosterScreen() {
           </View>
           {storyText.trim().length > 0 ? (
             <View style={[styles.storyOverlayWrap, storyOverlayPositionStyle]}>
-              <Text style={[styles.storyOverlayText, { color: storyColor }]} numberOfLines={2}>
+              <Text style={styles.storyOverlayText} numberOfLines={2}>
                 {storyText.trim()}
               </Text>
             </View>
@@ -295,22 +328,17 @@ export default function CreatePosterScreen() {
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Listing Source</Text>
-          <View style={styles.sourceRow}>
-            <AnimatedPressable
-              style={[styles.sourceChip, listingSource === 'mine' && styles.sourceChipActive]}
-              onPress={() => setListingSource('mine')}
-              activeOpacity={0.9}
-            >
-              <Text style={[styles.sourceChipText, listingSource === 'mine' && styles.sourceChipTextActive]}>Mine</Text>
-            </AnimatedPressable>
-            <AnimatedPressable
-              style={[styles.sourceChip, listingSource === 'marketplace' && styles.sourceChipActive]}
-              onPress={() => setListingSource('marketplace')}
-              activeOpacity={0.9}
-            >
-              <Text style={[styles.sourceChipText, listingSource === 'marketplace' && styles.sourceChipTextActive]}>Marketplace</Text>
-            </AnimatedPressable>
-          </View>
+          <AppSegmentControl
+            options={LISTING_SOURCE_OPTIONS}
+            value={listingSource}
+            onChange={setListingSource}
+            style={styles.sourceRow}
+            fullWidth
+            optionStyle={styles.sourceChip}
+            optionActiveStyle={styles.sourceChipActive}
+            optionTextStyle={styles.sourceChipText}
+            optionTextActiveStyle={styles.sourceChipTextActive}
+          />
           <Text style={styles.helperTextLeft}>Pick your own listing or share another seller listing with attribution.</Text>
         </View>
 
@@ -321,35 +349,47 @@ export default function CreatePosterScreen() {
           </View>
 
           <View style={styles.imagePickerRow}>
-            <AnimatedPressable
+            <AppButton
+              title="Gallery"
+              variant="secondary"
+              size="sm"
+              align="center"
               style={styles.imagePickerBtn}
+              icon={<Ionicons name="images-outline" size={16} color={Colors.textPrimary} />}
+              iconContainerStyle={styles.imagePickerIconWrap}
+              titleStyle={styles.imagePickerBtnText}
               onPress={pickFromLibrary}
-              activeOpacity={0.9}
               disabled={isPickingImage}
-            >
-              <Ionicons name="images-outline" size={16} color={Colors.textPrimary} />
-              <Text style={styles.imagePickerBtnText}>Gallery</Text>
-            </AnimatedPressable>
+              accessibilityLabel="Choose image from gallery"
+            />
 
-            <AnimatedPressable
+            <AppButton
+              title="Camera"
+              variant="secondary"
+              size="sm"
+              align="center"
               style={styles.imagePickerBtn}
+              icon={<Ionicons name="camera-outline" size={16} color={Colors.textPrimary} />}
+              iconContainerStyle={styles.imagePickerIconWrap}
+              titleStyle={styles.imagePickerBtnText}
               onPress={pickFromCamera}
-              activeOpacity={0.9}
               disabled={isPickingImage}
-            >
-              <Ionicons name="camera-outline" size={16} color={Colors.textPrimary} />
-              <Text style={styles.imagePickerBtnText}>Camera</Text>
-            </AnimatedPressable>
+              accessibilityLabel="Capture image using camera"
+            />
 
-            <AnimatedPressable
+            <AppButton
+              title="Reset"
+              variant="secondary"
+              size="sm"
+              align="center"
               style={[styles.imagePickerBtn, !posterImageUri && styles.imagePickerBtnDisabled]}
+              icon={<Ionicons name="refresh-outline" size={16} color={posterImageUri ? Colors.textPrimary : Colors.textMuted} />}
+              iconContainerStyle={styles.imagePickerIconWrap}
+              titleStyle={[styles.imagePickerBtnText, !posterImageUri && styles.imagePickerBtnTextDisabled]}
               onPress={() => setPosterImageUri(null)}
-              activeOpacity={0.9}
               disabled={!posterImageUri || isPickingImage}
-            >
-              <Ionicons name="refresh-outline" size={16} color={posterImageUri ? Colors.textPrimary : Colors.textMuted} />
-              <Text style={[styles.imagePickerBtnText, !posterImageUri && styles.imagePickerBtnTextDisabled]}>Reset</Text>
-            </AnimatedPressable>
+              accessibilityLabel="Reset poster image"
+            />
           </View>
 
           {isPickingImage ? (
@@ -386,59 +426,33 @@ export default function CreatePosterScreen() {
           />
 
           <View style={styles.storyControlRow}>
-            <Text style={styles.storyControlLabel}>Color</Text>
-            <View style={styles.storyColorRow}>
-              {STORY_COLORS.map((color) => {
-                const active = storyColor === color;
-                return (
-                  <AnimatedPressable
-                    key={color}
-                    style={[styles.storyColorChip, { backgroundColor: color }, active && styles.storyColorChipActive]}
-                    onPress={() => setStoryColor(color)}
-                    activeOpacity={0.85}
-                  />
-                );
-              })}
-            </View>
-          </View>
-
-          <View style={styles.storyControlRow}>
             <Text style={styles.storyControlLabel}>Position</Text>
-            <View style={styles.storyPositionRow}>
-              {STORY_POSITIONS.map((position) => {
-                const active = storyPosition === position;
-                return (
-                  <AnimatedPressable
-                    key={position}
-                    style={[styles.storyPositionChip, active && styles.storyPositionChipActive]}
-                    onPress={() => setStoryPosition(position)}
-                    activeOpacity={0.9}
-                  >
-                    <Text style={[styles.storyPositionText, active && styles.storyPositionTextActive]}>{position.toUpperCase()}</Text>
-                  </AnimatedPressable>
-                );
-              })}
-            </View>
+            <AppSegmentControl
+              options={STORY_POSITION_OPTIONS}
+              value={storyPosition}
+              onChange={setStoryPosition}
+              style={styles.storyPositionRow}
+              fullWidth
+              optionStyle={styles.storyPositionChip}
+              optionActiveStyle={styles.storyPositionChipActive}
+              optionTextStyle={styles.storyPositionText}
+              optionTextActiveStyle={styles.storyPositionTextActive}
+            />
           </View>
         </View>
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Expires In</Text>
-          <View style={styles.expiryRow}>
-            {EXPIRY_OPTIONS.map((hours) => {
-              const active = expiryHours === hours;
-              return (
-                <AnimatedPressable
-                  key={hours}
-                  style={[styles.expiryChip, active && styles.expiryChipActive]}
-                  onPress={() => setExpiryHours(hours)}
-                  activeOpacity={0.9}
-                >
-                  <Text style={[styles.expiryChipText, active && styles.expiryChipTextActive]}>{hours}h</Text>
-                </AnimatedPressable>
-              );
-            })}
-          </View>
+          <AppSegmentControl
+            options={EXPIRY_SEGMENT_OPTIONS}
+            value={expiryOptionValue}
+            onChange={handleExpiryOptionChange}
+            style={styles.expiryRow}
+            optionStyle={styles.expiryChip}
+            optionActiveStyle={styles.expiryChipActive}
+            optionTextStyle={styles.expiryChipText}
+            optionTextActiveStyle={styles.expiryChipTextActive}
+          />
         </View>
 
         <View style={styles.section}>
@@ -498,10 +512,9 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   publishBtn: {
-    backgroundColor: Colors.accent,
+    minHeight: 36,
     borderRadius: 16,
     paddingHorizontal: 12,
-    paddingVertical: 8,
   },
   publishBtnText: {
     color: Colors.background,
@@ -598,6 +611,7 @@ const styles = StyleSheet.create({
     bottom: 44,
   },
   storyOverlayText: {
+    color: '#fff',
     fontSize: 20,
     fontFamily: 'Inter_700Bold',
     textAlign: 'center',
@@ -687,22 +701,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.6,
     marginBottom: 6,
   },
-  storyColorRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 8,
-  },
-  storyColorChip: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    borderWidth: 1,
-    borderColor: COLOR_CHIP_BORDER,
-  },
-  storyColorChipActive: {
-    borderColor: COLOR_CHIP_ACTIVE_BORDER,
-    borderWidth: 2,
-  },
   storyPositionRow: {
     flexDirection: 'row',
     gap: 8,
@@ -773,11 +771,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: CHIP_BORDER,
     backgroundColor: CHIP_BG,
-    paddingVertical: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 6,
+    minHeight: 42,
+  },
+  imagePickerIconWrap: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: 'transparent',
   },
   imagePickerBtnDisabled: {
     borderColor: IMAGE_BTN_DISABLED_BORDER,

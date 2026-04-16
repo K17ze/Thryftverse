@@ -6,6 +6,9 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -34,6 +37,9 @@ jobs:
 
       - name: Typecheck
         run: npm run typecheck
+
+      - name: Design token guard
+        run: npm run lint:design-tokens
 
       - name: Run test suite
         run: npm run test

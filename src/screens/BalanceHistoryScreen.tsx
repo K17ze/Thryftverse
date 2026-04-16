@@ -85,7 +85,12 @@ export default function BalanceHistoryScreen({ navigation }: Props) {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={BG} />
       <View style={styles.header}>
-        <AnimatedPressable onPress={() => navigation.goBack()}>
+        <AnimatedPressable
+          onPress={() => navigation.goBack()}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+          accessibilityHint="Returns to the previous screen"
+        >
           <Ionicons name="arrow-back" size={24} color={TEXT} />
         </AnimatedPressable>
         <Text style={styles.headerTitle}>History</Text>

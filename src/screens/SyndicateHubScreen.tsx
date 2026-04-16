@@ -22,10 +22,18 @@ import { useStore } from '../store/useStore';
 import { resolveAssetMarketState } from '../data/mockSyndicateData';
 import { EmptyState } from '../components/EmptyState';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
+import { AppButton } from '../components/ui/AppButton';
+import { AppStatusPill } from '../components/ui/AppStatusPill';
+import { AppSegmentControl } from '../components/ui/AppSegmentControl';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 
 type HubSort = 'value' | 'movers' | 'latest';
+const SORT_OPTIONS: Array<{ value: HubSort; label: string; accessibilityLabel: string }> = [
+  { value: 'value', label: 'VALUE', accessibilityLabel: 'Sort by market value' },
+  { value: 'movers', label: 'MOVERS', accessibilityLabel: 'Sort by price movers' },
+  { value: 'latest', label: 'LATEST', accessibilityLabel: 'Sort by latest listings' },
+];
 const IS_LIGHT = ActiveTheme === 'light';
 const TRADE_ACCENT = Colors.accentGold;
 const PANEL_BG = Colors.card;
@@ -34,14 +42,6 @@ const SEARCH_BG = Colors.cardAlt;
 const METRIC_BG = IS_LIGHT ? '#f0ede7' : '#10161c';
 const METRIC_BORDER = IS_LIGHT ? '#d7d1c8' : '#24313b';
 const SORT_ACTIVE_BG = IS_LIGHT ? '#ede4d3' : '#17302b';
-const UP_PILL_BG = IS_LIGHT ? '#efe7d6' : '#142420';
-const UP_PILL_BORDER = IS_LIGHT ? '#d9c6a2' : '#2d4a45';
-const DOWN_PILL_BG = IS_LIGHT ? '#f6e6e6' : '#231616';
-const DOWN_PILL_BORDER = IS_LIGHT ? '#ddb0b0' : '#4b2c2c';
-const UP_TEXT_COLOR = IS_LIGHT ? '#7c5f1e' : '#d7b98f';
-const DOWN_TEXT_COLOR = IS_LIGHT ? '#b64242' : '#ff9d9d';
-const OUTLINE_BTN_BG = Colors.cardAlt;
-const OUTLINE_BTN_BORDER = Colors.border;
 
 export default function CoOwnHubScreen() {
   const navigation = useNavigation<NavT>();
@@ -118,16 +118,11 @@ export default function CoOwnHubScreen() {
         <View style={styles.assetBody}>
           <View style={styles.assetTopRow}>
             <Text style={styles.assetTitle} numberOfLines={1}>{item.title}</Text>
-            <View style={[styles.movePill, isPositive ? styles.movePillUp : styles.movePillDown]}>
-              <Ionicons
-                name={isPositive ? 'trending-up-outline' : 'trending-down-outline'}
-                size={12}
-                color={isPositive ? UP_TEXT_COLOR : DOWN_TEXT_COLOR}
-              />
-              <Text style={[styles.moveText, isPositive ? styles.moveTextUp : styles.moveTextDown]}>
-                {isPositive ? '+' : ''}{item.marketMovePct24h.toFixed(1)}%
-              </Text>
-            </View>
+            <AppStatusPill
+              tone={isPositive ? 'positive' : 'negative'}
+              iconName={isPositive ? 'trending-up-outline' : 'trending-down-outline'}
+              label={`${isPositive ? '+' : ''}${item.marketMovePct24h.toFixed(1)}%`}
+            />
           </View>
 
           <Text style={styles.assetMeta}>{item.availableUnits} / {item.totalUnits} shares available</Text>
@@ -148,21 +143,25 @@ export default function CoOwnHubScreen() {
           </View>
 
           <View style={styles.assetActionRow}>
-            <AnimatedPressable
+            <AppButton
               style={styles.tradeBtn}
-              activeOpacity={0.9}
+              variant="gold"
+              size="sm"
+              align="center"
+              title="Buy"
               onPress={() => navigation.navigate('Trade', { assetId: item.id, side: 'buy' })}
-            >
-              <Text style={styles.tradeBtnText}>Buy</Text>
-            </AnimatedPressable>
+              accessibilityLabel={`Buy shares of ${item.title}`}
+            />
 
-            <AnimatedPressable
+            <AppButton
               style={[styles.tradeBtn, styles.tradeBtnOutline]}
-              activeOpacity={0.9}
+              variant="secondary"
+              size="sm"
+              align="center"
+              title="Sell"
               onPress={() => navigation.navigate('Trade', { assetId: item.id, side: 'sell' })}
-            >
-              <Text style={styles.tradeBtnOutlineText}>Sell</Text>
-            </AnimatedPressable>
+              accessibilityLabel={`Sell shares of ${item.title}`}
+            />
           </View>
         </View>
         </AnimatedPressable>
@@ -225,44 +224,59 @@ export default function CoOwnHubScreen() {
             </View>
 
             <View style={styles.actionRow}>
-              <AnimatedPressable style={styles.quickBtn} onPress={() => navigation.navigate('Portfolio')}>
-                <Ionicons name="pie-chart-outline" size={15} color={Colors.background} />
-                <Text style={styles.quickBtnText}>Portfolio</Text>
-              </AnimatedPressable>
-              <AnimatedPressable style={styles.quickBtn} onPress={() => navigation.navigate('CoOwnOrderHistory')}>
-                <Ionicons name="time-outline" size={15} color={Colors.background} />
-                <Text style={styles.quickBtnText}>Orders</Text>
-              </AnimatedPressable>
-              <AnimatedPressable style={styles.quickBtn} onPress={() => navigation.navigate('AssetLeaderboard')}>
-                <Ionicons name="trophy-outline" size={15} color={Colors.background} />
-                <Text style={styles.quickBtnText}>Leaders</Text>
-              </AnimatedPressable>
+              <AppButton
+                style={styles.quickBtn}
+                variant="gold"
+                size="sm"
+                align="center"
+                icon={<Ionicons name="pie-chart-outline" size={15} color={Colors.textInverse} />}
+                title="Portfolio"
+                onPress={() => navigation.navigate('Portfolio')}
+                accessibilityLabel="Open co-own portfolio"
+              />
+              <AppButton
+                style={styles.quickBtn}
+                variant="gold"
+                size="sm"
+                align="center"
+                icon={<Ionicons name="time-outline" size={15} color={Colors.textInverse} />}
+                title="Orders"
+                onPress={() => navigation.navigate('CoOwnOrderHistory')}
+                accessibilityLabel="Open co-own order history"
+              />
+              <AppButton
+                style={styles.quickBtn}
+                variant="gold"
+                size="sm"
+                align="center"
+                icon={<Ionicons name="trophy-outline" size={15} color={Colors.textInverse} />}
+                title="Leaders"
+                onPress={() => navigation.navigate('AssetLeaderboard')}
+                accessibilityLabel="Open asset leaderboard"
+              />
             </View>
 
-            <View style={styles.sortRow}>
-              {(['value', 'movers', 'latest'] as HubSort[]).map((sortKey) => {
-                const active = sortBy === sortKey;
-                return (
-                  <AnimatedPressable
-                    key={sortKey}
-                    style={[styles.sortChip, active && styles.sortChipActive]}
-                    onPress={() => setSortBy(sortKey)}
-                    activeOpacity={0.9}
-                  >
-                    <Text style={[styles.sortChipText, active && styles.sortChipTextActive]}>{sortKey.toUpperCase()}</Text>
-                  </AnimatedPressable>
-                );
-              })}
-            </View>
+            <AppSegmentControl
+              style={styles.sortRow}
+              options={SORT_OPTIONS}
+              value={sortBy}
+              onChange={setSortBy}
+              optionStyle={styles.sortChip}
+              optionActiveStyle={styles.sortChipActive}
+              optionTextStyle={styles.sortChipText}
+              optionTextActiveStyle={styles.sortChipTextActive}
+            />
 
-            <AnimatedPressable
+            <AppButton
               style={styles.issueBtn}
-              activeOpacity={0.9}
+              variant="secondary"
+              size="sm"
+              align="center"
+              icon={<Ionicons name="add" size={16} color={Colors.textPrimary} />}
+              title="Issue New Co-Own"
               onPress={() => navigation.navigate('CreateCoOwn')}
-            >
-              <Ionicons name="add" size={16} color={Colors.background} />
-              <Text style={styles.issueBtnText}>Issue New Co-Own</Text>
-            </AnimatedPressable>
+              accessibilityLabel="Issue new co-own asset"
+            />
           </View>
         }
         contentContainerStyle={styles.contentContainer}
@@ -391,19 +405,6 @@ const styles = StyleSheet.create({
   },
   quickBtn: {
     flex: 1,
-    borderRadius: 10,
-    backgroundColor: Colors.accentGold,
-    paddingVertical: 9,
-    paddingHorizontal: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 5,
-  },
-  quickBtnText: {
-    color: Colors.background,
-    fontSize: 11,
-    fontFamily: 'Inter_700Bold',
   },
   sortRow: {
     marginTop: 12,
@@ -433,18 +434,6 @@ const styles = StyleSheet.create({
   },
   issueBtn: {
     marginTop: 12,
-    borderRadius: 11,
-    paddingVertical: 11,
-    backgroundColor: '#f0f0e8',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-  },
-  issueBtnText: {
-    color: Colors.background,
-    fontSize: 13,
-    fontFamily: 'Inter_700Bold',
   },
   assetCard: {
     borderRadius: 14,
@@ -473,33 +462,6 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
     fontSize: 16,
     fontFamily: 'Inter_700Bold',
-  },
-  movePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    borderRadius: 999,
-    borderWidth: 1,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  movePillUp: {
-    borderColor: UP_PILL_BORDER,
-    backgroundColor: UP_PILL_BG,
-  },
-  movePillDown: {
-    borderColor: DOWN_PILL_BORDER,
-    backgroundColor: DOWN_PILL_BG,
-  },
-  moveText: {
-    fontSize: 11,
-    fontFamily: 'Inter_700Bold',
-  },
-  moveTextUp: {
-    color: UP_TEXT_COLOR,
-  },
-  moveTextDown: {
-    color: DOWN_TEXT_COLOR,
   },
   assetMeta: {
     marginTop: 4,
@@ -531,26 +493,9 @@ const styles = StyleSheet.create({
   },
   tradeBtn: {
     flex: 1,
-    borderRadius: 10,
-    backgroundColor: Colors.accentGold,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 10,
-  },
-  tradeBtnText: {
-    color: Colors.background,
-    fontSize: 12,
-    fontFamily: 'Inter_700Bold',
   },
   tradeBtnOutline: {
-    backgroundColor: OUTLINE_BTN_BG,
-    borderWidth: 1,
-    borderColor: OUTLINE_BTN_BORDER,
-  },
-  tradeBtnOutlineText: {
-    color: Colors.textPrimary,
-    fontSize: 12,
-    fontFamily: 'Inter_700Bold',
+    backgroundColor: 'transparent',
   },
 });
 

@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { shutdownTelemetry } from './telemetry.js';
-import Fastify from 'fastify';
+import Fastify, { type FastifyReply, type FastifyRequest } from 'fastify';
 import * as Sentry from '@sentry/node';
 import type { Pool, PoolClient } from 'pg';
 import rateLimit from '@fastify/rate-limit';
@@ -26,11 +26,23 @@ import {
 } from './lib/auth.js';
 import { sendAuthEmail } from './lib/authEmail.js';
 import {
-  assertOperatorToken,
-  createIzeReconciliationAttestation,
-  resolveGoldRate,
-  setGoldRateOverride,
-} from './lib/goldOracle.js';
+  assertOnezeOperatorToken,
+  createOnezeReconciliationAttestation,
+} from './lib/onezeGovernance.js';
+import {
+  PRICING_PARAMETER_BOUNDS,
+  findPricingArbitrageViolations,
+  getCountryPricingProfile,
+  listCountryPricingQuotes,
+  pricingTablesAvailable as onezePricingTablesAvailable,
+  resolveCountryPricingQuote,
+  resolveCountryPricingQuoteByCurrency,
+  resolveInternalFxRate,
+  setInternalFxRate,
+  setOnezeAnchorConfig,
+  upsertCountryPricingProfile,
+  validatePricingProfileInput,
+} from './lib/pricingEngine.js';
 import {
   expectedGatewayIdForProvider,
   resolveProviderFromPathSegment,
@@ -48,6 +60,7 @@ import {
   closeBackgroundQueues,
   enqueueAuctionSweepJob,
   enqueueOnezeMintReserveJob,
+  enqueueReconciliationJob,
   enqueueOnezeWithdrawalExecuteJob,
   enqueuePushNotificationJob,
   startBackgroundWorkers,
@@ -79,7 +92,12 @@ import {
   resolveClientIp,
   resolveJurisdictionRule,
 } from './lib/compliance.js';
-import { resolveCountryCapabilities } from './lib/countryCapabilities.js';
+import {
+  getConfiguredClusters,
+  isGatewayConfigured,
+  resolveCountryCapabilities,
+  type CapabilityCarrier,
+} from './lib/countryCapabilities.js';
 import {
   getAllowedGatewayIds,
   isGatewayAllowedForChannel,
@@ -100,6 +118,22 @@ import {
   generateTotpSecret,
   verifyTotp,
 } from './lib/totp.js';
+import {
+  createShipment,
+  getShippingQuotes,
+  isCarrierLiveConfigured,
+  normalizeAndVerifyShippingWebhook,
+} from './lib/shippingProvider.js';
+import {
+  getLatestReconciliationRun,
+  reconciliationTableAvailable,
+  runDailyReconciliation,
+  type DailyReconciliationRun,
+} from './lib/reconciliation.js';
+import {
+  collectOperationalAlerts,
+  type OpsAlert,
+} from './lib/alerting.js';
 
 const app = Fastify({ logger: true });
 
@@ -116,7 +150,7 @@ void app.register(websocket);
 void app.register(fastifyRawBody, {
   field: 'rawBody',
   global: false,
-  routes: ['/webhooks/*'],
+  routes: ['/webhooks/*', '/shipping/webhooks/*'],
   encoding: 'utf8',
   runFirst: true,
 });
@@ -199,6 +233,10 @@ function asFiniteNumber(value: unknown): number | null {
   return null;
 }
 
+function normalizePostcode(value: string): string {
+  return value.replace(/\s+/g, '').toUpperCase();
+}
+
 async function ensureUserExists(userId: string) {
   const result = await db.query<{ id: string }>(
     `
@@ -258,6 +296,26 @@ function roundTo(value: number, decimals: number): number {
   return Math.round(value * factor) / factor;
 }
 
+function clampNumber(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function toSafeInteger(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.round(value));
+}
+
+function ratioOrNull(numerator: number, denominator: number, decimals = 6): number | null {
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator <= 0) {
+    return null;
+  }
+
+  return roundTo(numerator / denominator, decimals);
+}
+
 const COMMERCE_PLATFORM_CHARGE_RATE = 0.05;
 const COMMERCE_PLATFORM_CHARGE_FIXED_GBP = 0.7;
 const COMMERCE_PLATFORM_CHARGE_MIN_RATE = 0.02;
@@ -267,6 +325,8 @@ const WALLET_TOPUP_PLATFORM_FEE_RATE = 0.01;
 const ONEZE_MG_PER_IZE = 1_000;
 const DEFAULT_WALLET_FIAT_CURRENCY = 'INR';
 const ONEZE_MINT_BURN_HALT_REDIS_KEY = 'oneze:mint_burn_halted';
+const PAYOUTS_PAUSED_REDIS_KEY = 'ops:payouts_paused';
+const ALERT_DEDUP_REDIS_PREFIX = 'ops:alerted:';
 const ONEZE_MINT_DEFAULT_CUSTODIAN = 'MMTC-PAMP';
 const PARCEL_EVENT_TYPES = [
   'picked_up',
@@ -287,6 +347,16 @@ const PARCEL_SHIPPING_PROGRESS_EVENTS = new Set<ParcelEventType>([
   'in_transit',
   'out_for_delivery',
 ]);
+const COMMERCE_ORDER_STATUSES = [
+  'created',
+  'paid',
+  'shipped',
+  'delivered',
+  'cancelled',
+] as const;
+type CommerceOrderStatus = (typeof COMMERCE_ORDER_STATUSES)[number];
+
+let listingsStatusColumnAvailableCache: boolean | null = null;
 
 const MINT_OPERATION_TERMINAL_STATES = new Set<string>([
   'SETTLED',
@@ -553,7 +623,7 @@ function isPublicRoute(method: string, path: string) {
     return true;
   }
 
-  if (method === 'POST' && path.startsWith('/webhooks/')) {
+  if (method === 'POST' && (path.startsWith('/webhooks/') || path.startsWith('/shipping/webhooks/'))) {
     return true;
   }
 
@@ -673,7 +743,7 @@ function resolveAuthenticatedUserId(
 }
 
 function statusCodeForApiError(code: string): number {
-  if (code === 'ONEZE_OPERATIONS_HALTED') {
+  if (code === 'ONEZE_OPERATIONS_HALTED' || code === 'RECONCILIATION_TABLES_UNAVAILABLE' || code === 'PAYOUTS_PAUSED') {
     return 503;
   }
 
@@ -824,6 +894,7 @@ type LedgerOwnerType = 'platform' | 'user';
 type LedgerAccountCode =
   | 'escrow_liability'
   | 'platform_revenue'
+  | 'platform_operating'
   | 'seller_payable'
   | 'buyer_spend'
   | 'withdrawal_pending'
@@ -927,6 +998,15 @@ interface WalletRow {
   updated_at: string;
 }
 
+interface WalletSegmentRow {
+  wallet_id: string;
+  purchased_balance_mg: number | string;
+  earned_balance_mg: number | string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
 interface WalletLedgerRow {
   id: number;
   wallet_id: string;
@@ -937,7 +1017,7 @@ interface WalletLedgerRow {
   kind: string;
   ref_type: string | null;
   ref_id: string | null;
-  gold_rate_inr_per_g: number | string | null;
+  anchor_value_in_inr: number | string | null;
   metadata: Record<string, unknown>;
   created_at: string;
 }
@@ -1027,7 +1107,7 @@ function createRuntimeId(prefix: string): string {
 }
 
 function directOnezeWithdrawalRoutesDisabled(): boolean {
-  return true;
+  return !config.onezeEnableDirectRedemption;
 }
 
 type ChatConversationType = 'dm' | 'group';
@@ -1291,6 +1371,8 @@ function toWalletLedgerPayload(row: WalletLedgerRow) {
   const asset = row.asset;
   const amount = Number(row.amount);
   const balanceAfter = Number(row.balance_after);
+  // The internal anchor is intentionally hidden from user-facing responses.
+  const anchorValueInInr = null;
 
   return {
     id: row.id,
@@ -1304,7 +1386,8 @@ function toWalletLedgerPayload(row: WalletLedgerRow) {
     kind: row.kind,
     refType: row.ref_type,
     refId: row.ref_id,
-    goldRateInrPerG: row.gold_rate_inr_per_g === null ? null : Number(row.gold_rate_inr_per_g),
+    anchorValueInInr,
+    goldRateInrPerG: anchorValueInInr,
     metadata: row.metadata,
     createdAt: row.created_at,
   };
@@ -1692,6 +1775,38 @@ async function orderParcelEventsTableAvailable(client: DbQueryable): Promise<boo
   return Boolean(result.rows[0]?.exists);
 }
 
+async function paymentDisputesTableAvailable(client: DbQueryable): Promise<boolean> {
+  const result = await client.query<{ exists: boolean }>(
+    `
+      SELECT
+        to_regclass('public.payment_disputes') IS NOT NULL AS exists
+    `
+  );
+
+  return Boolean(result.rows[0]?.exists);
+}
+
+async function listingsStatusColumnAvailable(client: DbQueryable): Promise<boolean> {
+  if (listingsStatusColumnAvailableCache !== null) {
+    return listingsStatusColumnAvailableCache;
+  }
+
+  const result = await client.query<{ exists: boolean }>(
+    `
+      SELECT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'listings'
+          AND column_name = 'status'
+      ) AS exists
+    `
+  );
+
+  listingsStatusColumnAvailableCache = Boolean(result.rows[0]?.exists);
+  return listingsStatusColumnAvailableCache;
+}
+
 async function onezeTablesAvailable(client: DbQueryable): Promise<boolean> {
   const result = await client.query<{ exists: boolean }>(
     `
@@ -1700,8 +1815,9 @@ async function onezeTablesAvailable(client: DbQueryable): Promise<boolean> {
         AND to_regclass('public.ledger_entries') IS NOT NULL
         AND to_regclass('public.payment_intents') IS NOT NULL
         AND to_regclass('public.wallet_ize_operations') IS NOT NULL
-        AND to_regclass('public.gold_rate_quotes') IS NOT NULL
-        AND to_regclass('public.gold_rate_overrides') IS NOT NULL
+        AND to_regclass('public.oneze_anchor_config') IS NOT NULL
+        AND to_regclass('public.oneze_country_pricing_profiles') IS NOT NULL
+        AND to_regclass('public.oneze_internal_fx_rates') IS NOT NULL
         AND to_regclass('public.ize_reconciliation_snapshots') IS NOT NULL AS exists
     `
   );
@@ -1729,7 +1845,6 @@ async function onezeArchitectureTablesAvailable(client: DbQueryable): Promise<bo
       SELECT
         to_regclass('public.wallets') IS NOT NULL
         AND to_regclass('public.wallet_ledger') IS NOT NULL
-        AND to_regclass('public.gold_price_ticks') IS NOT NULL
         AND to_regclass('public.payout_corridors') IS NOT NULL
         AND to_regclass('public.fx_rates') IS NOT NULL
         AND to_regclass('public.withdrawals') IS NOT NULL
@@ -1809,6 +1924,83 @@ async function getOnezeMintBurnHaltState(): Promise<{
       reason: 'halt_state_decode_failed',
     };
   }
+}
+
+async function setPayoutPauseState(input: {
+  paused: boolean;
+  reason: string;
+  reconciliationRunId?: string;
+  mismatchGbp?: number;
+}): Promise<void> {
+  if (!input.paused) {
+    await redis.del(PAYOUTS_PAUSED_REDIS_KEY);
+    return;
+  }
+
+  await redis.set(
+    PAYOUTS_PAUSED_REDIS_KEY,
+    toJsonString({
+      paused: true,
+      reason: input.reason,
+      reconciliationRunId: input.reconciliationRunId ?? null,
+      mismatchGbp: input.mismatchGbp ?? null,
+      pausedAt: new Date().toISOString(),
+    })
+  );
+}
+
+async function getPayoutPauseState(): Promise<{
+  paused: boolean;
+  reason?: string;
+  reconciliationRunId?: string | null;
+  mismatchGbp?: number | null;
+}> {
+  const raw = await redis.get(PAYOUTS_PAUSED_REDIS_KEY);
+  if (!raw) {
+    return { paused: false };
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as {
+      paused?: boolean;
+      reason?: string;
+      reconciliationRunId?: string | null;
+      mismatchGbp?: number | null;
+    };
+
+    if (!parsed.paused) {
+      return { paused: false };
+    }
+
+    return {
+      paused: true,
+      reason: parsed.reason,
+      reconciliationRunId: parsed.reconciliationRunId ?? null,
+      mismatchGbp: parsed.mismatchGbp ?? null,
+    };
+  } catch {
+    return {
+      paused: true,
+      reason: 'payout_pause_state_decode_failed',
+    };
+  }
+}
+
+function toUtcDateString(value: Date): string {
+  return value.toISOString().slice(0, 10);
+}
+
+function parseRunDateOrToday(runDate?: string): string {
+  if (!runDate) {
+    return toUtcDateString(new Date());
+  }
+
+  const parsed = new Date(`${runDate}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime())) {
+    return toUtcDateString(new Date());
+  }
+
+  return toUtcDateString(parsed);
 }
 
 async function assertOnezeMintBurnNotHalted(): Promise<void> {
@@ -2023,7 +2215,7 @@ async function applyWalletLedgerDelta(
     kind: string;
     refType?: string;
     refId?: string;
-    goldRateInrPerG?: number;
+    anchorValueInInr?: number;
     metadata?: Record<string, unknown>;
   }
 ): Promise<number> {
@@ -2083,7 +2275,7 @@ async function applyWalletLedgerDelta(
         kind,
         ref_type,
         ref_id,
-        gold_rate_inr_per_g,
+        anchor_value_in_inr,
         metadata
       )
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
@@ -2097,12 +2289,403 @@ async function applyWalletLedgerDelta(
       input.kind,
       input.refType ?? null,
       input.refId ?? null,
-      input.goldRateInrPerG ?? null,
+      input.anchorValueInInr ?? null,
       toJsonString(input.metadata ?? {}),
     ]
   );
 
   return nextBalance;
+}
+
+function normalizeOnezeCountryTag(country: string | null | undefined): string {
+  const raw = (country ?? '').trim().toUpperCase();
+  return raw.length >= 2 ? raw : 'GLOBAL';
+}
+
+async function ensureWalletSegments(client: DbQueryable, wallet: WalletRow): Promise<WalletSegmentRow> {
+  const seededPurchasedMg = Math.max(0, Number(wallet.oneze_balance_mg));
+
+  const upserted = await client.query<WalletSegmentRow>(
+    `
+      INSERT INTO oneze_wallet_segments (
+        wallet_id,
+        purchased_balance_mg,
+        earned_balance_mg,
+        metadata
+      )
+      VALUES ($1, $2, 0, $3::jsonb)
+      ON CONFLICT (wallet_id)
+      DO UPDATE SET wallet_id = EXCLUDED.wallet_id
+      RETURNING
+        wallet_id,
+        purchased_balance_mg,
+        earned_balance_mg,
+        metadata,
+        created_at::text,
+        updated_at::text
+    `,
+    [
+      wallet.id,
+      seededPurchasedMg,
+      toJsonString({
+        bootstrapFromWalletMg: seededPurchasedMg,
+      }),
+    ]
+  );
+
+  const segments = upserted.rows[0];
+  const walletBalanceMg = Math.max(0, Number(wallet.oneze_balance_mg));
+  const segmentTotalMg = Number(segments.purchased_balance_mg) + Number(segments.earned_balance_mg);
+
+  if (segmentTotalMg >= walletBalanceMg) {
+    return segments;
+  }
+
+  const parityDeltaMg = walletBalanceMg - segmentTotalMg;
+  const parityPatched = await client.query<WalletSegmentRow>(
+    `
+      UPDATE oneze_wallet_segments
+      SET
+        purchased_balance_mg = purchased_balance_mg + $2,
+        metadata = metadata || $3::jsonb,
+        updated_at = NOW()
+      WHERE wallet_id = $1
+      RETURNING
+        wallet_id,
+        purchased_balance_mg,
+        earned_balance_mg,
+        metadata,
+        created_at::text,
+        updated_at::text
+    `,
+    [
+      wallet.id,
+      parityDeltaMg,
+      toJsonString({
+        paritySync: {
+          at: new Date().toISOString(),
+          deltaMg: parityDeltaMg,
+          reason: 'segment_total_below_wallet_balance',
+        },
+      }),
+    ]
+  );
+
+  return parityPatched.rows[0] ?? segments;
+}
+
+async function loadWalletSegmentsForUpdate(
+  client: DbQueryable,
+  wallet: WalletRow
+): Promise<WalletSegmentRow> {
+  await ensureWalletSegments(client, wallet);
+
+  const result = await client.query<WalletSegmentRow>(
+    `
+      SELECT
+        wallet_id,
+        purchased_balance_mg,
+        earned_balance_mg,
+        metadata,
+        created_at::text,
+        updated_at::text
+      FROM oneze_wallet_segments
+      WHERE wallet_id = $1
+      LIMIT 1
+      FOR UPDATE
+    `,
+    [wallet.id]
+  );
+
+  const segments = result.rows[0];
+  if (!segments) {
+    throw createApiError('WALLET_SEGMENTS_NOT_FOUND', 'Wallet segment record is missing', {
+      walletId: wallet.id,
+      userId: wallet.user_id,
+    });
+  }
+
+  return segments;
+}
+
+async function appendWalletOriginEvent(
+  client: DbQueryable,
+  input: {
+    walletId: string;
+    txId: string;
+    amountMg: number;
+    originCountry: string;
+    segment: 'purchased' | 'earned';
+    metadata?: Record<string, unknown>;
+  }
+): Promise<void> {
+  if (!Number.isSafeInteger(input.amountMg) || input.amountMg === 0) {
+    return;
+  }
+
+  await client.query(
+    `
+      INSERT INTO oneze_balance_origin_events (
+        wallet_id,
+        tx_id,
+        amount_mg,
+        origin_country,
+        segment,
+        metadata
+      )
+      VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+    `,
+    [
+      input.walletId,
+      input.txId,
+      input.amountMg,
+      normalizeOnezeCountryTag(input.originCountry),
+      input.segment,
+      toJsonString(input.metadata ?? {}),
+    ]
+  );
+}
+
+async function creditWalletSegmentBalance(
+  client: DbQueryable,
+  input: {
+    wallet: WalletRow;
+    txId: string;
+    purchasedCreditMg?: number;
+    earnedCreditMg?: number;
+    originCountry: string;
+    metadata?: Record<string, unknown>;
+  }
+): Promise<{ purchasedBalanceMg: number; earnedBalanceMg: number }> {
+  const purchasedCreditMg = input.purchasedCreditMg ?? 0;
+  const earnedCreditMg = input.earnedCreditMg ?? 0;
+
+  if (!Number.isSafeInteger(purchasedCreditMg) || !Number.isSafeInteger(earnedCreditMg)) {
+    throw createApiError('WALLET_SEGMENT_AMOUNT_INVALID', 'Wallet segment credits must be integer mg units');
+  }
+
+  if (purchasedCreditMg < 0 || earnedCreditMg < 0) {
+    throw createApiError('WALLET_SEGMENT_AMOUNT_INVALID', 'Wallet segment credits cannot be negative');
+  }
+
+  const segments = await loadWalletSegmentsForUpdate(client, input.wallet);
+  const nextPurchasedMg = Number(segments.purchased_balance_mg) + purchasedCreditMg;
+  const nextEarnedMg = Number(segments.earned_balance_mg) + earnedCreditMg;
+
+  await client.query(
+    `
+      UPDATE oneze_wallet_segments
+      SET
+        purchased_balance_mg = $2,
+        earned_balance_mg = $3,
+        metadata = metadata || $4::jsonb,
+        updated_at = NOW()
+      WHERE wallet_id = $1
+    `,
+    [
+      input.wallet.id,
+      nextPurchasedMg,
+      nextEarnedMg,
+      toJsonString({
+        txId: input.txId,
+        operation: 'credit',
+        purchasedCreditMg,
+        earnedCreditMg,
+        ...(input.metadata ?? {}),
+      }),
+    ]
+  );
+
+  if (purchasedCreditMg > 0) {
+    await appendWalletOriginEvent(client, {
+      walletId: input.wallet.id,
+      txId: input.txId,
+      amountMg: purchasedCreditMg,
+      originCountry: input.originCountry,
+      segment: 'purchased',
+      metadata: {
+        direction: 'credit',
+        ...(input.metadata ?? {}),
+      },
+    });
+  }
+
+  if (earnedCreditMg > 0) {
+    await appendWalletOriginEvent(client, {
+      walletId: input.wallet.id,
+      txId: input.txId,
+      amountMg: earnedCreditMg,
+      originCountry: input.originCountry,
+      segment: 'earned',
+      metadata: {
+        direction: 'credit',
+        ...(input.metadata ?? {}),
+      },
+    });
+  }
+
+  return {
+    purchasedBalanceMg: nextPurchasedMg,
+    earnedBalanceMg: nextEarnedMg,
+  };
+}
+
+async function getLockedPurchasedBalanceMg(
+  client: DbQueryable,
+  walletId: string,
+  lockHours: number
+): Promise<number> {
+  if (!Number.isFinite(lockHours) || lockHours <= 0) {
+    return 0;
+  }
+
+  const result = await client.query<{ total: string }>(
+    `
+      SELECT COALESCE(SUM(amount_mg), 0)::text AS total
+      FROM oneze_balance_origin_events
+      WHERE wallet_id = $1
+        AND segment = 'purchased'
+        AND amount_mg > 0
+        AND created_at >= NOW() - make_interval(hours => $2::int)
+    `,
+    [walletId, Math.round(lockHours)]
+  );
+
+  return Math.max(0, Number(result.rows[0]?.total ?? '0'));
+}
+
+async function debitWalletSegmentBalance(
+  client: DbQueryable,
+  input: {
+    wallet: WalletRow;
+    txId: string;
+    amountMg: number;
+    originCountry: string;
+    metadata?: Record<string, unknown>;
+    lockHours?: number;
+  }
+): Promise<{
+  purchasedDebitedMg: number;
+  earnedDebitedMg: number;
+  lockedPurchasedMg: number;
+  redeemableMg: number;
+  purchasedBalanceMg: number;
+  earnedBalanceMg: number;
+}> {
+  if (!Number.isSafeInteger(input.amountMg) || input.amountMg <= 0) {
+    throw createApiError('WALLET_SEGMENT_AMOUNT_INVALID', 'Wallet segment debit must be a positive integer mg value');
+  }
+
+  const segments = await loadWalletSegmentsForUpdate(client, input.wallet);
+  const purchasedMg = Number(segments.purchased_balance_mg);
+  const earnedMg = Number(segments.earned_balance_mg);
+  const lockedPurchasedMg = await getLockedPurchasedBalanceMg(client, input.wallet.id, input.lockHours ?? 0);
+  const redeemablePurchasedMg = Math.max(0, purchasedMg - lockedPurchasedMg);
+  const redeemableMg = earnedMg + redeemablePurchasedMg;
+
+  if (input.amountMg > redeemableMg) {
+    throw createApiError('WALLET_SEGMENT_REDEEM_LOCKED', 'Requested amount exceeds redeemable segmented balance', {
+      walletId: input.wallet.id,
+      amountMg: input.amountMg,
+      redeemableMg,
+      purchasedMg,
+      earnedMg,
+      lockedPurchasedMg,
+      lockHours: input.lockHours ?? 0,
+    });
+  }
+
+  const earnedDebitedMg = Math.min(earnedMg, input.amountMg);
+  const purchasedDebitedMg = input.amountMg - earnedDebitedMg;
+  const nextPurchasedMg = purchasedMg - purchasedDebitedMg;
+  const nextEarnedMg = earnedMg - earnedDebitedMg;
+
+  if (nextPurchasedMg < 0 || nextEarnedMg < 0) {
+    throw createApiError('WALLET_SEGMENT_AMOUNT_INVALID', 'Segment balances cannot go negative');
+  }
+
+  await client.query(
+    `
+      UPDATE oneze_wallet_segments
+      SET
+        purchased_balance_mg = $2,
+        earned_balance_mg = $3,
+        metadata = metadata || $4::jsonb,
+        updated_at = NOW()
+      WHERE wallet_id = $1
+    `,
+    [
+      input.wallet.id,
+      nextPurchasedMg,
+      nextEarnedMg,
+      toJsonString({
+        txId: input.txId,
+        operation: 'debit',
+        purchasedDebitedMg,
+        earnedDebitedMg,
+        lockHours: input.lockHours ?? 0,
+        ...(input.metadata ?? {}),
+      }),
+    ]
+  );
+
+  if (purchasedDebitedMg > 0) {
+    await appendWalletOriginEvent(client, {
+      walletId: input.wallet.id,
+      txId: input.txId,
+      amountMg: -purchasedDebitedMg,
+      originCountry: input.originCountry,
+      segment: 'purchased',
+      metadata: {
+        direction: 'debit',
+        ...(input.metadata ?? {}),
+      },
+    });
+  }
+
+  if (earnedDebitedMg > 0) {
+    await appendWalletOriginEvent(client, {
+      walletId: input.wallet.id,
+      txId: input.txId,
+      amountMg: -earnedDebitedMg,
+      originCountry: input.originCountry,
+      segment: 'earned',
+      metadata: {
+        direction: 'debit',
+        ...(input.metadata ?? {}),
+      },
+    });
+  }
+
+  return {
+    purchasedDebitedMg,
+    earnedDebitedMg,
+    lockedPurchasedMg,
+    redeemableMg,
+    purchasedBalanceMg: nextPurchasedMg,
+    earnedBalanceMg: nextEarnedMg,
+  };
+}
+
+async function getCommittedBurnIzeInWindow(
+  client: DbQueryable,
+  userId: string,
+  hours: number
+): Promise<number> {
+  const safeHours = Math.max(1, Math.round(hours));
+  const result = await client.query<{ total: string }>(
+    `
+      SELECT COALESCE(SUM(ize_amount), 0)::text AS total
+      FROM wallet_ize_operations
+      WHERE user_id = $1
+        AND operation_type = 'burn'
+        AND status = 'committed'
+        AND committed_at >= NOW() - make_interval(hours => $2::int)
+    `,
+    [userId, safeHours]
+  );
+
+  return Number(result.rows[0]?.total ?? '0');
 }
 
 async function resolveUserCountryCode(client: DbQueryable, userId: string): Promise<string> {
@@ -2287,153 +2870,6 @@ async function evaluateP2pPolicyEligibility(
   };
 }
 
-async function appendGoldPriceTick(client: DbQueryable, source: string, inrPerGram: number): Promise<void> {
-  await client.query(
-    `
-      INSERT INTO gold_price_ticks (source, inr_per_gram, observed_at)
-      VALUES ($1, $2, NOW())
-    `,
-    [source, inrPerGram]
-  );
-}
-
-async function addReserveLotForMint(
-  client: DbQueryable,
-  input: {
-    linkedTxId: string;
-    weightMg: number;
-    custodian: string;
-    custodianRef: string;
-    purity: number;
-    acquisitionCostInr: number;
-    attestationUrl?: string;
-    metadata?: Record<string, unknown>;
-  }
-): Promise<string> {
-  const lotId = createRuntimeId('lot');
-  await client.query(
-    `
-      INSERT INTO gold_reserve_lots (
-        id,
-        custodian,
-        custodian_ref,
-        weight_mg,
-        purity,
-        acquired_at,
-        acquisition_cost_inr,
-        attestation_url,
-        status
-      )
-      VALUES ($1, $2, $3, $4, $5, NOW(), $6, $7, 'active')
-    `,
-    [
-      lotId,
-      input.custodian,
-      input.custodianRef,
-      input.weightMg,
-      input.purity,
-      input.acquisitionCostInr,
-      input.attestationUrl ?? null,
-    ]
-  );
-
-  await client.query(
-    `
-      INSERT INTO reserve_movements (
-        id,
-        lot_id,
-        delta_mg,
-        reason,
-        linked_tx_id,
-        metadata
-      )
-      VALUES ($1, $2, $3, 'user_deposit_mint', $4, $5::jsonb)
-    `,
-    [createRuntimeId('rsm'), lotId, input.weightMg, input.linkedTxId, toJsonString(input.metadata ?? {})]
-  );
-
-  return lotId;
-}
-
-async function consumeReserveLotsForBurn(
-  client: DbQueryable,
-  input: {
-    linkedTxId: string;
-    requiredMg: number;
-    metadata?: Record<string, unknown>;
-  }
-): Promise<Array<{ lotId: string; consumedMg: number }>> {
-  const lotsResult = await client.query<{
-    id: string;
-    weight_mg: number | string;
-  }>(
-    `
-      SELECT id, weight_mg
-      FROM gold_reserve_lots
-      WHERE status = 'active'
-        AND weight_mg > 0
-      ORDER BY acquired_at ASC, id ASC
-      FOR UPDATE
-    `
-  );
-
-  let remaining = input.requiredMg;
-  const consumed: Array<{ lotId: string; consumedMg: number }> = [];
-
-  for (const lot of lotsResult.rows) {
-    if (remaining <= 0) {
-      break;
-    }
-
-    const available = Number(lot.weight_mg);
-    if (available <= 0) {
-      continue;
-    }
-
-    const take = Math.min(available, remaining);
-    const nextWeight = available - take;
-
-    await client.query(
-      `
-        UPDATE gold_reserve_lots
-        SET
-          weight_mg = $2,
-          status = CASE WHEN $2 <= 0 THEN 'depleted' ELSE status END,
-          updated_at = NOW()
-        WHERE id = $1
-      `,
-      [lot.id, nextWeight]
-    );
-
-    await client.query(
-      `
-        INSERT INTO reserve_movements (
-          id,
-          lot_id,
-          delta_mg,
-          reason,
-          linked_tx_id,
-          metadata
-        )
-        VALUES ($1, $2, $3, 'user_redemption', $4, $5::jsonb)
-      `,
-      [createRuntimeId('rsm'), lot.id, -take, input.linkedTxId, toJsonString(input.metadata ?? {})]
-    );
-
-    consumed.push({ lotId: lot.id, consumedMg: take });
-    remaining -= take;
-  }
-
-  if (remaining > 0) {
-    throw createApiError('RESERVE_INSUFFICIENT', 'Active reserve inventory is insufficient for burn', {
-      requestedMg: input.requiredMg,
-      unfulfilledMg: remaining,
-    });
-  }
-
-  return consumed;
-}
-
 async function resolvePayoutCorridor(client: DbQueryable, currency: string): Promise<PayoutCorridorRow | null> {
   const result = await client.query<PayoutCorridorRow>(
     `
@@ -2456,49 +2892,16 @@ async function resolvePayoutCorridor(client: DbQueryable, currency: string): Pro
   return result.rows[0] ?? null;
 }
 
-async function resolveXauFxRate(
+async function resolveOnezeFiatFxRate(
   client: DbQueryable,
   currency: string,
   options?: { forceRefresh?: boolean }
 ): Promise<{ rate: number; source: string; observedAt: string }> {
-  const upper = currency.toUpperCase();
-  if (!options?.forceRefresh) {
-    const cached = await client.query<{ rate: string; source: string; observed_at: string }>(
-      `
-        SELECT rate::text, source, observed_at::text
-        FROM fx_rates
-        WHERE base = 'XAU'
-          AND quote = $1
-        ORDER BY observed_at DESC
-        LIMIT 1
-      `,
-      [upper]
-    );
-
-    if (cached.rowCount) {
-      return {
-        rate: Number(cached.rows[0].rate),
-        source: cached.rows[0].source,
-        observedAt: cached.rows[0].observed_at,
-      };
-    }
-  }
-
-  const goldRate = await resolveGoldRate(client, upper, {
-    forceRefresh: options?.forceRefresh ?? false,
-  });
-
-  await client.query(
-    `
-      INSERT INTO fx_rates (base, quote, rate, source, observed_at)
-      VALUES ('XAU', $1, $2, $3, NOW())
-    `,
-    [upper, goldRate.ratePerGram, `gold_oracle:${goldRate.source}`]
-  );
-
+  void options;
+  const quote = await resolveCountryPricingQuoteByCurrency(client, currency);
   return {
-    rate: goldRate.ratePerGram,
-    source: `gold_oracle:${goldRate.source}`,
+    rate: quote.sellPrice,
+    source: `internal_pricing:${quote.countryCode}:sell`,
     observedAt: new Date().toISOString(),
   };
 }
@@ -2565,6 +2968,335 @@ async function loadWithdrawalById(
   return result.rows[0] ?? null;
 }
 
+interface OnezeReservePolicyState {
+  enabled: boolean;
+  minRatio: number;
+  maxRatio: number;
+  configuredOperationalReserveMg: number;
+  reservedWithdrawalMg: number;
+  operationalLiquidityMg: number;
+  configuredReserveRatio: number | null;
+  effectiveReserveRatio: number | null;
+  withinPolicy: boolean;
+}
+
+interface OnezeRiskDashboardMetrics {
+  evaluatedAt: string;
+  lookbackHours: number;
+  countryFlows: Array<{
+    countryCode: string;
+    inflowMg: number;
+    outflowMg: number;
+    netFlowMg: number;
+  }>;
+  totals: {
+    inflowMg: number;
+    outflowMg: number;
+    netFlowMg: number;
+  };
+  redemption: {
+    mintedIze: number;
+    burnedIze: number;
+    mintCount: number;
+    burnCount: number;
+    redemptionRate: number | null;
+  };
+  crossBorder: {
+    transferIze: number;
+    burnIze: number;
+    totalIze: number;
+    transferCount: number;
+    burnCount: number;
+    totalCount: number;
+  };
+  liquidity: {
+    pendingWithdrawalMg: number;
+    operationalLiquidityMg: number;
+    stressIndex: number | null;
+    stressSignal: number;
+    stressLevel: 'normal' | 'elevated' | 'high' | 'critical';
+  };
+  exposure: {
+    circulatingMg: number;
+    reserveActiveMg: number;
+    supplyDeltaMg: number;
+    toleranceMg: number;
+    withinSupplyInvariant: boolean;
+    netExposureMg: number;
+    netExposureIze: number;
+  };
+  reservePolicy: OnezeReservePolicyState;
+}
+
+async function getPendingWithdrawalAmountMg(client: DbQueryable): Promise<number> {
+  const result = await client.query<{ total: string }>(
+    `
+      SELECT COALESCE(SUM(amount_mg), 0)::text AS total
+      FROM withdrawals
+      WHERE status IN ('ACCEPTED', 'RESERVED')
+    `
+  );
+
+  return Math.max(0, Number(result.rows[0]?.total ?? '0'));
+}
+
+function buildOnezeReservePolicyState(input: {
+  reserveActiveMg: number;
+  reservedWithdrawalMg: number;
+}): OnezeReservePolicyState {
+  const minRatio = clampNumber(config.onezeReserveRatioMin, 0, 1);
+  const maxRatio = clampNumber(config.onezeReserveRatioMax, minRatio, 1);
+  const configuredOperationalReserveMg = toSafeInteger(config.onezeOperationalReserveMg);
+  const reservedWithdrawalMg = toSafeInteger(input.reservedWithdrawalMg);
+  const operationalLiquidityMg = Math.max(0, configuredOperationalReserveMg - reservedWithdrawalMg);
+  const configuredReserveRatio = ratioOrNull(configuredOperationalReserveMg, input.reserveActiveMg);
+  const effectiveReserveRatio = ratioOrNull(operationalLiquidityMg, input.reserveActiveMg);
+  const withinPolicy =
+    !config.onezeReservePolicyEnabled
+    || input.reserveActiveMg <= 0
+    || (effectiveReserveRatio !== null && effectiveReserveRatio >= minRatio && effectiveReserveRatio <= maxRatio);
+
+  return {
+    enabled: config.onezeReservePolicyEnabled,
+    minRatio,
+    maxRatio,
+    configuredOperationalReserveMg,
+    reservedWithdrawalMg,
+    operationalLiquidityMg,
+    configuredReserveRatio,
+    effectiveReserveRatio,
+    withinPolicy,
+  };
+}
+
+async function collectOnezeRiskDashboardMetrics(
+  client: DbQueryable,
+  lookbackHours: number
+): Promise<OnezeRiskDashboardMetrics> {
+  const safeLookbackHours = clampNumber(Math.round(lookbackHours), 1, 24 * 30);
+  const [
+    flowRows,
+    operationRows,
+    crossBorderTransferRows,
+    crossBorderBurnRows,
+    pendingWithdrawalMg,
+    latestSnapshotRows,
+    circulatingRows,
+    outstandingIze,
+  ] = await Promise.all([
+    client.query<{ origin_country: string; inflow_mg: string; outflow_mg: string }>(
+      `
+        SELECT
+          origin_country,
+          COALESCE(SUM(CASE WHEN amount_mg > 0 THEN amount_mg ELSE 0 END), 0)::text AS inflow_mg,
+          COALESCE(SUM(CASE WHEN amount_mg < 0 THEN -amount_mg ELSE 0 END), 0)::text AS outflow_mg
+        FROM oneze_balance_origin_events
+        WHERE created_at >= NOW() - make_interval(hours => $1::int)
+        GROUP BY origin_country
+        ORDER BY origin_country ASC
+      `,
+      [safeLookbackHours]
+    ),
+    client.query<{
+      minted_ize: string;
+      burned_ize: string;
+      mint_count: number | string;
+      burn_count: number | string;
+    }>(
+      `
+        SELECT
+          COALESCE(SUM(CASE WHEN operation_type = 'mint' AND status = 'committed' THEN ize_amount ELSE 0 END), 0)::text AS minted_ize,
+          COALESCE(SUM(CASE WHEN operation_type = 'burn' AND status = 'committed' THEN ize_amount ELSE 0 END), 0)::text AS burned_ize,
+          COALESCE(COUNT(*) FILTER (WHERE operation_type = 'mint' AND status = 'committed'), 0)::text AS mint_count,
+          COALESCE(COUNT(*) FILTER (WHERE operation_type = 'burn' AND status = 'committed'), 0)::text AS burn_count
+        FROM wallet_ize_operations
+        WHERE committed_at >= NOW() - make_interval(hours => $1::int)
+      `,
+      [safeLookbackHours]
+    ),
+    client.query<{ total_ize: string; tx_count: number | string }>(
+      `
+        SELECT
+          COALESCE(SUM(ize_amount), 0)::text AS total_ize,
+          COALESCE(COUNT(*), 0)::text AS tx_count
+        FROM wallet_ize_transfers
+        WHERE status = 'committed'
+          AND committed_at >= NOW() - make_interval(hours => $1::int)
+          AND (
+            is_cross_border = TRUE
+            OR (
+              sender_country IS NOT NULL
+              AND recipient_country IS NOT NULL
+              AND sender_country <> recipient_country
+            )
+          )
+      `,
+      [safeLookbackHours]
+    ),
+    client.query<{ total_ize: string; tx_count: number | string }>(
+      `
+        SELECT
+          COALESCE(SUM(ize_amount), 0)::text AS total_ize,
+          COALESCE(COUNT(*), 0)::text AS tx_count
+        FROM wallet_ize_operations
+        WHERE operation_type = 'burn'
+          AND status = 'committed'
+          AND committed_at >= NOW() - make_interval(hours => $1::int)
+          AND LOWER(COALESCE(metadata->>'isCrossBorder', 'false')) = 'true'
+      `,
+      [safeLookbackHours]
+    ),
+    getPendingWithdrawalAmountMg(client),
+    client.query<{
+      circulating_mg: string;
+      reserve_active_mg: string;
+      within_invariant: boolean;
+      metadata: Record<string, unknown>;
+    }>(
+      `
+        SELECT
+          circulating_mg::text,
+          reserve_active_mg::text,
+          within_invariant,
+          metadata
+        FROM oneze_reconciliation_snapshots
+        ORDER BY created_at DESC
+        LIMIT 1
+      `
+    ),
+    client.query<{ total: string }>(
+      `
+        SELECT COALESCE(SUM(oneze_balance_mg), 0)::text AS total
+        FROM wallets
+      `
+    ),
+    getLedgerAccountBalance(client, 'platform', 'platform', 'ize_outstanding', 'IZE'),
+  ]);
+
+  const countryFlows = flowRows.rows.map((row) => {
+    const inflowMg = Number(row.inflow_mg);
+    const outflowMg = Number(row.outflow_mg);
+    return {
+      countryCode: normalizeOnezeCountryTag(row.origin_country),
+      inflowMg,
+      outflowMg,
+      netFlowMg: inflowMg - outflowMg,
+    };
+  });
+
+  const totals = countryFlows.reduce(
+    (accumulator, row) => {
+      accumulator.inflowMg += row.inflowMg;
+      accumulator.outflowMg += row.outflowMg;
+      accumulator.netFlowMg += row.netFlowMg;
+      return accumulator;
+    },
+    {
+      inflowMg: 0,
+      outflowMg: 0,
+      netFlowMg: 0,
+    }
+  );
+
+  const operationSummary = operationRows.rows[0];
+  const mintedIze = Number(operationSummary?.minted_ize ?? '0');
+  const burnedIze = Number(operationSummary?.burned_ize ?? '0');
+  const mintCount = Number(operationSummary?.mint_count ?? '0');
+  const burnCount = Number(operationSummary?.burn_count ?? '0');
+  const redemptionRate = mintedIze > 0 ? roundTo(burnedIze / mintedIze, 6) : null;
+
+  const crossBorderTransfers = crossBorderTransferRows.rows[0];
+  const crossBorderBurns = crossBorderBurnRows.rows[0];
+  const transferIze = Number(crossBorderTransfers?.total_ize ?? '0');
+  const burnIze = Number(crossBorderBurns?.total_ize ?? '0');
+  const transferCount = Number(crossBorderTransfers?.tx_count ?? '0');
+  const burnCountCrossBorder = Number(crossBorderBurns?.tx_count ?? '0');
+
+  const latestSnapshot = latestSnapshotRows.rows[0];
+  const latestSnapshotMetadata = asObject(latestSnapshot?.metadata);
+  const circulatingMg = latestSnapshot
+    ? Number(latestSnapshot.circulating_mg)
+    : Number(circulatingRows.rows[0]?.total ?? '0');
+  const reserveActiveMg = latestSnapshot
+    ? Number(latestSnapshot.reserve_active_mg)
+    : Math.max(0, Math.round(outstandingIze * ONEZE_MG_PER_IZE));
+  const supplyDeltaMg =
+    asFiniteNumber(latestSnapshotMetadata.supplyDeltaMg)
+    ?? (circulatingMg - reserveActiveMg);
+  const toleranceMg =
+    asFiniteNumber(latestSnapshotMetadata.toleranceMg)
+    ?? Math.max(0, Math.round(Math.abs(config.onezeSupplyDriftThresholdIze) * ONEZE_MG_PER_IZE));
+  const withinSupplyInvariant =
+    (typeof latestSnapshotMetadata.withinSupplyInvariant === 'boolean'
+      ? latestSnapshotMetadata.withinSupplyInvariant
+      : null)
+    ?? latestSnapshot?.within_invariant
+    ?? (Math.abs(supplyDeltaMg) <= toleranceMg);
+
+  const reservePolicy = buildOnezeReservePolicyState({
+    reserveActiveMg,
+    reservedWithdrawalMg: pendingWithdrawalMg,
+  });
+  const stressSignal =
+    reservePolicy.operationalLiquidityMg > 0
+      ? pendingWithdrawalMg / reservePolicy.operationalLiquidityMg
+      : pendingWithdrawalMg > 0
+        ? Number.POSITIVE_INFINITY
+        : 0;
+  const stressIndex = Number.isFinite(stressSignal) ? roundTo(stressSignal, 6) : null;
+  const stressLevel: 'normal' | 'elevated' | 'high' | 'critical' =
+    !Number.isFinite(stressSignal)
+      ? (pendingWithdrawalMg > 0 ? 'critical' : 'normal')
+      : stressSignal >= 1
+        ? 'critical'
+        : stressSignal >= 0.85
+          ? 'high'
+          : stressSignal >= 0.5
+            ? 'elevated'
+            : 'normal';
+
+  const netExposureMg = circulatingMg - reservePolicy.configuredOperationalReserveMg;
+
+  return {
+    evaluatedAt: new Date().toISOString(),
+    lookbackHours: safeLookbackHours,
+    countryFlows,
+    totals,
+    redemption: {
+      mintedIze,
+      burnedIze,
+      mintCount,
+      burnCount,
+      redemptionRate,
+    },
+    crossBorder: {
+      transferIze,
+      burnIze,
+      totalIze: roundTo(transferIze + burnIze, 6),
+      transferCount,
+      burnCount: burnCountCrossBorder,
+      totalCount: transferCount + burnCountCrossBorder,
+    },
+    liquidity: {
+      pendingWithdrawalMg,
+      operationalLiquidityMg: reservePolicy.operationalLiquidityMg,
+      stressIndex,
+      stressSignal,
+      stressLevel,
+    },
+    exposure: {
+      circulatingMg,
+      reserveActiveMg,
+      supplyDeltaMg,
+      toleranceMg,
+      withinSupplyInvariant,
+      netExposureMg,
+      netExposureIze: mgToOnezeAmount(netExposureMg),
+    },
+    reservePolicy,
+  };
+}
+
 async function captureOnezeReconciliationSnapshot(
   client: DbQueryable,
   reason: string,
@@ -2574,38 +3306,43 @@ async function captureOnezeReconciliationSnapshot(
   circulatingMg: number;
   reserveActiveMg: number;
   withinInvariant: boolean;
+  withinSupplyInvariant: boolean;
+  withinReservePolicy: boolean;
   invariantHash: string;
   supplyDeltaMg: number;
   toleranceMg: number;
   operationalLiquidityMg: number;
+  configuredOperationalReserveMg: number;
+  reservedWithdrawalMg: number;
+  configuredReserveRatio: number | null;
+  effectiveReserveRatio: number | null;
   createdAt: string;
 }> {
-  const [circulatingResult, operationalLiquidityResult, outstandingIze] = await Promise.all([
+  const [circulatingResult, outstandingIze, reservedWithdrawalMg] = await Promise.all([
     client.query<{ total: string }>(
       `
         SELECT COALESCE(SUM(oneze_balance_mg), 0)::text AS total
         FROM wallets
       `
     ),
-    client.query<{ total: string }>(
-      `
-        SELECT COALESCE(SUM(weight_mg), 0)::text AS total
-        FROM gold_reserve_lots
-        WHERE status = 'active'
-      `
-    ),
     getLedgerAccountBalance(client, 'platform', 'platform', 'ize_outstanding', 'IZE'),
+    getPendingWithdrawalAmountMg(client),
   ]);
 
   const circulatingMg = Number(circulatingResult.rows[0]?.total ?? '0');
   const reserveActiveMg = Math.max(0, Math.round(outstandingIze * ONEZE_MG_PER_IZE));
-  const operationalLiquidityMg = Number(operationalLiquidityResult.rows[0]?.total ?? '0');
+  const reservePolicy = buildOnezeReservePolicyState({
+    reserveActiveMg,
+    reservedWithdrawalMg,
+  });
+  const operationalLiquidityMg = reservePolicy.operationalLiquidityMg;
   const supplyDeltaMg = circulatingMg - reserveActiveMg;
-  const toleranceMg = Math.max(0, Math.round(Math.abs(config.goldReserveDriftThresholdGrams) * ONEZE_MG_PER_IZE));
-  const withinInvariant = Math.abs(supplyDeltaMg) <= toleranceMg;
+  const toleranceMg = Math.max(0, Math.round(Math.abs(config.onezeSupplyDriftThresholdIze) * ONEZE_MG_PER_IZE));
+  const withinSupplyInvariant = Math.abs(supplyDeltaMg) <= toleranceMg;
+  const withinInvariant = withinSupplyInvariant && reservePolicy.withinPolicy;
   const invariantHash = crypto
     .createHash('sha256')
-    .update(`${circulatingMg}|${reserveActiveMg}|${reason}`)
+    .update(`${circulatingMg}|${reserveActiveMg}|${reason}|${reservePolicy.effectiveReserveRatio ?? 'na'}`)
     .digest('hex');
   const snapshotId = createRuntimeId('recon');
 
@@ -2634,6 +3371,17 @@ async function captureOnezeReconciliationSnapshot(
         invariantMode: 'closed_loop_supply_parity',
         supplyDeltaMg,
         toleranceMg,
+        withinSupplyInvariant,
+        reservePolicy: {
+          enabled: reservePolicy.enabled,
+          minRatio: reservePolicy.minRatio,
+          maxRatio: reservePolicy.maxRatio,
+          configuredOperationalReserveMg: reservePolicy.configuredOperationalReserveMg,
+          reservedWithdrawalMg: reservePolicy.reservedWithdrawalMg,
+          configuredReserveRatio: reservePolicy.configuredReserveRatio,
+          effectiveReserveRatio: reservePolicy.effectiveReserveRatio,
+          withinPolicy: reservePolicy.withinPolicy,
+        },
         operationalLiquidityMg,
         ...(metadata ?? {}),
       }),
@@ -2645,10 +3393,16 @@ async function captureOnezeReconciliationSnapshot(
     circulatingMg,
     reserveActiveMg,
     withinInvariant,
+    withinSupplyInvariant,
+    withinReservePolicy: reservePolicy.withinPolicy,
     invariantHash,
     supplyDeltaMg,
     toleranceMg,
     operationalLiquidityMg,
+    configuredOperationalReserveMg: reservePolicy.configuredOperationalReserveMg,
+    reservedWithdrawalMg: reservePolicy.reservedWithdrawalMg,
+    configuredReserveRatio: reservePolicy.configuredReserveRatio,
+    effectiveReserveRatio: reservePolicy.effectiveReserveRatio,
     createdAt: inserted.rows[0]?.created_at ?? new Date().toISOString(),
   };
 }
@@ -2698,19 +3452,8 @@ async function executeReservedWithdrawal(
 
   const amountMg = Number(withdrawal.amount_mg);
   const linkedTxId = withdrawal.burn_tx_id ?? createRuntimeId('wdburn');
-  const reserveConsumption = await consumeReserveLotsForBurn(client, {
-    linkedTxId,
-    requiredMg: amountMg,
-    metadata: {
-      withdrawalId: withdrawal.id,
-      stage: 'execute',
-      ...(input.metadata ?? {}),
-    },
-  });
-
-  const inrRate = await resolveGoldRate(client, 'INR', {
-    forceRefresh: false,
-  });
+  const reserveConsumption: Array<{ lotId: string; consumedMg: number }> = [];
+  const pricingQuote = await resolveCountryPricingQuoteByCurrency(client, withdrawal.target_currency);
 
   const wallet = await ensureWallet(client, withdrawal.user_id, withdrawal.target_currency);
   const walletBalanceAfterMg = await applyWalletLedgerDelta(client, {
@@ -2721,10 +3464,11 @@ async function executeReservedWithdrawal(
     kind: 'WITHDRAWAL_SETTLED',
     refType: 'withdrawal',
     refId: withdrawal.id,
-    goldRateInrPerG: inrRate.ratePerGram,
+    anchorValueInInr: pricingQuote.anchorValueInInr,
     metadata: {
       withdrawalId: withdrawal.id,
       reserveLots: reserveConsumption,
+      pricingSource: `internal_pricing:${pricingQuote.countryCode}:sell`,
       ...(input.metadata ?? {}),
     },
   });
@@ -3292,12 +4036,14 @@ async function postCommerceOrderLedgerEntries(
     sellerId: string;
     subtotalGbp: number;
     platformChargeGbp: number;
+    postageFeeGbp?: number;
     totalGbp: number;
   }
 ): Promise<void> {
   const totalGbp = roundTo(input.totalGbp, 2);
   const subtotalGbp = roundTo(input.subtotalGbp, 2);
   const platformChargeGbp = roundTo(input.platformChargeGbp, 2);
+  const postageFeeGbp = roundTo(Math.max(0, input.postageFeeGbp ?? 0), 2);
 
   if (totalGbp <= 0) {
     return;
@@ -3381,6 +4127,113 @@ async function postCommerceOrderLedgerEntries(
       },
     });
   }
+
+  if (postageFeeGbp > 0) {
+    await appendLedgerEntry(client, {
+      accountId: escrowAccountId,
+      counterpartyAccountId: platformRevenueAccountId,
+      direction: 'debit',
+      amountGbp: postageFeeGbp,
+      sourceType: 'order_payment',
+      sourceId: input.orderId,
+      lineType: 'postage_fee_credit',
+      metadata: {
+        component: 'postage_fee',
+      },
+    });
+
+    await appendLedgerEntry(client, {
+      accountId: platformRevenueAccountId,
+      counterpartyAccountId: escrowAccountId,
+      direction: 'credit',
+      amountGbp: postageFeeGbp,
+      sourceType: 'order_payment',
+      sourceId: input.orderId,
+      lineType: 'postage_fee_credit',
+      metadata: {
+        component: 'postage_fee',
+      },
+    });
+  }
+}
+
+async function hasCommerceOrderRefundReversalPosted(
+  client: DbQueryable,
+  orderId: string
+): Promise<boolean> {
+  const result = await client.query<{ exists: boolean }>(
+    `
+      SELECT EXISTS (
+        SELECT 1
+        FROM ledger_entries
+        WHERE source_id = $1
+          AND source_type = 'refund'
+          AND line_type = 'buyer_refund'
+      ) AS exists
+    `,
+    [orderId]
+  );
+
+  return Boolean(result.rows[0]?.exists);
+}
+
+async function postCommerceOrderRefundLedgerReversal(
+  client: DbQueryable,
+  orderId: string,
+  buyerId: string,
+  totalGbp: number
+): Promise<{ reversed: boolean; alreadyReversed: boolean }> {
+  if (totalGbp <= 0) {
+    return {
+      reversed: false,
+      alreadyReversed: true,
+    };
+  }
+
+  if (await hasCommerceOrderRefundReversalPosted(client, orderId)) {
+    return {
+      reversed: false,
+      alreadyReversed: true,
+    };
+  }
+
+  const buyerSpendAccountId = await ensureLedgerAccount(
+    client,
+    'user',
+    buyerId,
+    'buyer_spend'
+  );
+  const escrowAccountId = await ensureLedgerAccount(
+    client,
+    'platform',
+    'platform',
+    'escrow_liability'
+  );
+
+  await appendLedgerEntry(client, {
+    accountId: escrowAccountId,
+    counterpartyAccountId: buyerSpendAccountId,
+    direction: 'debit',
+    amountGbp: totalGbp,
+    sourceType: 'refund',
+    sourceId: orderId,
+    lineType: 'buyer_refund',
+  });
+
+  await appendLedgerEntry(client, {
+    accountId: buyerSpendAccountId,
+    counterpartyAccountId: escrowAccountId,
+    direction: 'credit',
+    amountGbp: totalGbp,
+    sourceType: 'refund',
+    sourceId: orderId,
+    lineType: 'buyer_refund',
+  });
+
+  return {
+    reversed: true,
+    alreadyReversed: false,
+  };
 }
 
 async function hasCommerceOrderSellerEscrowReleased(
@@ -3502,6 +4355,522 @@ async function releaseCommerceOrderEscrowToSeller(
   return {
     released: true,
     alreadyReleased: false,
+  };
+}
+
+interface CommerceOrderDbRow {
+  id: string;
+  buyer_id: string;
+  seller_id: string;
+  listing_id: string;
+  subtotal_gbp: number | string;
+  buyer_protection_fee_gbp: number | string;
+  postage_fee_gbp: number | string;
+  total_gbp: number | string;
+  status: string;
+  address_id: number | null;
+  payment_method_id: number | null;
+  shipping_carrier_id: string | null;
+  shipping_provider: string | null;
+  tracking_number: string | null;
+  shipping_label_url: string | null;
+  shipping_quote_gbp: number | string | null;
+  shipped_at: string | null;
+  delivered_at: string | null;
+  shipping_metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+async function resolveUserPrimaryPostcode(client: DbQueryable, userId: string): Promise<string | null> {
+  const result = await client.query<{ postcode: string }>(
+    `
+      SELECT postcode
+      FROM user_addresses
+      WHERE user_id = $1
+      ORDER BY is_default DESC, updated_at DESC, created_at DESC
+      LIMIT 1
+    `,
+    [userId]
+  );
+
+  return result.rows[0]?.postcode ?? null;
+}
+
+async function provisionOrderShipmentIfMissing(
+  client: DbQueryable,
+  input: {
+    orderId: string;
+    buyerId: string;
+    sellerId: string;
+    addressId: number | null;
+    listingId: string;
+    preferredCarrierId?: string | null;
+    postageFeeGbp?: number;
+  }
+): Promise<
+  | {
+    provisioned: true;
+    shippingProvider: string;
+    trackingNumber: string;
+    shippingLabelUrl: string | null;
+    quoteGbp: number;
+  }
+  | {
+    provisioned: false;
+    reason: string;
+    shippingProvider?: string | null;
+    trackingNumber?: string | null;
+    shippingLabelUrl?: string | null;
+    quoteGbp?: number | null;
+  }
+> {
+  const existing = await client.query<{
+    tracking_number: string | null;
+    shipping_provider: string | null;
+    shipping_label_url: string | null;
+    shipping_quote_gbp: number | string | null;
+  }>(
+    `
+      SELECT
+        tracking_number,
+        shipping_provider,
+        shipping_label_url,
+        shipping_quote_gbp
+      FROM orders
+      WHERE id = $1
+      LIMIT 1
+      FOR UPDATE
+    `,
+    [input.orderId]
+  );
+
+  const current = existing.rows[0];
+  if (current?.tracking_number) {
+    return {
+      provisioned: false,
+      reason: 'tracking_already_present',
+      trackingNumber: current.tracking_number,
+      shippingProvider: current.shipping_provider,
+      shippingLabelUrl: current.shipping_label_url,
+      quoteGbp: current.shipping_quote_gbp === null ? null : Number(current.shipping_quote_gbp),
+    };
+  }
+
+  const destinationPostcode = input.addressId
+    ? (
+      await client.query<{ postcode: string }>(
+        'SELECT postcode FROM user_addresses WHERE id = $1 AND user_id = $2 LIMIT 1',
+        [input.addressId, input.buyerId]
+      )
+    ).rows[0]?.postcode ?? null
+    : await resolveUserPrimaryPostcode(client, input.buyerId);
+
+  const originPostcode = await resolveUserPrimaryPostcode(client, input.sellerId);
+
+  if (!originPostcode || !destinationPostcode) {
+    return {
+      provisioned: false,
+      reason: 'postcode_context_missing',
+    };
+  }
+
+  let postageCarriers: CapabilityCarrier[] = resolveCountryCapabilities({
+    countryCode: 'GB',
+  }).postage.carriers;
+
+  try {
+    if (await onezeP2pTablesAvailable(client)) {
+      const buyerProfile = await getOrCreateComplianceProfile(client, input.buyerId);
+      const capabilities = resolveCountryCapabilities({
+        countryCode: buyerProfile.countryCode,
+        residencyCountryCode: buyerProfile.residencyCountryCode,
+      });
+
+      if (capabilities.postage.carriers.length > 0) {
+        postageCarriers = capabilities.postage.carriers;
+      }
+    }
+  } catch {
+    // Default carrier profile is used when compliance context is unavailable.
+  }
+
+  const selectedCarrier =
+    postageCarriers.find((carrier) => carrier.id === input.preferredCarrierId)
+    ?? postageCarriers[0]
+    ?? {
+      id: input.preferredCarrierId ?? 'evri',
+      label: 'Evri',
+      priceFromGbp: 2.9,
+      etaMinDays: 2,
+      etaMaxDays: 4,
+      tracking: true,
+    };
+
+  const shipment = await createShipment({
+    orderId: input.orderId,
+    carrierId: selectedCarrier.id,
+    carrierLabel: selectedCarrier.label,
+    originPostcode,
+    destinationPostcode,
+    declaredValueGbp: input.postageFeeGbp,
+  });
+
+  const resolvedQuoteGbp = roundTo(
+    Math.max(0, input.postageFeeGbp ?? shipment.priceGbp ?? selectedCarrier.priceFromGbp),
+    2
+  );
+
+  await client.query(
+    `
+      UPDATE orders
+      SET
+        shipping_carrier_id = COALESCE(shipping_carrier_id, $2),
+        shipping_provider = COALESCE(shipping_provider, $3),
+        tracking_number = COALESCE(tracking_number, $4),
+        shipping_label_url = COALESCE(shipping_label_url, $5),
+        shipping_quote_gbp = COALESCE(shipping_quote_gbp, $6),
+        shipping_metadata = COALESCE(shipping_metadata, '{}'::jsonb) || $7::jsonb,
+        updated_at = NOW()
+      WHERE id = $1
+    `,
+    [
+      input.orderId,
+      selectedCarrier.id,
+      shipment.provider,
+      shipment.trackingNumber,
+      shipment.labelUrl,
+      resolvedQuoteGbp,
+      toJsonString({
+        shipment: {
+          carrierId: selectedCarrier.id,
+          provider: shipment.provider,
+          trackingNumber: shipment.trackingNumber,
+          labelUrl: shipment.labelUrl,
+          quoteGbp: resolvedQuoteGbp,
+          live: shipment.live,
+          metadata: shipment.metadata,
+          provisionedAt: new Date().toISOString(),
+        },
+      }),
+    ]
+  );
+
+  return {
+    provisioned: true,
+    shippingProvider: shipment.provider,
+    trackingNumber: shipment.trackingNumber,
+    shippingLabelUrl: shipment.labelUrl,
+    quoteGbp: resolvedQuoteGbp,
+  };
+}
+
+async function applyOrderParcelEvent(
+  client: PoolClient,
+  input: {
+    orderId: string;
+    provider: string;
+    eventType: ParcelEventType;
+    providerEventId?: string;
+    trackingId?: string;
+    occurredAt?: string;
+    payload?: Record<string, unknown>;
+    source: 'admin' | 'shipping_webhook';
+  }
+): Promise<{
+  idempotent: boolean;
+  parcelEvent: {
+    provider: string;
+    eventType: ParcelEventType;
+    providerEventId: string | null;
+    trackingId: string | null;
+    occurredAt: string | null;
+    recorded: boolean;
+    duplicate: boolean;
+  };
+  order: {
+    id: string;
+    buyerId: string;
+    sellerId: string;
+    listingId: string;
+    subtotalGbp: number;
+    buyerProtectionFeeGbp: number;
+    platformChargeGbp: number;
+    postageFeeGbp: number;
+    totalGbp: number;
+    status: string;
+    addressId: number | null;
+    paymentMethodId: number | null;
+    shippingCarrierId: string | null;
+    shippingProvider: string | null;
+    trackingNumber: string | null;
+    shippingLabelUrl: string | null;
+    shippingQuoteGbp: number | null;
+    shippedAt: string | null;
+    deliveredAt: string | null;
+    createdAt: string;
+    updatedAt: string;
+  };
+  settlement: {
+    releasePolicy: 'parcel_delivery_confirmation';
+    sellerEscrowHeldGbp: number;
+    sellerPayableReleasedGbp: number;
+    sellerCashoutEligible: boolean;
+    alreadyReleased: boolean;
+  };
+}> {
+  const orderResult = await client.query<CommerceOrderDbRow>(
+    `
+      SELECT
+        id,
+        buyer_id,
+        seller_id,
+        listing_id,
+        subtotal_gbp,
+        buyer_protection_fee_gbp,
+        postage_fee_gbp,
+        total_gbp,
+        status,
+        address_id,
+        payment_method_id,
+        shipping_carrier_id,
+        shipping_provider,
+        tracking_number,
+        shipping_label_url,
+        shipping_quote_gbp,
+        shipped_at::text,
+        delivered_at::text,
+        shipping_metadata,
+        created_at::text,
+        updated_at::text
+      FROM orders
+      WHERE id = $1
+      LIMIT 1
+      FOR UPDATE
+    `,
+    [input.orderId]
+  );
+
+  const order = orderResult.rows[0];
+  if (!order) {
+    throw createApiError('ORDER_NOT_FOUND', 'Order not found', {
+      orderId: input.orderId,
+      source: input.source,
+    });
+  }
+
+  if (order.status === 'created') {
+    throw createApiError('ORDER_NOT_READY', 'Order has not been paid yet, parcel events cannot be applied', {
+      orderId: input.orderId,
+      source: input.source,
+    });
+  }
+
+  if (order.status === 'cancelled') {
+    throw createApiError('ORDER_INVALID_STATE', 'Order is cancelled and cannot accept parcel events', {
+      orderId: input.orderId,
+      source: input.source,
+    });
+  }
+
+  let parcelEventRecorded = true;
+  let parcelEventDuplicate = false;
+  if (await orderParcelEventsTableAvailable(client)) {
+    const storedEvent = await client.query<{ id: number }>(
+      `
+        INSERT INTO order_parcel_events (
+          order_id,
+          provider,
+          event_type,
+          provider_event_id,
+          tracking_id,
+          occurred_at,
+          payload
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+        ON CONFLICT (provider, provider_event_id)
+        WHERE provider_event_id IS NOT NULL
+        DO NOTHING
+        RETURNING id
+      `,
+      [
+        input.orderId,
+        input.provider,
+        input.eventType,
+        input.providerEventId ?? null,
+        input.trackingId ?? null,
+        input.occurredAt ?? null,
+        toJsonString(input.payload ?? {}),
+      ]
+    );
+
+    const insertedEventCount = storedEvent.rowCount ?? 0;
+    parcelEventRecorded = insertedEventCount > 0 || !input.providerEventId;
+    parcelEventDuplicate = Boolean(input.providerEventId) && insertedEventCount === 0;
+  }
+
+  let nextStatus = order.status;
+  if (PARCEL_DELIVERY_RELEASE_EVENTS.has(input.eventType)) {
+    if (order.status === 'paid' || order.status === 'shipped') {
+      nextStatus = 'delivered';
+    }
+  } else if (PARCEL_SHIPPING_PROGRESS_EVENTS.has(input.eventType)) {
+    if (order.status === 'paid') {
+      nextStatus = 'shipped';
+    }
+  }
+
+  let status = order.status;
+  let updatedAt = order.updated_at;
+  let shippedAt = order.shipped_at;
+  let deliveredAt = order.delivered_at;
+  let trackingNumber = order.tracking_number;
+  let shippingProvider = order.shipping_provider;
+  let shippingLabelUrl = order.shipping_label_url;
+  let shippingQuoteGbp = order.shipping_quote_gbp === null ? null : Number(order.shipping_quote_gbp);
+  let shippingCarrierId = order.shipping_carrier_id;
+  let statusChanged = false;
+
+  const shouldUpdateTracking = Boolean(input.trackingId) && trackingNumber !== input.trackingId;
+  const shouldUpdateProvider = !shippingProvider && input.provider.trim().length > 0;
+
+  if (nextStatus !== order.status || shouldUpdateTracking || shouldUpdateProvider) {
+    const updatedOrder = await client.query<{
+      status: string;
+      updated_at: string;
+      shipped_at: string | null;
+      delivered_at: string | null;
+      tracking_number: string | null;
+      shipping_provider: string | null;
+      shipping_label_url: string | null;
+      shipping_quote_gbp: number | string | null;
+      shipping_carrier_id: string | null;
+    }>(
+      `
+        UPDATE orders
+        SET
+          status = $2,
+          shipped_at = CASE
+            WHEN $2 = 'shipped' THEN COALESCE(shipped_at, NOW())
+            ELSE shipped_at
+          END,
+          delivered_at = CASE
+            WHEN $2 = 'delivered' THEN COALESCE(delivered_at, NOW())
+            ELSE delivered_at
+          END,
+          tracking_number = COALESCE($3, tracking_number),
+          shipping_provider = COALESCE($4, shipping_provider),
+          updated_at = NOW()
+        WHERE id = $1
+        RETURNING
+          status,
+          updated_at::text,
+          shipped_at::text,
+          delivered_at::text,
+          tracking_number,
+          shipping_provider,
+          shipping_label_url,
+          shipping_quote_gbp::text,
+          shipping_carrier_id
+      `,
+      [
+        input.orderId,
+        nextStatus,
+        input.trackingId ?? null,
+        shouldUpdateProvider ? input.provider : null,
+      ]
+    );
+
+    const updatedRow = updatedOrder.rows[0];
+    if (updatedRow) {
+      status = updatedRow.status;
+      updatedAt = updatedRow.updated_at;
+      shippedAt = updatedRow.shipped_at;
+      deliveredAt = updatedRow.delivered_at;
+      trackingNumber = updatedRow.tracking_number;
+      shippingProvider = updatedRow.shipping_provider;
+      shippingLabelUrl = updatedRow.shipping_label_url;
+      shippingQuoteGbp = updatedRow.shipping_quote_gbp === null ? null : Number(updatedRow.shipping_quote_gbp);
+      shippingCarrierId = updatedRow.shipping_carrier_id;
+      statusChanged = status !== order.status;
+    }
+  }
+
+  let sellerPayableReleasedGbp = 0;
+  let alreadyReleased = false;
+  if (PARCEL_DELIVERY_RELEASE_EVENTS.has(input.eventType)) {
+    if (order.status !== 'paid' && order.status !== 'shipped' && order.status !== 'delivered') {
+      throw createApiError('ORDER_INVALID_STATE', `Order cannot be delivered from status '${order.status}'`, {
+        orderId: input.orderId,
+        status: order.status,
+      });
+    }
+
+    if (await ledgerTablesAvailable(client)) {
+      const release = await releaseCommerceOrderEscrowToSeller(client, {
+        orderId: order.id,
+        sellerId: order.seller_id,
+        subtotalGbp: Number(order.subtotal_gbp),
+        parcelProvider: input.provider,
+        parcelEventType: input.eventType,
+        trackingId: input.trackingId,
+        providerEventId: input.providerEventId,
+      });
+
+      sellerPayableReleasedGbp = release.released ? Number(order.subtotal_gbp) : 0;
+      alreadyReleased = release.alreadyReleased;
+    }
+  }
+
+  const sellerEscrowHeldGbp = Number(order.subtotal_gbp);
+  const platformChargeGbp = Number(order.buyer_protection_fee_gbp);
+  const postageFeeGbp = Number(order.postage_fee_gbp);
+  const idempotent =
+    !statusChanged
+    && !sellerPayableReleasedGbp
+    && (alreadyReleased || parcelEventDuplicate);
+
+  return {
+    idempotent,
+    parcelEvent: {
+      provider: input.provider,
+      eventType: input.eventType,
+      providerEventId: input.providerEventId ?? null,
+      trackingId: input.trackingId ?? null,
+      occurredAt: input.occurredAt ?? null,
+      recorded: parcelEventRecorded,
+      duplicate: parcelEventDuplicate,
+    },
+    order: {
+      id: order.id,
+      buyerId: order.buyer_id,
+      sellerId: order.seller_id,
+      listingId: order.listing_id,
+      subtotalGbp: sellerEscrowHeldGbp,
+      buyerProtectionFeeGbp: platformChargeGbp,
+      platformChargeGbp,
+      postageFeeGbp,
+      totalGbp: Number(order.total_gbp),
+      status,
+      addressId: order.address_id,
+      paymentMethodId: order.payment_method_id,
+      shippingCarrierId,
+      shippingProvider,
+      trackingNumber,
+      shippingLabelUrl,
+      shippingQuoteGbp,
+      shippedAt,
+      deliveredAt,
+      createdAt: order.created_at,
+      updatedAt,
+    },
+    settlement: {
+      releasePolicy: 'parcel_delivery_confirmation',
+      sellerEscrowHeldGbp,
+      sellerPayableReleasedGbp,
+      sellerCashoutEligible: status === 'delivered',
+      alreadyReleased,
+    },
   };
 }
 
@@ -3922,6 +5291,15 @@ async function settlePaymentIntent(
     sellerCashoutEligible: boolean;
     platformCommissionCreditedGbp: number;
     platformChargeCreditedGbp: number;
+    postageFeeCreditedGbp: number;
+    shipment?: {
+      provisioned: boolean;
+      reason?: string;
+      trackingNumber?: string | null;
+      shippingProvider?: string | null;
+      shippingLabelUrl?: string | null;
+      shippingQuoteGbp?: number | null;
+    };
   };
 }> {
   const intentResult = await client.query<PaymentIntentRow>(
@@ -4060,6 +5438,15 @@ async function settlePaymentIntent(
         sellerCashoutEligible: boolean;
         platformCommissionCreditedGbp: number;
         platformChargeCreditedGbp: number;
+        postageFeeCreditedGbp: number;
+        shipment?: {
+          provisioned: boolean;
+          reason?: string;
+          trackingNumber?: string | null;
+          shippingProvider?: string | null;
+          shippingLabelUrl?: string | null;
+          shippingQuoteGbp?: number | null;
+        };
       }
     | undefined;
 
@@ -4068,9 +5455,13 @@ async function settlePaymentIntent(
       id: string;
       buyer_id: string;
       seller_id: string;
+      listing_id: string;
+      address_id: number | null;
       subtotal_gbp: number | string;
       buyer_protection_fee_gbp: number | string;
+      postage_fee_gbp: number | string;
       total_gbp: number | string;
+      shipping_carrier_id: string | null;
     }>(
       `
         UPDATE orders
@@ -4080,9 +5471,13 @@ async function settlePaymentIntent(
           id,
           buyer_id,
           seller_id,
+          listing_id,
+          address_id,
           subtotal_gbp,
           buyer_protection_fee_gbp,
+          postage_fee_gbp,
           total_gbp
+          ,shipping_carrier_id
       `,
       [updatedIntent.order_id]
     );
@@ -4096,19 +5491,75 @@ async function settlePaymentIntent(
           sellerId: paidOrder.seller_id,
           subtotalGbp: Number(paidOrder.subtotal_gbp),
           platformChargeGbp: Number(paidOrder.buyer_protection_fee_gbp),
+          postageFeeGbp: Number(paidOrder.postage_fee_gbp),
           totalGbp: Number(paidOrder.total_gbp),
         });
       }
 
+      let shipment:
+        | {
+          provisioned: boolean;
+          reason?: string;
+          trackingNumber?: string | null;
+          shippingProvider?: string | null;
+          shippingLabelUrl?: string | null;
+          shippingQuoteGbp?: number | null;
+        }
+        | undefined;
+
+      try {
+        const provisionedShipment = await provisionOrderShipmentIfMissing(client, {
+          orderId: paidOrder.id,
+          buyerId: paidOrder.buyer_id,
+          sellerId: paidOrder.seller_id,
+          addressId: paidOrder.address_id,
+          listingId: paidOrder.listing_id,
+          preferredCarrierId: paidOrder.shipping_carrier_id,
+          postageFeeGbp: Number(paidOrder.postage_fee_gbp),
+        });
+
+        shipment = provisionedShipment.provisioned
+          ? {
+            provisioned: true,
+            trackingNumber: provisionedShipment.trackingNumber,
+            shippingProvider: provisionedShipment.shippingProvider,
+            shippingLabelUrl: provisionedShipment.shippingLabelUrl,
+            shippingQuoteGbp: provisionedShipment.quoteGbp,
+          }
+          : {
+            provisioned: false,
+            reason: provisionedShipment.reason,
+            trackingNumber: provisionedShipment.trackingNumber,
+            shippingProvider: provisionedShipment.shippingProvider,
+            shippingLabelUrl: provisionedShipment.shippingLabelUrl,
+            shippingQuoteGbp: provisionedShipment.quoteGbp,
+          };
+      } catch (shipmentError) {
+        shipment = {
+          provisioned: false,
+          reason: 'shipment_provision_failed',
+        };
+        app.log.error(
+          {
+            err: shipmentError,
+            orderId: paidOrder.id,
+          },
+          'Failed to provision shipment after payment settlement'
+        );
+      }
+
       const platformChargeCreditedGbp = Number(paidOrder.buyer_protection_fee_gbp);
+      const postageFeeCreditedGbp = Number(paidOrder.postage_fee_gbp);
       orderSettlement = {
         orderId: paidOrder.id,
         buyerChargedGbp: Number(paidOrder.total_gbp),
         sellerPayableCreditedGbp: 0,
         sellerEscrowHeldGbp: Number(paidOrder.subtotal_gbp),
         sellerCashoutEligible: false,
-        platformCommissionCreditedGbp: platformChargeCreditedGbp,
+        platformCommissionCreditedGbp: roundTo(platformChargeCreditedGbp + postageFeeCreditedGbp, 2),
         platformChargeCreditedGbp,
+        postageFeeCreditedGbp,
+        shipment,
       };
     }
   }
@@ -4472,6 +5923,49 @@ async function settlePayoutRequest(
       'PAYOUT_INVALID_TRANSITION',
       `Payout request cannot transition from '${payoutRequest.status}' to '${input.targetStatus}'`
     );
+  }
+
+  const payoutMetadata = asObject(payoutRequest.metadata);
+  const safeguardsMetadata = asObject(payoutMetadata.safeguards);
+  const manualReviewRequired =
+    payoutMetadata.manualReviewRequired === true
+    || safeguardsMetadata.manualReviewRequired === true
+    || payoutMetadata.nameMismatch === true;
+
+  const isForwardSettlement = input.targetStatus === 'processing' || input.targetStatus === 'paid';
+  const transitionSource = input.source ?? 'manual_status';
+
+  if (isForwardSettlement) {
+    if (
+      manualReviewRequired
+      && transitionSource !== 'admin_review'
+      && transitionSource !== 'provider_webhook'
+      && transitionSource !== 'mock_webhook'
+    ) {
+      throw createApiError(
+        'PAYOUT_REVIEW_REQUIRED',
+        'Payout request requires admin review before processing',
+        {
+          requestId: input.requestId,
+          manualReviewRequired,
+        }
+      );
+    }
+
+    if (transitionSource !== 'provider_webhook' && transitionSource !== 'mock_webhook') {
+      const pauseState = await getPayoutPauseState();
+      if (pauseState.paused) {
+        throw createApiError(
+          'PAYOUTS_PAUSED',
+          'Payouts are temporarily paused for reconciliation review',
+          {
+            reason: pauseState.reason,
+            reconciliationRunId: pauseState.reconciliationRunId,
+            mismatchGbp: pauseState.mismatchGbp,
+          }
+        );
+      }
+    }
   }
 
   const amountGbp = roundTo(Number(payoutRequest.amount_gbp), 2);
@@ -4869,6 +6363,210 @@ async function queueUserNotification(input: {
   return eventId;
 }
 
+function formatGbpAmount(amountGbp: number): string {
+  return `£${roundTo(Math.max(0, amountGbp), 2).toFixed(2)}`;
+}
+
+async function queueCommercePaymentNotifications(input: {
+  orderId: string;
+  source: string;
+}): Promise<void> {
+  const orderResult = await db.query<{
+    id: string;
+    buyer_id: string;
+    seller_id: string;
+    shipping_label_url: string | null;
+    tracking_number: string | null;
+    listing_title: string | null;
+  }>(
+    `
+      SELECT
+        o.id,
+        o.buyer_id,
+        o.seller_id,
+        o.shipping_label_url,
+        o.tracking_number,
+        l.title AS listing_title
+      FROM orders o
+      LEFT JOIN listings l ON l.id = o.listing_id
+      WHERE o.id = $1
+      LIMIT 1
+    `,
+    [input.orderId]
+  );
+
+  const order = orderResult.rows[0];
+  if (!order) {
+    return;
+  }
+
+  const listingTitle = order.listing_title?.trim() || 'your order';
+
+  try {
+    await queueUserNotification({
+      userId: order.buyer_id,
+      title: 'Payment confirmed',
+      body: `Payment confirmed for ${listingTitle}`,
+      payload: {
+        event: 'order_payment_succeeded',
+        orderId: order.id,
+      },
+      metadata: {
+        source: input.source,
+      },
+    });
+  } catch (error) {
+    app.log.error({ err: error, orderId: order.id }, 'Failed to queue buyer payment-confirmed notification');
+  }
+
+  try {
+    await queueUserNotification({
+      userId: order.seller_id,
+      title: 'New order',
+      body: 'New order! Print the shipping label',
+      payload: {
+        event: 'order_payment_succeeded_seller',
+        orderId: order.id,
+        shippingLabelUrl: order.shipping_label_url,
+      },
+      metadata: {
+        source: input.source,
+      },
+    });
+  } catch (error) {
+    app.log.error({ err: error, orderId: order.id }, 'Failed to queue seller new-order notification');
+  }
+
+  if (order.shipping_label_url || order.tracking_number) {
+    try {
+      await queueUserNotification({
+        userId: order.buyer_id,
+        title: 'Shipment created',
+        body: 'Your order is on its way!',
+        payload: {
+          event: 'order_shipment_created',
+          orderId: order.id,
+          trackingNumber: order.tracking_number,
+        },
+        metadata: {
+          source: input.source,
+        },
+      });
+    } catch (error) {
+      app.log.error({ err: error, orderId: order.id }, 'Failed to queue buyer shipment-created notification');
+    }
+  }
+}
+
+async function queueCommerceParcelSettlementNotifications(input: {
+  orderId: string;
+  buyerId: string;
+  sellerId: string;
+  orderStatus: string;
+  sellerPayableReleasedGbp: number;
+  source: string;
+  provider: string;
+  eventType: string;
+}): Promise<void> {
+  if (input.orderStatus === 'delivered') {
+    try {
+      await queueUserNotification({
+        userId: input.buyerId,
+        title: 'Order delivered',
+        body: 'Your order has been delivered',
+        payload: {
+          event: 'order_delivered',
+          orderId: input.orderId,
+          provider: input.provider,
+          eventType: input.eventType,
+        },
+        metadata: {
+          source: input.source,
+        },
+      });
+    } catch (error) {
+      app.log.error({ err: error, orderId: input.orderId }, 'Failed to queue buyer delivered notification');
+    }
+  }
+
+  if (input.sellerPayableReleasedGbp > 0) {
+    try {
+      await queueUserNotification({
+        userId: input.sellerId,
+        title: 'Escrow released',
+        body: `${formatGbpAmount(input.sellerPayableReleasedGbp)} released to your balance`,
+        payload: {
+          event: 'order_escrow_released',
+          orderId: input.orderId,
+          amountGbp: roundTo(input.sellerPayableReleasedGbp, 2),
+          provider: input.provider,
+          eventType: input.eventType,
+        },
+        metadata: {
+          source: input.source,
+        },
+      });
+    } catch (error) {
+      app.log.error({ err: error, orderId: input.orderId }, 'Failed to queue seller escrow-released notification');
+    }
+  }
+}
+
+async function queuePayoutProcessedNotification(input: {
+  payoutRequest: ReturnType<typeof toPayoutRequestPayload>;
+  source: string;
+}): Promise<void> {
+  if (input.payoutRequest.status !== 'paid') {
+    return;
+  }
+
+  try {
+    await queueUserNotification({
+      userId: input.payoutRequest.userId,
+      title: 'Payout processed',
+      body: `${formatGbpAmount(input.payoutRequest.amountGbp)} sent to your bank`,
+      payload: {
+        event: 'payout_processed',
+        payoutRequestId: input.payoutRequest.id,
+        amountGbp: input.payoutRequest.amountGbp,
+      },
+      metadata: {
+        source: input.source,
+      },
+    });
+  } catch (error) {
+    app.log.error(
+      { err: error, payoutRequestId: input.payoutRequest.id },
+      'Failed to queue payout-processed notification'
+    );
+  }
+}
+
+async function queueRefundCompletedNotification(input: {
+  userId: string;
+  amountGbp: number;
+  orderId?: string | null;
+  source: string;
+}): Promise<void> {
+  try {
+    await queueUserNotification({
+      userId: input.userId,
+      title: 'Refund completed',
+      body: `${formatGbpAmount(input.amountGbp)} refunded`,
+      payload: {
+        event: 'refund_completed',
+        amountGbp: roundTo(input.amountGbp, 2),
+        orderId: input.orderId ?? null,
+      },
+      metadata: {
+        source: input.source,
+      },
+    });
+  } catch (error) {
+    app.log.error({ err: error, orderId: input.orderId }, 'Failed to queue refund-completed notification');
+  }
+}
+
 async function processPushQueueJob(job: {
   eventId: string;
   userId: string;
@@ -5166,6 +6864,617 @@ function stopAuctionSweepScheduler(): void {
 
 let onezeReconcileTimer: NodeJS.Timeout | null = null;
 let onezeDailyAttestationTimer: NodeJS.Timeout | null = null;
+let onezeFxSyncTimer: NodeJS.Timeout | null = null;
+let onezeAutoAdjustTimer: NodeJS.Timeout | null = null;
+let reconciliationSchedulerDelayTimer: NodeJS.Timeout | null = null;
+let reconciliationSchedulerIntervalTimer: NodeJS.Timeout | null = null;
+let opsAlertingTimer: NodeJS.Timeout | null = null;
+let platformRevenueSweepTimer: NodeJS.Timeout | null = null;
+
+type PlatformRevenueSweepReason = 'startup' | 'interval' | 'manual';
+type OnezeFxSyncReason = 'startup' | 'interval' | 'manual';
+type OnezeAutoAdjustReason = 'startup' | 'interval' | 'manual';
+type PlatformRevenueSweepGateway = 'wise' | 'wise_global';
+
+interface PlatformRevenueSweepExternalTransfer {
+  attempted: boolean;
+  executed: boolean;
+  gatewayId: 'wise_global' | null;
+  status: 'executed' | 'skipped';
+  reason: string | null;
+  providerTransferRef: string | null;
+  providerQuoteRef: string | null;
+}
+
+function stringValue(value: unknown): string | null {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+
+  return null;
+}
+
+function resolvePlatformRevenueSweepGateway(): PlatformRevenueSweepGateway | null {
+  const configuredGateway = config.platformRevenueSweepGateway;
+  if (!configuredGateway) {
+    return null;
+  }
+
+  if (configuredGateway === 'wise' || configuredGateway === 'wise_global') {
+    return configuredGateway;
+  }
+
+  return null;
+}
+
+async function executeWisePlatformRevenueSweepTransfer(input: {
+  amountGbp: number;
+  sourceId: string;
+  reason: PlatformRevenueSweepReason;
+}): Promise<PlatformRevenueSweepExternalTransfer> {
+  if (!config.wiseApiKey) {
+    return {
+      attempted: false,
+      executed: false,
+      gatewayId: 'wise_global',
+      status: 'skipped',
+      reason: 'wise_api_key_missing',
+      providerTransferRef: null,
+      providerQuoteRef: null,
+    };
+  }
+
+  const profileId = Number(config.wisePlatformProfileId);
+  const recipientAccountId = Number(config.wisePlatformRecipientAccountId);
+  if (!Number.isFinite(profileId) || profileId <= 0 || !Number.isFinite(recipientAccountId) || recipientAccountId <= 0) {
+    return {
+      attempted: false,
+      executed: false,
+      gatewayId: 'wise_global',
+      status: 'skipped',
+      reason: 'wise_corporate_recipient_config_missing',
+      providerTransferRef: null,
+      providerQuoteRef: null,
+    };
+  }
+
+  const wiseApiBaseUrl = config.wiseApiBaseUrl.replace(/\/$/, '');
+  const quoteResponse = await fetch(`${wiseApiBaseUrl}/v3/quotes`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${config.wiseApiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      profile: Math.round(profileId),
+      sourceCurrency: 'GBP',
+      targetCurrency: 'GBP',
+      sourceAmount: roundTo(input.amountGbp, 2),
+      targetAccount: Math.round(recipientAccountId),
+      payOut: 'BANK_TRANSFER',
+    }),
+  });
+
+  const quotePayload = asObject(await quoteResponse.json().catch(() => ({})));
+  if (!quoteResponse.ok) {
+    throw createApiError(
+      'PLATFORM_SWEEP_EXTERNAL_TRANSFER_FAILED',
+      'Unable to create Wise quote for platform revenue sweep transfer',
+      {
+        provider: 'wise',
+        stage: 'quote',
+        status: quoteResponse.status,
+        payload: quotePayload,
+      }
+    );
+  }
+
+  const quoteId = stringValue(quotePayload.id) ?? stringValue(quotePayload.quoteUuid);
+  if (!quoteId) {
+    throw createApiError(
+      'PLATFORM_SWEEP_EXTERNAL_TRANSFER_FAILED',
+      'Wise quote response did not include a quote id',
+      {
+        provider: 'wise',
+        stage: 'quote',
+        payload: quotePayload,
+      }
+    );
+  }
+
+  const transferReference = `${config.wisePlatformTransferReferencePrefix}-${input.sourceId}`.slice(0, 35);
+  const transferResponse = await fetch(`${wiseApiBaseUrl}/v1/transfers`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${config.wiseApiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      targetAccount: Math.round(recipientAccountId),
+      quoteUuid: quoteId,
+      customerTransactionId: input.sourceId,
+      details: {
+        reference: transferReference,
+      },
+    }),
+  });
+
+  const transferPayload = asObject(await transferResponse.json().catch(() => ({})));
+  if (!transferResponse.ok) {
+    throw createApiError(
+      'PLATFORM_SWEEP_EXTERNAL_TRANSFER_FAILED',
+      'Unable to create Wise transfer for platform revenue sweep',
+      {
+        provider: 'wise',
+        stage: 'transfer',
+        status: transferResponse.status,
+        payload: transferPayload,
+      }
+    );
+  }
+
+  const providerTransferRef =
+    stringValue(transferPayload.id)
+    ?? stringValue(transferPayload.transferId)
+    ?? stringValue(asObject(transferPayload.data).id);
+
+  if (!providerTransferRef) {
+    throw createApiError(
+      'PLATFORM_SWEEP_EXTERNAL_TRANSFER_FAILED',
+      'Wise transfer response did not include a transfer reference',
+      {
+        provider: 'wise',
+        stage: 'transfer',
+        payload: transferPayload,
+      }
+    );
+  }
+
+  return {
+    attempted: true,
+    executed: true,
+    gatewayId: 'wise_global',
+    status: 'executed',
+    reason: null,
+    providerTransferRef,
+    providerQuoteRef: quoteId,
+  };
+}
+
+async function listActiveOnezePricingCurrencies(client: DbQueryable): Promise<string[]> {
+  const result = await client.query<{ currency: string }>(
+    `
+      SELECT DISTINCT currency
+      FROM oneze_country_pricing_profiles
+      WHERE is_active = TRUE
+      ORDER BY currency ASC
+    `
+  );
+
+  return result.rows
+    .map((row) => row.currency.trim().toUpperCase())
+    .filter((currency) => currency.length === 3);
+}
+
+async function fetchOnezeFxProviderRates(
+  baseCurrency: string,
+  quoteCurrencies: string[]
+): Promise<Record<string, number>> {
+  if (quoteCurrencies.length === 0) {
+    return {};
+  }
+
+  const url = new URL(config.onezeFxProviderUrl);
+  url.searchParams.set('base', baseCurrency);
+  url.searchParams.set('symbols', quoteCurrencies.join(','));
+
+  const headers: Record<string, string> = {
+    accept: 'application/json',
+  };
+
+  if (config.onezeFxProviderApiKey) {
+    headers.authorization = `Bearer ${config.onezeFxProviderApiKey}`;
+    headers['x-api-key'] = config.onezeFxProviderApiKey;
+  }
+
+  const response = await fetch(url.toString(), {
+    method: 'GET',
+    headers,
+  });
+
+  if (!response.ok) {
+    throw new Error(`FX provider responded ${response.status}`);
+  }
+
+  const payload = asObject(await response.json());
+  const rates = asObject(payload.rates);
+  const mapped: Record<string, number> = {};
+
+  for (const quoteCurrency of quoteCurrencies) {
+    const rate = asFiniteNumber(rates[quoteCurrency]);
+    if (rate === null || rate <= 0) {
+      continue;
+    }
+
+    mapped[quoteCurrency] = rate;
+  }
+
+  if (Object.keys(mapped).length === 0) {
+    throw new Error('FX provider returned no valid rates for active pricing currencies');
+  }
+
+  return mapped;
+}
+
+async function syncOnezeInternalFxRatesFromProvider(
+  reason: OnezeFxSyncReason
+): Promise<{
+  baseCurrency: string;
+  quotedCurrencies: number;
+  updatedPairs: number;
+  fetchedAt: string;
+}> {
+  if (!(await onezePricingTablesAvailable(db))) {
+    throw new Error('1ze controlled pricing tables are unavailable. Run migrations first.');
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    const configuredBaseCurrency = config.onezeFxProviderBaseCurrency.trim().toUpperCase();
+    const baseCurrency = configuredBaseCurrency.length === 3 ? configuredBaseCurrency : 'INR';
+
+    const activeCurrencies = await listActiveOnezePricingCurrencies(client);
+    const quoteCurrencies = Array.from(
+      new Set(
+        activeCurrencies
+          .map((currency) => currency.trim().toUpperCase())
+          .filter((currency) => currency !== baseCurrency)
+      )
+    );
+
+    if (quoteCurrencies.length === 0) {
+      await client.query('COMMIT');
+      return {
+        baseCurrency,
+        quotedCurrencies: 0,
+        updatedPairs: 0,
+        fetchedAt: new Date().toISOString(),
+      };
+    }
+
+    const rates = await fetchOnezeFxProviderRates(baseCurrency, quoteCurrencies);
+    let updatedPairs = 0;
+
+    for (const quoteCurrency of quoteCurrencies) {
+      const directRate = rates[quoteCurrency];
+      if (!Number.isFinite(directRate) || directRate <= 0) {
+        continue;
+      }
+
+      const inverseRate = Number((1 / directRate).toFixed(8));
+
+      await setInternalFxRate(client, {
+        baseCurrency,
+        quoteCurrency,
+        rate: directRate,
+        source: 'external_fx_provider',
+        metadata: {
+          reason,
+          providerUrl: config.onezeFxProviderUrl,
+        },
+      });
+
+      await setInternalFxRate(client, {
+        baseCurrency: quoteCurrency,
+        quoteCurrency: baseCurrency,
+        rate: inverseRate,
+        source: 'external_fx_provider_inverse',
+        metadata: {
+          reason,
+          providerUrl: config.onezeFxProviderUrl,
+        },
+      });
+
+      updatedPairs += 2;
+    }
+
+    await client.query('COMMIT');
+
+    return {
+      baseCurrency,
+      quotedCurrencies: quoteCurrencies.length,
+      updatedPairs,
+      fetchedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+type OnezeAutoAdjustDirection = 'tighten' | 'relax';
+
+function applyAutoAdjustStep(
+  current: number,
+  direction: OnezeAutoAdjustDirection,
+  stepBps: number,
+  bounds: { min: number; max: number }
+): number {
+  const shifted = direction === 'tighten' ? current + stepBps : current - stepBps;
+  return clampNumber(shifted, bounds.min, bounds.max);
+}
+
+function resolveAutoAdjustDirection(input: {
+  metrics: OnezeRiskDashboardMetrics;
+  violationCount: number;
+}): { direction: OnezeAutoAdjustDirection | null; triggers: string[] } {
+  const triggers: string[] = [];
+  const highStress = input.metrics.liquidity.stressSignal >= config.onezeAutoAdjustHighStressThreshold;
+  const lowStress = input.metrics.liquidity.stressSignal <= config.onezeAutoAdjustLowStressThreshold;
+  const redemptionRate = input.metrics.redemption.redemptionRate;
+  const highRedemption =
+    redemptionRate !== null && redemptionRate >= config.onezeAutoAdjustHighRedemptionRate;
+  const lowRedemption =
+    redemptionRate === null
+      ? input.metrics.redemption.burnedIze === 0
+      : redemptionRate <= config.onezeAutoAdjustLowRedemptionRate;
+
+  if (input.violationCount > 0) {
+    triggers.push('arbitrage_violation');
+  }
+
+  if (!input.metrics.reservePolicy.withinPolicy) {
+    triggers.push('reserve_policy_violation');
+  }
+
+  if (highStress) {
+    triggers.push('liquidity_stress_high');
+  }
+
+  if (highRedemption) {
+    triggers.push('redemption_rate_high');
+  }
+
+  if (triggers.length > 0) {
+    return {
+      direction: 'tighten',
+      triggers,
+    };
+  }
+
+  if (lowStress && lowRedemption && input.violationCount === 0) {
+    return {
+      direction: 'relax',
+      triggers: ['liquidity_stress_low', 'redemption_rate_low'],
+    };
+  }
+
+  return {
+    direction: null,
+    triggers: ['no_trigger'],
+  };
+}
+
+async function runOnezeAutomaticSpreadAdjustment(
+  reason: OnezeAutoAdjustReason,
+  options?: { ignoreEnabled?: boolean }
+): Promise<{
+  executed: boolean;
+  mode: 'tighten' | 'relax' | 'hold' | 'disabled';
+  reason: OnezeAutoAdjustReason;
+  triggerSignals: string[];
+  lookbackHours: number;
+  stepBps: number;
+  matrixSizeBefore: number;
+  matrixSizeAfter: number;
+  violationCountBefore: number;
+  violationCountAfter: number;
+  adjustments: Array<{
+    country: string;
+    before: {
+      markupBps: number;
+      markdownBps: number;
+      crossBorderFeeBps: number;
+    };
+    after: {
+      markupBps: number;
+      markdownBps: number;
+      crossBorderFeeBps: number;
+    };
+  }>;
+  evaluatedAt: string;
+}> {
+  if (!config.onezeAutoAdjustEnabled && !options?.ignoreEnabled) {
+    return {
+      executed: false,
+      mode: 'disabled',
+      reason,
+      triggerSignals: ['auto_adjust_disabled'],
+      lookbackHours: clampNumber(Math.round(config.onezeAutoAdjustLookbackHours), 1, 24 * 30),
+      stepBps: clampNumber(toSafeInteger(config.onezeAutoAdjustStepBps), 1, 500),
+      matrixSizeBefore: 0,
+      matrixSizeAfter: 0,
+      violationCountBefore: 0,
+      violationCountAfter: 0,
+      adjustments: [],
+      evaluatedAt: new Date().toISOString(),
+    };
+  }
+
+  if (!(await onezePricingTablesAvailable(db))) {
+    throw new Error('1ze controlled pricing tables are unavailable. Run migrations first.');
+  }
+
+  const safeLookbackHours = clampNumber(Math.round(config.onezeAutoAdjustLookbackHours), 1, 24 * 30);
+  const stepBps = clampNumber(toSafeInteger(config.onezeAutoAdjustStepBps), 1, 500);
+  const client = await db.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const metrics = await collectOnezeRiskDashboardMetrics(client, safeLookbackHours);
+    const quotesBefore = await listCountryPricingQuotes(client);
+    const violationsBefore = findPricingArbitrageViolations(quotesBefore);
+    const decision = resolveAutoAdjustDirection({
+      metrics,
+      violationCount: violationsBefore.length,
+    });
+
+    if (!decision.direction) {
+      await client.query('COMMIT');
+      return {
+        executed: false,
+        mode: 'hold',
+        reason,
+        triggerSignals: decision.triggers,
+        lookbackHours: safeLookbackHours,
+        stepBps,
+        matrixSizeBefore: quotesBefore.length,
+        matrixSizeAfter: quotesBefore.length,
+        violationCountBefore: violationsBefore.length,
+        violationCountAfter: violationsBefore.length,
+        adjustments: [],
+        evaluatedAt: metrics.evaluatedAt,
+      };
+    }
+
+    const adjustments: Array<{
+      country: string;
+      before: {
+        markupBps: number;
+        markdownBps: number;
+        crossBorderFeeBps: number;
+      };
+      after: {
+        markupBps: number;
+        markdownBps: number;
+        crossBorderFeeBps: number;
+      };
+    }> = [];
+
+    for (const quote of quotesBefore) {
+      const profile = await getCountryPricingProfile(client, quote.countryCode);
+      if (!profile || !profile.isActive) {
+        continue;
+      }
+
+      const nextMarkupBps = applyAutoAdjustStep(
+        profile.markupBps,
+        decision.direction,
+        stepBps,
+        PRICING_PARAMETER_BOUNDS.markupBps
+      );
+      const nextMarkdownBps = applyAutoAdjustStep(
+        profile.markdownBps,
+        decision.direction,
+        stepBps,
+        PRICING_PARAMETER_BOUNDS.markdownBps
+      );
+      const nextCrossBorderFeeBps = applyAutoAdjustStep(
+        profile.crossBorderFeeBps,
+        decision.direction,
+        stepBps,
+        PRICING_PARAMETER_BOUNDS.crossBorderFeeBps
+      );
+
+      if (
+        nextMarkupBps === profile.markupBps
+        && nextMarkdownBps === profile.markdownBps
+        && nextCrossBorderFeeBps === profile.crossBorderFeeBps
+      ) {
+        continue;
+      }
+
+      validatePricingProfileInput({
+        markupBps: nextMarkupBps,
+        markdownBps: nextMarkdownBps,
+        crossBorderFeeBps: nextCrossBorderFeeBps,
+        pppFactor: profile.pppFactor,
+      });
+
+      await upsertCountryPricingProfile(client, {
+        countryCode: profile.countryCode,
+        currency: profile.currency,
+        markupBps: nextMarkupBps,
+        markdownBps: nextMarkdownBps,
+        crossBorderFeeBps: nextCrossBorderFeeBps,
+        pppFactor: profile.pppFactor,
+        withdrawalLockHours: profile.withdrawalLockHours,
+        dailyRedeemLimitIze: profile.dailyRedeemLimitIze,
+        weeklyRedeemLimitIze: profile.weeklyRedeemLimitIze,
+        isActive: profile.isActive,
+        metadata: {
+          autoAdjust: {
+            reason,
+            direction: decision.direction,
+            stepBps,
+            triggerSignals: decision.triggers,
+            evaluatedAt: metrics.evaluatedAt,
+          },
+        },
+      });
+
+      adjustments.push({
+        country: profile.countryCode,
+        before: {
+          markupBps: profile.markupBps,
+          markdownBps: profile.markdownBps,
+          crossBorderFeeBps: profile.crossBorderFeeBps,
+        },
+        after: {
+          markupBps: nextMarkupBps,
+          markdownBps: nextMarkdownBps,
+          crossBorderFeeBps: nextCrossBorderFeeBps,
+        },
+      });
+    }
+
+    const quotesAfter = await listCountryPricingQuotes(client);
+    const violationsAfter = findPricingArbitrageViolations(quotesAfter);
+    if (violationsAfter.length > 0) {
+      throw createApiError(
+        'PRICING_ARBITRAGE_VIOLATION',
+        'Automatic spread adjustment introduces guaranteed arbitrage',
+        {
+          reason,
+          triggers: decision.triggers,
+          violations: violationsAfter.slice(0, 10),
+        }
+      );
+    }
+
+    await client.query('COMMIT');
+
+    return {
+      executed: adjustments.length > 0,
+      mode: decision.direction,
+      reason,
+      triggerSignals: decision.triggers,
+      lookbackHours: safeLookbackHours,
+      stepBps,
+      matrixSizeBefore: quotesBefore.length,
+      matrixSizeAfter: quotesAfter.length,
+      violationCountBefore: violationsBefore.length,
+      violationCountAfter: violationsAfter.length,
+      adjustments,
+      evaluatedAt: metrics.evaluatedAt,
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
 
 async function processMintOperationPaymentWebhook(
   client: DbQueryable,
@@ -5404,6 +7713,16 @@ async function processQueuedOnezeMintReserveAllocation(input: {
     return;
   }
 
+  if (!(await onezePricingTablesAvailable(db))) {
+    app.log.warn(
+      {
+        mintOperationId: input.mintOperationId,
+      },
+      'Skipped queued 1ze mint allocation because controlled pricing tables are unavailable'
+    );
+    return;
+  }
+
   const client = await db.connect();
   try {
     await client.query('BEGIN');
@@ -5437,7 +7756,6 @@ async function processQueuedOnezeMintReserveAllocation(input: {
     }
 
     let mutableOperation = operation;
-    const rateInr = await resolveGoldRate(client, 'INR', { forceRefresh: false });
 
     if (mutableOperation.state === 'PAYMENT_CONFIRMED') {
       const purchasingResult = await client.query<MintOperationRow>(
@@ -5544,6 +7862,7 @@ async function processQueuedOnezeMintReserveAllocation(input: {
       const wallet = await ensureWallet(client, mutableOperation.user_id, mutableOperation.fiat_currency);
       const walletCreditTxId = createRuntimeId('mintcred');
       const amountMg = Number(mutableOperation.ize_amount_mg);
+      const pricingQuote = await resolveCountryPricingQuoteByCurrency(client, mutableOperation.fiat_currency);
 
       await applyWalletLedgerDelta(client, {
         walletId: wallet.id,
@@ -5553,12 +7872,28 @@ async function processQueuedOnezeMintReserveAllocation(input: {
         kind: 'MINT',
         refType: 'mint_operation',
         refId: mutableOperation.id,
-        goldRateInrPerG: rateInr.ratePerGram,
+        anchorValueInInr: pricingQuote.anchorValueInInr,
         metadata: {
           mintOperationId: mutableOperation.id,
           paymentIntentId: mutableOperation.payment_intent_id,
           allocationMode: 'closed_loop_no_custody',
           initiatedBy: input.initiatedBy,
+          pricingSource: `internal_pricing:${pricingQuote.countryCode}:buy`,
+        },
+      });
+
+      await creditWalletSegmentBalance(client, {
+        wallet,
+        txId: walletCreditTxId,
+        purchasedCreditMg: amountMg,
+        originCountry: normalizeOnezeCountryTag(
+          typeof mutableOperation.metadata?.originCountry === 'string'
+            ? mutableOperation.metadata.originCountry
+            : null
+        ),
+        metadata: {
+          mintOperationId: mutableOperation.id,
+          source: 'mint_queue_credit',
         },
       });
 
@@ -5715,10 +8050,16 @@ async function runOnezeReconciliation(reason: 'startup' | 'interval' | 'manual')
   circulatingMg: number;
   reserveActiveMg: number;
   withinInvariant: boolean;
+  withinSupplyInvariant: boolean;
+  withinReservePolicy: boolean;
   invariantHash: string;
   supplyDeltaMg: number;
   toleranceMg: number;
   operationalLiquidityMg: number;
+  configuredOperationalReserveMg: number;
+  reservedWithdrawalMg: number;
+  configuredReserveRatio: number | null;
+  effectiveReserveRatio: number | null;
   createdAt: string;
 } | null> {
   if (!(await onezeArchitectureTablesAvailable(db))) {
@@ -5730,9 +8071,13 @@ async function runOnezeReconciliation(reason: 'startup' | 'interval' | 'manual')
   });
 
   if (!snapshot.withinInvariant) {
+    const haltReason = snapshot.withinSupplyInvariant
+      ? 'reconciliation_reserve_policy_violation'
+      : 'reconciliation_supply_mismatch';
+
     await setOnezeMintBurnHaltState({
       halted: true,
-      reason: 'reconciliation_supply_mismatch',
+      reason: haltReason,
       reconciliationId: snapshot.id,
     });
 
@@ -5742,7 +8087,7 @@ async function runOnezeReconciliation(reason: 'startup' | 'interval' | 'manual')
           UPDATE mint_operations
           SET
             state = 'RECONCILIATION_HOLD',
-            last_error = 'reconciliation_supply_mismatch',
+            last_error = $2,
             metadata = metadata || $1::jsonb,
             updated_at = NOW()
           WHERE state IN ('PAYMENT_PENDING', 'PAYMENT_CONFIRMED', 'RESERVE_PURCHASING', 'RESERVE_ALLOCATED')
@@ -5752,7 +8097,9 @@ async function runOnezeReconciliation(reason: 'startup' | 'interval' | 'manual')
             reconciliationHoldAt: new Date().toISOString(),
             reconciliationId: snapshot.id,
             reason,
+            haltReason,
           }),
+          haltReason,
         ]
       );
     }
@@ -5765,8 +8112,13 @@ async function runOnezeReconciliation(reason: 'startup' | 'interval' | 'manual')
         supplyDeltaMg: snapshot.supplyDeltaMg,
         toleranceMg: snapshot.toleranceMg,
         operationalLiquidityMg: snapshot.operationalLiquidityMg,
+        configuredOperationalReserveMg: snapshot.configuredOperationalReserveMg,
+        reservedWithdrawalMg: snapshot.reservedWithdrawalMg,
+        effectiveReserveRatio: snapshot.effectiveReserveRatio,
+        reservePolicyViolation: !snapshot.withinReservePolicy,
+        haltReason,
       },
-      '1ze reconciliation detected a closed-loop supply mismatch'
+      '1ze reconciliation detected an invariant policy violation'
     );
   } else {
     await setOnezeMintBurnHaltState({
@@ -5817,7 +8169,13 @@ async function runOnezeDailyAttestation(reason: 'startup' | 'interval' | 'manual
         supplyDeltaMg: snapshot.supplyDeltaMg,
         toleranceMg: snapshot.toleranceMg,
         operationalLiquidityMg: snapshot.operationalLiquidityMg,
-        withinSupplyTolerance: snapshot.withinInvariant,
+        configuredOperationalReserveMg: snapshot.configuredOperationalReserveMg,
+        reservedWithdrawalMg: snapshot.reservedWithdrawalMg,
+        configuredReserveRatio: snapshot.configuredReserveRatio,
+        effectiveReserveRatio: snapshot.effectiveReserveRatio,
+        withinReservePolicy: snapshot.withinReservePolicy,
+        withinSupplyTolerance: snapshot.withinSupplyInvariant,
+        withinSupplyInvariant: snapshot.withinSupplyInvariant,
         withinInvariant: snapshot.withinInvariant,
         invariantHash: snapshot.invariantHash,
         createdAt: snapshot.createdAt,
@@ -5937,6 +8295,528 @@ function stopOnezeDailyAttestationScheduler(): void {
   onezeDailyAttestationTimer = null;
 }
 
+function startOnezeFxSyncScheduler(): void {
+  if (onezeFxSyncTimer || !config.onezeFxSyncEnabled) {
+    return;
+  }
+
+  void syncOnezeInternalFxRatesFromProvider('startup').catch((error) => {
+    app.log.error({ err: error }, 'Failed startup 1ze FX sync');
+  });
+
+  onezeFxSyncTimer = setInterval(() => {
+    void syncOnezeInternalFxRatesFromProvider('interval').catch((error) => {
+      app.log.error({ err: error }, 'Failed interval 1ze FX sync');
+    });
+  }, config.onezeFxSyncIntervalMs);
+
+  onezeFxSyncTimer.unref?.();
+}
+
+function stopOnezeFxSyncScheduler(): void {
+  if (!onezeFxSyncTimer) {
+    return;
+  }
+
+  clearInterval(onezeFxSyncTimer);
+  onezeFxSyncTimer = null;
+}
+
+function startOnezeAutoAdjustScheduler(): void {
+  if (onezeAutoAdjustTimer || !config.onezeAutoAdjustEnabled) {
+    return;
+  }
+
+  void runOnezeAutomaticSpreadAdjustment('startup').catch((error) => {
+    app.log.error({ err: error }, 'Failed startup 1ze automatic spread adjustment');
+  });
+
+  onezeAutoAdjustTimer = setInterval(() => {
+    void runOnezeAutomaticSpreadAdjustment('interval').catch((error) => {
+      app.log.error({ err: error }, 'Failed interval 1ze automatic spread adjustment');
+    });
+  }, config.onezeAutoAdjustIntervalMs);
+
+  onezeAutoAdjustTimer.unref?.();
+}
+
+function stopOnezeAutoAdjustScheduler(): void {
+  if (!onezeAutoAdjustTimer) {
+    return;
+  }
+
+  clearInterval(onezeAutoAdjustTimer);
+  onezeAutoAdjustTimer = null;
+}
+
+function millisecondsUntilNextUtcHour(targetHourUtc: number): number {
+  const now = new Date();
+  const next = new Date(now);
+  next.setUTCHours(targetHourUtc, 0, 0, 0);
+
+  if (next.getTime() <= now.getTime()) {
+    next.setUTCDate(next.getUTCDate() + 1);
+  }
+
+  return Math.max(1_000, next.getTime() - now.getTime());
+}
+
+async function listAdminAlertRecipients(): Promise<string[]> {
+  const configuredIds = config.alertingAdminUserIds
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+
+  try {
+    const result = await db.query<{ id: string }>(
+      `
+        SELECT id
+        FROM users
+        WHERE role = 'admin'
+        ORDER BY created_at ASC
+        LIMIT 200
+      `
+    );
+
+    const roleIds = result.rows.map((row) => row.id).filter((entry) => entry.trim().length > 0);
+    const uniqueIds = new Set<string>([...configuredIds, ...roleIds]);
+    return Array.from(uniqueIds);
+  } catch {
+    return configuredIds;
+  }
+}
+
+async function dispatchOpsAlert(alert: OpsAlert): Promise<void> {
+  const dedupeBucket = Math.floor(Date.now() / (5 * 60 * 1000));
+  const dedupeKey = `${ALERT_DEDUP_REDIS_PREFIX}${alert.code}:${dedupeBucket}`;
+  const shouldSend = await redis.set(dedupeKey, '1', 'EX', 5 * 60, 'NX');
+
+  if (!shouldSend) {
+    return;
+  }
+
+  if (alert.severity === 'critical' && config.sentryDsn) {
+    Sentry.captureMessage(`Operational alert: ${alert.message}`, {
+      level: 'error',
+      tags: {
+        alert_code: alert.code,
+      },
+      extra: {
+        metricValue: alert.metricValue,
+        threshold: alert.threshold,
+        metadata: alert.metadata,
+      },
+    });
+  }
+
+  if (config.alertingWebhookUrls.length > 0) {
+    await Promise.all(
+      config.alertingWebhookUrls.map(async (webhookUrl) => {
+        try {
+          await fetch(webhookUrl, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: toJsonString({
+              text: `[${alert.severity.toUpperCase()}] ${alert.message}`,
+              alert,
+            }),
+          });
+        } catch (error) {
+          app.log.error({ err: error, webhookUrl, code: alert.code }, 'Failed sending ops alert webhook');
+        }
+      })
+    );
+  }
+
+  const adminRecipients = await listAdminAlertRecipients();
+  await Promise.all(
+    adminRecipients.map(async (userId) => {
+      try {
+        await queueUserNotification({
+          userId,
+          title: alert.severity === 'critical' ? 'Critical Ops Alert' : 'Ops Alert',
+          body: alert.message,
+          payload: {
+            event: 'ops_alert',
+            code: alert.code,
+            severity: alert.severity,
+            metricValue: alert.metricValue,
+            threshold: alert.threshold,
+          },
+          metadata: {
+            source: 'ops_alerting_scheduler',
+            ...alert.metadata,
+          },
+        });
+      } catch (error) {
+        app.log.error({ err: error, userId, code: alert.code }, 'Failed queueing ops alert notification');
+      }
+    })
+  );
+}
+
+async function runOpsAlerting(reason: 'interval' | 'manual'): Promise<{
+  reason: 'interval' | 'manual';
+  checkedAt: string;
+  alertCount: number;
+  alerts: OpsAlert[];
+}> {
+  const checkedAt = new Date().toISOString();
+  const alerts = await collectOperationalAlerts(db, checkedAt);
+
+  for (const alert of alerts) {
+    await dispatchOpsAlert(alert);
+  }
+
+  return {
+    reason,
+    checkedAt,
+    alertCount: alerts.length,
+    alerts,
+  };
+}
+
+async function runPlatformReconciliation(
+  reason: 'scheduled' | 'manual',
+  explicitRunDate?: string
+): Promise<DailyReconciliationRun> {
+  const runDate = parseRunDateOrToday(explicitRunDate);
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    if (!(await reconciliationTableAvailable(client))) {
+      throw createApiError(
+        'RECONCILIATION_TABLES_UNAVAILABLE',
+        'Reconciliation tables are unavailable. Run migrations first.'
+      );
+    }
+
+    const run = await runDailyReconciliation(client, {
+      runDate,
+      reason,
+      mismatchThresholdGbp: config.reconciliationMismatchThresholdGbp,
+      criticalMismatchThresholdGbp: config.reconciliationCriticalMismatchThresholdGbp,
+    });
+
+    if (run.status === 'critical') {
+      await setPayoutPauseState({
+        paused: true,
+        reason: 'critical_reconciliation_mismatch',
+        reconciliationRunId: run.id,
+        mismatchGbp: run.mismatchGbp,
+      });
+    } else {
+      await setPayoutPauseState({
+        paused: false,
+        reason: 'reconciliation_ok',
+      });
+    }
+
+    await client.query('COMMIT');
+
+    if (run.status === 'critical' && config.sentryDsn) {
+      Sentry.captureMessage(
+        `Critical reconciliation mismatch for ${run.runDate}: GBP ${run.mismatchGbp.toFixed(2)}`,
+        {
+          level: 'error',
+          tags: {
+            reconciliation_status: run.status,
+          },
+          extra: {
+            run,
+            reason,
+          },
+        }
+      );
+    }
+
+    return run;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function runPlatformRevenueSweep(
+  reason: PlatformRevenueSweepReason
+): Promise<{
+  reason: PlatformRevenueSweepReason;
+  executedAt: string;
+  sweepAmountGbp: number;
+  transferRecorded: boolean;
+  externalTransfer: PlatformRevenueSweepExternalTransfer;
+  balances: {
+    platformRevenueBeforeGbp: number;
+    platformRevenueAfterGbp: number;
+    platformOperatingBeforeGbp: number;
+    platformOperatingAfterGbp: number;
+  };
+}> {
+  const executedAt = new Date().toISOString();
+
+  if (!(await ledgerTablesAvailable(db))) {
+    throw createApiError(
+      'LEDGER_TABLES_UNAVAILABLE',
+      'Payment settlement ledger tables are unavailable. Run migrations first.'
+    );
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    const platformRevenueAccountId = await ensureLedgerAccount(
+      client,
+      'platform',
+      'platform',
+      'platform_revenue'
+    );
+    const platformOperatingAccountId = await ensureLedgerAccount(
+      client,
+      'platform',
+      'platform',
+      'platform_operating'
+    );
+
+    const platformRevenueBeforeGbp = await getLedgerAccountBalance(
+      client,
+      'platform',
+      'platform',
+      'platform_revenue'
+    );
+    const platformOperatingBeforeGbp = await getLedgerAccountBalance(
+      client,
+      'platform',
+      'platform',
+      'platform_operating'
+    );
+
+    const sweepAmountGbp = Math.max(0, roundTo(platformRevenueBeforeGbp, 6));
+    let transferRecorded = false;
+    let externalTransfer: PlatformRevenueSweepExternalTransfer = {
+      attempted: false,
+      executed: false,
+      gatewayId: null,
+      status: 'skipped',
+      reason: 'no_sweep_amount',
+      providerTransferRef: null,
+      providerQuoteRef: null,
+    };
+
+    if (sweepAmountGbp > 0) {
+      const sourceId = createRuntimeId('platform_revenue_sweep');
+      const sweepGateway = resolvePlatformRevenueSweepGateway();
+
+      if (sweepGateway === 'wise' || sweepGateway === 'wise_global') {
+        externalTransfer = await executeWisePlatformRevenueSweepTransfer({
+          amountGbp: sweepAmountGbp,
+          sourceId,
+          reason,
+        });
+      } else if (config.platformRevenueSweepGateway) {
+        externalTransfer = {
+          attempted: false,
+          executed: false,
+          gatewayId: null,
+          status: 'skipped',
+          reason: `unsupported_gateway_${config.platformRevenueSweepGateway}`,
+          providerTransferRef: null,
+          providerQuoteRef: null,
+        };
+      } else {
+        externalTransfer = {
+          attempted: false,
+          executed: false,
+          gatewayId: null,
+          status: 'skipped',
+          reason: 'gateway_not_configured',
+          providerTransferRef: null,
+          providerQuoteRef: null,
+        };
+      }
+
+      if (config.platformRevenueSweepRequireExternalTransfer && !externalTransfer.executed) {
+        throw createApiError(
+          'PLATFORM_SWEEP_EXTERNAL_TRANSFER_REQUIRED',
+          'Platform revenue sweep requires an external transfer but no transfer was executed',
+          {
+            gateway: config.platformRevenueSweepGateway,
+            reason: externalTransfer.reason,
+          }
+        );
+      }
+
+      await appendLedgerEntry(client, {
+        accountId: platformRevenueAccountId,
+        counterpartyAccountId: platformOperatingAccountId,
+        direction: 'debit',
+        amountGbp: sweepAmountGbp,
+        sourceType: 'adjustment',
+        sourceId,
+        lineType: 'platform_revenue_sweep_out',
+        metadata: {
+          reason,
+          externalTransfer,
+        },
+      });
+
+      await appendLedgerEntry(client, {
+        accountId: platformOperatingAccountId,
+        counterpartyAccountId: platformRevenueAccountId,
+        direction: 'credit',
+        amountGbp: sweepAmountGbp,
+        sourceType: 'adjustment',
+        sourceId,
+        lineType: 'platform_revenue_sweep_in',
+        metadata: {
+          reason,
+          externalTransfer,
+        },
+      });
+
+      transferRecorded = true;
+    }
+
+    const platformRevenueAfterGbp = await getLedgerAccountBalance(
+      client,
+      'platform',
+      'platform',
+      'platform_revenue'
+    );
+    const platformOperatingAfterGbp = await getLedgerAccountBalance(
+      client,
+      'platform',
+      'platform',
+      'platform_operating'
+    );
+
+    await client.query('COMMIT');
+
+    return {
+      reason,
+      executedAt,
+      sweepAmountGbp: roundTo(sweepAmountGbp, 6),
+      transferRecorded,
+      externalTransfer,
+      balances: {
+        platformRevenueBeforeGbp: roundTo(platformRevenueBeforeGbp, 6),
+        platformRevenueAfterGbp: roundTo(platformRevenueAfterGbp, 6),
+        platformOperatingBeforeGbp: roundTo(platformOperatingBeforeGbp, 6),
+        platformOperatingAfterGbp: roundTo(platformOperatingAfterGbp, 6),
+      },
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+function startPlatformReconciliationScheduler(): void {
+  if (reconciliationSchedulerDelayTimer || reconciliationSchedulerIntervalTimer) {
+    return;
+  }
+
+  const targetHour = Math.min(23, Math.max(0, Math.round(config.reconciliationScheduleUtcHour)));
+  const enqueueScheduledReconciliation = () => {
+    void enqueueReconciliationJob({ reason: 'scheduled' }).catch((error) => {
+      app.log.error({ err: error }, 'Failed scheduling reconciliation job');
+    });
+  };
+
+  const scheduleDailyRun = () => {
+    reconciliationSchedulerIntervalTimer = setInterval(() => {
+      enqueueScheduledReconciliation();
+    }, 24 * 60 * 60 * 1000);
+
+    reconciliationSchedulerIntervalTimer.unref?.();
+  };
+
+  reconciliationSchedulerDelayTimer = setTimeout(() => {
+    reconciliationSchedulerDelayTimer = null;
+
+    enqueueScheduledReconciliation();
+
+    scheduleDailyRun();
+  }, millisecondsUntilNextUtcHour(targetHour));
+
+  reconciliationSchedulerDelayTimer.unref?.();
+}
+
+function stopPlatformReconciliationScheduler(): void {
+  if (reconciliationSchedulerDelayTimer) {
+    clearTimeout(reconciliationSchedulerDelayTimer);
+    reconciliationSchedulerDelayTimer = null;
+  }
+
+  if (reconciliationSchedulerIntervalTimer) {
+    clearInterval(reconciliationSchedulerIntervalTimer);
+    reconciliationSchedulerIntervalTimer = null;
+  }
+}
+
+function startPlatformRevenueSweepScheduler(): void {
+  if (platformRevenueSweepTimer) {
+    return;
+  }
+
+  void runPlatformRevenueSweep('startup').catch((error) => {
+    app.log.error({ err: error }, 'Failed startup platform revenue sweep run');
+  });
+
+  const intervalMs = Math.max(60_000, config.platformRevenueSweepIntervalMs);
+  platformRevenueSweepTimer = setInterval(() => {
+    void runPlatformRevenueSweep('interval').catch((error) => {
+      app.log.error({ err: error }, 'Failed interval platform revenue sweep run');
+    });
+  }, intervalMs);
+
+  platformRevenueSweepTimer.unref?.();
+}
+
+function stopPlatformRevenueSweepScheduler(): void {
+  if (!platformRevenueSweepTimer) {
+    return;
+  }
+
+  clearInterval(platformRevenueSweepTimer);
+  platformRevenueSweepTimer = null;
+}
+
+function startOpsAlertingScheduler(): void {
+  if (opsAlertingTimer) {
+    return;
+  }
+
+  void runOpsAlerting('interval').catch((error) => {
+    app.log.error({ err: error }, 'Failed startup ops alerting run');
+  });
+
+  const intervalMs = Math.max(15_000, config.opsAlertIntervalMs);
+  opsAlertingTimer = setInterval(() => {
+    void runOpsAlerting('interval').catch((error) => {
+      app.log.error({ err: error }, 'Failed interval ops alerting run');
+    });
+  }, intervalMs);
+
+  opsAlertingTimer.unref?.();
+}
+
+function stopOpsAlertingScheduler(): void {
+  if (!opsAlertingTimer) {
+    return;
+  }
+
+  clearInterval(opsAlertingTimer);
+  opsAlertingTimer = null;
+}
+
 app.get('/health', async () => {
   const [{ now }] = (await db.query<{ now: string }>('SELECT NOW() AS now')).rows;
   const redisPing = await redis.ping();
@@ -5969,6 +8849,168 @@ app.post('/ops/auctions/sweep', async (request, reply) => {
   return {
     ok: true,
     queued: true,
+  };
+});
+
+app.post('/ops/reconciliation/run', async (request, reply) => {
+  const securityAdminError = ensureSecurityAdminAccess(request, reply);
+  if (securityAdminError) {
+    return securityAdminError;
+  }
+
+  const bodySchema = z.object({
+    runDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  });
+
+  const payload = bodySchema.parse(request.body ?? {});
+
+  if (!(await paymentTablesAvailable(db)) || !(await ledgerTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: 'Payment settlement or ledger tables are unavailable. Run migrations first.',
+    };
+  }
+
+  try {
+    const run = await runPlatformReconciliation('manual', payload.runDate);
+    const pauseState = await getPayoutPauseState();
+
+    return {
+      ok: true,
+      run,
+      payouts: {
+        paused: pauseState.paused,
+        reason: pauseState.reason ?? null,
+        reconciliationRunId: pauseState.reconciliationRunId ?? null,
+      },
+    };
+  } catch (error) {
+    const apiError = getApiError(error);
+    if (apiError?.code === 'RECONCILIATION_TABLES_UNAVAILABLE') {
+      reply.code(503);
+      return {
+        ok: false,
+        error: apiError.message,
+      };
+    }
+
+    request.log.error({ err: error, runDate: payload.runDate }, 'Failed manual reconciliation run');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to run reconciliation',
+    };
+  }
+});
+
+app.get('/ops/reconciliation/latest', async (request, reply) => {
+  const securityAdminError = ensureSecurityAdminAccess(request, reply);
+  if (securityAdminError) {
+    return securityAdminError;
+  }
+
+  const latest = await getLatestReconciliationRun(db);
+  const pauseState = await getPayoutPauseState();
+
+  return {
+    ok: true,
+    latest,
+    payouts: {
+      paused: pauseState.paused,
+      reason: pauseState.reason ?? null,
+      reconciliationRunId: pauseState.reconciliationRunId ?? null,
+      mismatchGbp: pauseState.mismatchGbp ?? null,
+    },
+  };
+});
+
+app.post('/ops/platform-revenue/sweep', async (request, reply) => {
+  const securityAdminError = ensureSecurityAdminAccess(request, reply);
+  if (securityAdminError) {
+    return securityAdminError;
+  }
+
+  try {
+    const result = await runPlatformRevenueSweep('manual');
+    return {
+      ok: true,
+      result,
+    };
+  } catch (error) {
+    const apiError = getApiError(error);
+    if (apiError?.code === 'LEDGER_TABLES_UNAVAILABLE') {
+      reply.code(503);
+      return {
+        ok: false,
+        error: apiError.message,
+      };
+    }
+
+    if (apiError?.code === 'PLATFORM_SWEEP_EXTERNAL_TRANSFER_REQUIRED') {
+      reply.code(503);
+      return {
+        ok: false,
+        error: apiError.message,
+        details: apiError.details,
+      };
+    }
+
+    if (apiError?.code === 'PLATFORM_SWEEP_EXTERNAL_TRANSFER_FAILED') {
+      reply.code(502);
+      return {
+        ok: false,
+        error: apiError.message,
+        details: apiError.details,
+      };
+    }
+
+    request.log.error({ err: error }, 'Failed manual platform revenue sweep run');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to run platform revenue sweep',
+    };
+  }
+});
+
+app.post('/ops/alerts/run', async (request, reply) => {
+  const securityAdminError = ensureSecurityAdminAccess(request, reply);
+  if (securityAdminError) {
+    return securityAdminError;
+  }
+
+  try {
+    const result = await runOpsAlerting('manual');
+    return {
+      ok: true,
+      result,
+    };
+  } catch (error) {
+    request.log.error({ err: error }, 'Failed manual ops alerting run');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to run ops alerting checks',
+    };
+  }
+});
+
+app.get('/ops/payouts/pause', async (request, reply) => {
+  const securityAdminError = ensureSecurityAdminAccess(request, reply);
+  if (securityAdminError) {
+    return securityAdminError;
+  }
+
+  const pauseState = await getPayoutPauseState();
+  return {
+    ok: true,
+    payouts: {
+      paused: pauseState.paused,
+      reason: pauseState.reason ?? null,
+      reconciliationRunId: pauseState.reconciliationRunId ?? null,
+      mismatchGbp: pauseState.mismatchGbp ?? null,
+    },
   };
 });
 
@@ -6012,6 +9054,79 @@ app.post('/ops/oneze/attest', async (request, reply) => {
     ok: true,
     attestation,
   };
+});
+
+app.post('/ops/oneze/fx-sync', async (request, reply) => {
+  const securityAdminError = ensureSecurityAdminAccess(request, reply);
+  if (securityAdminError) {
+    return securityAdminError;
+  }
+
+  if (!(await onezePricingTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze controlled pricing tables are unavailable. Run migrations first.',
+    };
+  }
+
+  try {
+    const result = await syncOnezeInternalFxRatesFromProvider('manual');
+    return {
+      ok: true,
+      sync: result,
+    };
+  } catch (error) {
+    request.log.error({ err: error }, 'Failed manual 1ze FX sync');
+    reply.code(502);
+    return {
+      ok: false,
+      error: 'Unable to sync FX rates from provider',
+    };
+  }
+});
+
+app.post('/ops/oneze/auto-adjust', async (request, reply) => {
+  const securityAdminError = ensureSecurityAdminAccess(request, reply);
+  if (securityAdminError) {
+    return securityAdminError;
+  }
+
+  if (!(await onezePricingTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze controlled pricing tables are unavailable. Run migrations first.',
+    };
+  }
+
+  try {
+    const result = await runOnezeAutomaticSpreadAdjustment('manual', {
+      ignoreEnabled: true,
+    });
+
+    return {
+      ok: true,
+      adjustment: result,
+    };
+  } catch (error) {
+    const apiError = getApiError(error);
+    if (apiError) {
+      reply.code(statusCodeForApiError(apiError.code));
+      return {
+        ok: false,
+        error: apiError.message,
+        details: apiError.details,
+      };
+    }
+
+    request.log.error({ err: error }, 'Failed manual 1ze automatic spread adjustment');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to execute automatic spread adjustment',
+    };
+  }
 });
 
 app.get('/health/deep', async (request, reply) => {
@@ -6115,17 +9230,23 @@ app.get('/health/deep', async (request, reply) => {
     result.details!.s3 = (error as Error).message;
   }
 
-  if (result.ok) {
-    delete result.details;
-    return result;
+  const paymentClusters = getConfiguredClusters();
+  const resultWithClusters = {
+    ...result,
+    paymentClusters,
+  };
+
+  if (resultWithClusters.ok) {
+    delete resultWithClusters.details;
+    return resultWithClusters;
   }
 
   if (config.nodeEnv === 'production') {
-    delete result.details;
+    delete resultWithClusters.details;
   }
 
   reply.code(503);
-  return result;
+  return resultWithClusters;
 });
 
 app.post('/security/keys/:keyName/rotate', async (request, reply) => {
@@ -11920,47 +15041,74 @@ app.get('/wallets/:userId/snapshot', async (request, reply) => {
   };
 });
 
-app.get('/oracle/gold/latest', async (request, reply) => {
+app.get('/oracle/gold/latest', async (_request, reply) => {
+  reply.code(410);
+  return {
+    ok: false,
+    error: 'Gold oracle endpoint has been decommissioned for 1ze controlled pricing.',
+    code: 'GOLD_ORACLE_DECOMMISSIONED',
+  };
+});
+
+app.post('/oracle/gold/override', async (_request, reply) => {
+  reply.code(410);
+  return {
+    ok: false,
+    error: 'Gold rate overrides are disabled. Use /update-anchor and /update-pricing controls instead.',
+    code: 'GOLD_ORACLE_DECOMMISSIONED',
+  };
+});
+
+app.get('/price', async (request, reply) => {
   const querySchema = z.object({
-    currency: z.string().length(3).default('GBP'),
-    forceRefresh: z.coerce.boolean().default(false),
+    country: z.string().min(2).max(3).default('IN'),
   });
 
-  const { currency, forceRefresh } = querySchema.parse(request.query);
+  const payload = querySchema.parse(request.query);
 
-  if (!(await onezeTablesAvailable(db))) {
+  if (!(await onezePricingTablesAvailable(db))) {
     reply.code(503);
     return {
       ok: false,
-      error: '1ze money-layer tables are unavailable. Run migrations first.',
+      error: '1ze controlled pricing tables are unavailable. Run migrations first.',
     };
   }
 
   try {
-    const rate = await resolveGoldRate(db, currency, {
-      forceRefresh,
-    });
-
+    const quote = await resolveCountryPricingQuote(db, payload.country);
     return {
       ok: true,
-      rate,
+      quote: {
+        country: quote.countryCode,
+        currency: quote.currency,
+        buyPrice: quote.buyPrice,
+        sellPrice: quote.sellPrice,
+        crossBorderPrice: quote.crossBorderSellPrice,
+        markupBps: quote.markupBps,
+        markdownBps: quote.markdownBps,
+        crossBorderFeeBps: quote.crossBorderFeeBps,
+        pppFactor: quote.pppFactor,
+        source: quote.source,
+      },
     };
   } catch (error) {
-    request.log.error({ err: error, currency }, 'Failed to resolve gold oracle rate');
-    reply.code(500);
+    request.log.error({ err: error, payload }, 'Failed to resolve controlled 1ze price');
+    reply.code(404);
     return {
       ok: false,
-      error: 'Unable to resolve gold oracle rate',
+      error: 'Unable to resolve 1ze price for requested country',
     };
   }
 });
 
 app.get('/wallet/1ze/quote', async (request, reply) => {
   const querySchema = z.object({
+    country: z.string().min(2).max(3).optional(),
+    originCountry: z.string().min(2).max(3).optional(),
+    redeemCountry: z.string().min(2).max(3).optional(),
     fiatCurrency: z.string().length(3).default('GBP'),
     fiatAmount: z.coerce.number().positive().optional(),
     izeAmount: z.coerce.number().positive().optional(),
-    forceRefresh: z.coerce.boolean().default(false),
   });
 
   const payload = querySchema.parse(request.query);
@@ -11973,26 +15121,28 @@ app.get('/wallet/1ze/quote', async (request, reply) => {
     };
   }
 
-  if (!(await onezeTablesAvailable(db))) {
+  if (!(await onezeTablesAvailable(db)) || !(await onezePricingTablesAvailable(db))) {
     reply.code(503);
     return {
       ok: false,
-      error: '1ze money-layer tables are unavailable. Run migrations first.',
+      error: '1ze controlled pricing tables are unavailable. Run migrations first.',
     };
   }
 
   try {
-    const rate = await resolveGoldRate(db, payload.fiatCurrency, {
-      forceRefresh: payload.forceRefresh,
-    });
-
     const direction = payload.fiatAmount !== undefined ? 'mint' : 'burn';
+    const fiatCurrency = payload.fiatCurrency.toUpperCase();
+    const countryQuote = payload.country
+      ? await resolveCountryPricingQuote(db, payload.country)
+      : await resolveCountryPricingQuoteByCurrency(db, fiatCurrency);
 
     let fiatAmount: number;
     let izeAmount: number;
     let netFiatAmount: number;
     let platformFeeAmount = 0;
     let platformFeeRate = 0;
+    let effectiveRate = countryQuote.buyPrice;
+    let effectiveRateMode: 'buy' | 'sell' | 'cross_border_sell' = 'buy';
 
     if (direction === 'mint') {
       const feeBreakdown = calculateWalletTopupFeeBreakdown(payload.fiatAmount ?? 0);
@@ -12000,9 +15150,23 @@ app.get('/wallet/1ze/quote', async (request, reply) => {
       netFiatAmount = feeBreakdown.netFiatAmount;
       platformFeeAmount = feeBreakdown.platformFeeAmount;
       platformFeeRate = feeBreakdown.platformFeeRate;
-      izeAmount = Number((netFiatAmount / rate.ratePerGram).toFixed(6));
+
+      if (!Number.isFinite(netFiatAmount) || netFiatAmount <= 0) {
+        throw createApiError('IZE_MINT_INVALID', 'Top-up amount is too low after platform fee');
+      }
+
+      effectiveRate = countryQuote.buyPrice;
+      effectiveRateMode = 'buy';
+      izeAmount = Number((netFiatAmount / effectiveRate).toFixed(6));
     } else {
-      fiatAmount = Number(((payload.izeAmount ?? 0) * rate.ratePerGram).toFixed(6));
+      const isCrossBorder =
+        Boolean(payload.originCountry)
+        && Boolean(payload.redeemCountry)
+        && payload.originCountry?.toUpperCase() !== payload.redeemCountry?.toUpperCase();
+
+      effectiveRate = isCrossBorder ? countryQuote.crossBorderSellPrice : countryQuote.sellPrice;
+      effectiveRateMode = isCrossBorder ? 'cross_border_sell' : 'sell';
+      fiatAmount = Number(((payload.izeAmount ?? 0) * effectiveRate).toFixed(6));
       netFiatAmount = fiatAmount;
       izeAmount = Number((payload.izeAmount ?? 0).toFixed(6));
     }
@@ -12011,17 +15175,31 @@ app.get('/wallet/1ze/quote', async (request, reply) => {
       ok: true,
       quote: {
         direction,
-        fiatCurrency: payload.fiatCurrency.toUpperCase(),
+        country: countryQuote.countryCode,
+        fiatCurrency,
         fiatAmount,
         netFiatAmount,
         izeAmount,
         platformFeeRate,
         platformFeeAmount,
-        ratePerGram: rate.ratePerGram,
-        rateSource: rate.source,
+        ratePerGram: effectiveRate,
+        rateSource: `internal_pricing:${countryQuote.countryCode}:${effectiveRateMode}`,
+        buyPrice: countryQuote.buyPrice,
+        sellPrice: countryQuote.sellPrice,
+        crossBorderPrice: countryQuote.crossBorderSellPrice,
       },
     };
   } catch (error) {
+    const apiError = getApiError(error);
+    if (apiError) {
+      reply.code(statusCodeForApiError(apiError.code));
+      return {
+        ok: false,
+        error: apiError.message,
+        details: apiError.details,
+      };
+    }
+
     request.log.error({ err: error, payload }, 'Failed to resolve 1ze quote');
     reply.code(500);
     return {
@@ -12036,43 +15214,24 @@ app.get('/wallet/1ze/fx-quote', async (request, reply) => {
     fromCurrency: z.string().length(3),
     toCurrency: z.string().length(3),
     amount: z.coerce.number().positive(),
-    forceRefresh: z.coerce.boolean().default(false),
   });
 
   const payload = querySchema.parse(request.query);
 
-  if (!(await onezeTablesAvailable(db))) {
+  if (!(await onezePricingTablesAvailable(db))) {
     reply.code(503);
     return {
       ok: false,
-      error: '1ze money-layer tables are unavailable. Run migrations first.',
+      error: '1ze controlled pricing tables are unavailable. Run migrations first.',
     };
   }
 
   const fromCurrency = payload.fromCurrency.toUpperCase();
   const toCurrency = payload.toCurrency.toUpperCase();
-  if (fromCurrency === toCurrency) {
-    return {
-      ok: true,
-      quote: {
-        fromCurrency,
-        toCurrency,
-        inputAmount: Number(payload.amount.toFixed(6)),
-        fxRate: 1,
-        convertedAmount: Number(payload.amount.toFixed(6)),
-        source: 'identity',
-      },
-    };
-  }
 
   try {
-    const [fromRate, toRate] = await Promise.all([
-      resolveGoldRate(db, fromCurrency, { forceRefresh: payload.forceRefresh }),
-      resolveGoldRate(db, toCurrency, { forceRefresh: payload.forceRefresh }),
-    ]);
-
-    const fxRate = Number((toRate.ratePerGram / fromRate.ratePerGram).toFixed(8));
-    const convertedAmount = Number((payload.amount * fxRate).toFixed(6));
+    const fx = await resolveInternalFxRate(db, fromCurrency, toCurrency);
+    const convertedAmount = Number((payload.amount * fx.rate).toFixed(6));
 
     return {
       ok: true,
@@ -12080,13 +15239,10 @@ app.get('/wallet/1ze/fx-quote', async (request, reply) => {
         fromCurrency,
         toCurrency,
         inputAmount: Number(payload.amount.toFixed(6)),
-        fxRate,
+        fxRate: fx.rate,
         convertedAmount,
-        source: 'xau_cross',
-        referenceRates: {
-          from: fromRate,
-          to: toRate,
-        },
+        source: fx.source,
+        usedInverse: fx.usedInverse,
       },
     };
   } catch (error) {
@@ -12099,18 +15255,25 @@ app.get('/wallet/1ze/fx-quote', async (request, reply) => {
   }
 });
 
-app.post('/oracle/gold/override', async (request, reply) => {
+app.post('/update-pricing', async (request, reply) => {
   const bodySchema = z.object({
+    country: z.string().min(2).max(3),
     currency: z.string().length(3),
-    ratePerGram: z.number().positive(),
+    markupBps: z.number().int(),
+    markdownBps: z.number().int(),
+    crossBorderFeeBps: z.number().int(),
+    pppFactor: z.number().positive(),
+    withdrawalLockHours: z.number().int().min(0).max(336).optional(),
+    dailyRedeemLimitIze: z.number().positive().optional(),
+    weeklyRedeemLimitIze: z.number().positive().optional(),
+    isActive: z.boolean().optional(),
     reason: z.string().max(240).optional(),
-    expiresAt: z.string().datetime().optional(),
     metadata: z.record(z.unknown()).optional(),
   });
 
   try {
     const operatorToken = request.headers['x-platform-operator-token'] as string | undefined;
-    assertOperatorToken(operatorToken);
+    assertOnezeOperatorToken(operatorToken);
   } catch {
     reply.code(401);
     return {
@@ -12119,19 +15282,73 @@ app.post('/oracle/gold/override', async (request, reply) => {
     };
   }
 
-  const payload = bodySchema.parse(request.body ?? {});
-
-  if (!(await onezeTablesAvailable(db))) {
+  if (!(await onezePricingTablesAvailable(db))) {
     reply.code(503);
     return {
       ok: false,
-      error: '1ze money-layer tables are unavailable. Run migrations first.',
+      error: '1ze controlled pricing tables are unavailable. Run migrations first.',
     };
   }
 
+  const payload = bodySchema.parse(request.body ?? {});
+
   try {
-    await assertOnezeMintBurnNotHalted();
+    validatePricingProfileInput({
+      markupBps: payload.markupBps,
+      markdownBps: payload.markdownBps,
+      crossBorderFeeBps: payload.crossBorderFeeBps,
+      pppFactor: payload.pppFactor,
+    });
   } catch (error) {
+    reply.code(400);
+    return {
+      ok: false,
+      error: (error as Error).message,
+    };
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    const profile = await upsertCountryPricingProfile(client, {
+      countryCode: payload.country,
+      currency: payload.currency,
+      markupBps: payload.markupBps,
+      markdownBps: payload.markdownBps,
+      crossBorderFeeBps: payload.crossBorderFeeBps,
+      pppFactor: payload.pppFactor,
+      withdrawalLockHours: payload.withdrawalLockHours,
+      dailyRedeemLimitIze: payload.dailyRedeemLimitIze,
+      weeklyRedeemLimitIze: payload.weeklyRedeemLimitIze,
+      isActive: payload.isActive,
+      metadata: {
+        ...(payload.metadata ?? {}),
+        reason: payload.reason ?? null,
+        updatedBy: request.authUser?.userId ?? 'operator',
+      },
+    });
+
+    const quotes = await listCountryPricingQuotes(client);
+    const violations = findPricingArbitrageViolations(quotes);
+    if (violations.length > 0) {
+      throw createApiError('PRICING_ARBITRAGE_VIOLATION', 'Pricing update introduces guaranteed arbitrage', {
+        violations: violations.slice(0, 10),
+      });
+    }
+
+    const quote = quotes.find((entry) => entry.countryCode === profile.countryCode)
+      ?? await resolveCountryPricingQuote(client, profile.countryCode);
+
+    await client.query('COMMIT');
+    return {
+      ok: true,
+      profile,
+      quote,
+      matrixSize: quotes.length,
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
     const apiError = getApiError(error);
     if (apiError) {
       reply.code(statusCodeForApiError(apiError.code));
@@ -12142,41 +15359,410 @@ app.post('/oracle/gold/override', async (request, reply) => {
       };
     }
 
-    throw error;
+    request.log.error({ err: error, payload }, 'Failed to update country pricing profile');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to update pricing profile',
+    };
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/update-anchor', async (request, reply) => {
+  const bodySchema = z.object({
+    anchorValueInInr: z.number().positive(),
+    reason: z.string().max(240).optional(),
+    metadata: z.record(z.unknown()).optional(),
+  });
+
+  try {
+    const operatorToken = request.headers['x-platform-operator-token'] as string | undefined;
+    assertOnezeOperatorToken(operatorToken);
+  } catch {
+    reply.code(401);
+    return {
+      ok: false,
+      error: 'Missing or invalid operator token',
+    };
+  }
+
+  if (!(await onezePricingTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze controlled pricing tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const payload = bodySchema.parse(request.body ?? {});
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    const anchor = await setOnezeAnchorConfig(client, {
+      anchorValue: payload.anchorValueInInr,
+      notes: payload.reason,
+      metadata: {
+        ...(payload.metadata ?? {}),
+        updatedBy: request.authUser?.userId ?? 'operator',
+      },
+    });
+
+    const quotes = await listCountryPricingQuotes(client);
+    const violations = findPricingArbitrageViolations(quotes);
+    if (violations.length > 0) {
+      throw createApiError('PRICING_ARBITRAGE_VIOLATION', 'Anchor update introduces guaranteed arbitrage', {
+        violations: violations.slice(0, 10),
+      });
+    }
+
+    await client.query('COMMIT');
+    return {
+      ok: true,
+      anchor,
+      matrixSize: quotes.length,
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    const apiError = getApiError(error);
+    if (apiError) {
+      reply.code(statusCodeForApiError(apiError.code));
+      return {
+        ok: false,
+        error: apiError.message,
+        details: apiError.details,
+      };
+    }
+
+    request.log.error({ err: error, payload }, 'Failed to update 1ze anchor');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to update 1ze anchor',
+    };
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/admin/1ze/fx-rate', async (request, reply) => {
+  const bodySchema = z.object({
+    baseCurrency: z.string().length(3),
+    quoteCurrency: z.string().length(3),
+    rate: z.number().positive(),
+    reason: z.string().max(240).optional(),
+    metadata: z.record(z.unknown()).optional(),
+  });
+
+  try {
+    const operatorToken = request.headers['x-platform-operator-token'] as string | undefined;
+    assertOnezeOperatorToken(operatorToken);
+  } catch {
+    reply.code(401);
+    return {
+      ok: false,
+      error: 'Missing or invalid operator token',
+    };
+  }
+
+  if (!(await onezePricingTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze controlled pricing tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const payload = bodySchema.parse(request.body ?? {});
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    await setInternalFxRate(client, {
+      baseCurrency: payload.baseCurrency,
+      quoteCurrency: payload.quoteCurrency,
+      rate: payload.rate,
+      source: 'operator',
+      metadata: {
+        ...(payload.metadata ?? {}),
+        reason: payload.reason ?? null,
+        updatedBy: request.authUser?.userId ?? 'operator',
+      },
+    });
+
+    const quotes = await listCountryPricingQuotes(client);
+    const violations = findPricingArbitrageViolations(quotes);
+    if (violations.length > 0) {
+      throw createApiError('PRICING_ARBITRAGE_VIOLATION', 'FX update introduces guaranteed arbitrage', {
+        violations: violations.slice(0, 10),
+      });
+    }
+
+    await client.query('COMMIT');
+    return {
+      ok: true,
+      fx: {
+        baseCurrency: payload.baseCurrency.toUpperCase(),
+        quoteCurrency: payload.quoteCurrency.toUpperCase(),
+        rate: Number(payload.rate.toFixed(8)),
+      },
+      matrixSize: quotes.length,
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    const apiError = getApiError(error);
+    if (apiError) {
+      reply.code(statusCodeForApiError(apiError.code));
+      return {
+        ok: false,
+        error: apiError.message,
+        details: apiError.details,
+      };
+    }
+
+    request.log.error({ err: error, payload }, 'Failed to update internal FX rate');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to update internal FX rate',
+    };
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/adjust-spread', async (request, reply) => {
+  const bodySchema = z.object({
+    country: z.string().min(2).max(3),
+    markupBps: z.number().int().optional(),
+    markdownBps: z.number().int().optional(),
+    crossBorderFeeBps: z.number().int().optional(),
+    reason: z.string().max(240).optional(),
+    metadata: z.record(z.unknown()).optional(),
+  });
+
+  try {
+    const operatorToken = request.headers['x-platform-operator-token'] as string | undefined;
+    assertOnezeOperatorToken(operatorToken);
+  } catch {
+    reply.code(401);
+    return {
+      ok: false,
+      error: 'Missing or invalid operator token',
+    };
+  }
+
+  if (!(await onezePricingTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze controlled pricing tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const payload = bodySchema.parse(request.body ?? {});
+
+  if (
+    payload.markupBps === undefined
+    && payload.markdownBps === undefined
+    && payload.crossBorderFeeBps === undefined
+  ) {
+    reply.code(400);
+    return {
+      ok: false,
+      error: 'Provide at least one spread field to adjust',
+    };
   }
 
   const client = await db.connect();
   try {
     await client.query('BEGIN');
 
-    await setGoldRateOverride(client, {
-      currency: payload.currency,
-      ratePerGram: payload.ratePerGram,
-      reason: payload.reason,
-      createdBy: 'operator',
-      expiresAt: payload.expiresAt,
-      metadata: payload.metadata,
+    const current = await getCountryPricingProfile(client, payload.country);
+    if (!current) {
+      reply.code(404);
+      await client.query('ROLLBACK');
+      return {
+        ok: false,
+        error: 'Country pricing profile not found',
+      };
+    }
+
+    const nextMarkupBps = payload.markupBps ?? current.markupBps;
+    const nextMarkdownBps = payload.markdownBps ?? current.markdownBps;
+    const nextCrossBorderFeeBps = payload.crossBorderFeeBps ?? current.crossBorderFeeBps;
+
+    try {
+      validatePricingProfileInput({
+        markupBps: nextMarkupBps,
+        markdownBps: nextMarkdownBps,
+        crossBorderFeeBps: nextCrossBorderFeeBps,
+        pppFactor: current.pppFactor,
+      });
+    } catch (error) {
+      throw createApiError('PRICING_PROFILE_INVALID', (error as Error).message);
+    }
+
+    const profile = await upsertCountryPricingProfile(client, {
+      countryCode: current.countryCode,
+      currency: current.currency,
+      markupBps: nextMarkupBps,
+      markdownBps: nextMarkdownBps,
+      crossBorderFeeBps: nextCrossBorderFeeBps,
+      pppFactor: current.pppFactor,
+      withdrawalLockHours: current.withdrawalLockHours,
+      dailyRedeemLimitIze: current.dailyRedeemLimitIze,
+      weeklyRedeemLimitIze: current.weeklyRedeemLimitIze,
+      isActive: current.isActive,
+      metadata: {
+        ...(payload.metadata ?? {}),
+        reason: payload.reason ?? null,
+        updatedBy: request.authUser?.userId ?? 'operator',
+      },
     });
 
-    const rate = await resolveGoldRate(client, payload.currency, {
-      forceRefresh: false,
-    });
+    const quotes = await listCountryPricingQuotes(client);
+    const violations = findPricingArbitrageViolations(quotes);
+    if (violations.length > 0) {
+      throw createApiError('PRICING_ARBITRAGE_VIOLATION', 'Spread adjustment introduces guaranteed arbitrage', {
+        violations: violations.slice(0, 10),
+      });
+    }
+
+    const quote = quotes.find((entry) => entry.countryCode === profile.countryCode)
+      ?? await resolveCountryPricingQuote(client, profile.countryCode);
 
     await client.query('COMMIT');
     return {
       ok: true,
-      rate,
+      profile,
+      quote,
     };
   } catch (error) {
     await client.query('ROLLBACK');
-    request.log.error({ err: error }, 'Failed to apply gold rate override');
+    const apiError = getApiError(error);
+    if (apiError) {
+      reply.code(statusCodeForApiError(apiError.code));
+      return {
+        ok: false,
+        error: apiError.message,
+        details: apiError.details,
+      };
+    }
+
+    request.log.error({ err: error, payload }, 'Failed to adjust country spread');
     reply.code(500);
     return {
       ok: false,
-      error: 'Unable to apply gold rate override',
+      error: 'Unable to adjust pricing spread',
     };
   } finally {
     client.release();
+  }
+});
+
+app.get('/admin/1ze/pricing-health', async (request, reply) => {
+  try {
+    const operatorToken = request.headers['x-platform-operator-token'] as string | undefined;
+    assertOnezeOperatorToken(operatorToken);
+  } catch {
+    reply.code(401);
+    return {
+      ok: false,
+      error: 'Missing or invalid operator token',
+    };
+  }
+
+  if (!(await onezePricingTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze controlled pricing tables are unavailable. Run migrations first.',
+    };
+  }
+
+  try {
+    const quotes = await listCountryPricingQuotes(db);
+    const violations = findPricingArbitrageViolations(quotes);
+
+    return {
+      ok: true,
+      matrixSize: quotes.length,
+      violationCount: violations.length,
+      violations,
+      quotes,
+    };
+  } catch (error) {
+    request.log.error({ err: error }, 'Failed to evaluate 1ze pricing health');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to evaluate pricing health',
+    };
+  }
+});
+
+app.get('/admin/1ze/risk-dashboard', async (request, reply) => {
+  const querySchema = z.object({
+    lookbackHours: z.coerce.number().int().min(1).max(24 * 30).default(24),
+  });
+
+  try {
+    const operatorToken = request.headers['x-platform-operator-token'] as string | undefined;
+    assertOnezeOperatorToken(operatorToken);
+  } catch {
+    reply.code(401);
+    return {
+      ok: false,
+      error: 'Missing or invalid operator token',
+    };
+  }
+
+  if (
+    !(await onezePricingTablesAvailable(db))
+    || !(await onezeArchitectureTablesAvailable(db))
+    || !(await onezeTablesAvailable(db))
+  ) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze risk dashboard dependencies are unavailable. Run migrations first.',
+    };
+  }
+
+  const payload = querySchema.parse(request.query);
+
+  try {
+    const metrics = await collectOnezeRiskDashboardMetrics(db, payload.lookbackHours);
+
+    return {
+      ok: true,
+      dashboard: {
+        evaluatedAt: metrics.evaluatedAt,
+        lookbackHours: metrics.lookbackHours,
+        countryFlows: metrics.countryFlows,
+        totals: metrics.totals,
+        redemption: metrics.redemption,
+        crossBorder: metrics.crossBorder,
+        liquidity: {
+          pendingWithdrawalMg: metrics.liquidity.pendingWithdrawalMg,
+          operationalLiquidityMg: metrics.liquidity.operationalLiquidityMg,
+          stressIndex: metrics.liquidity.stressIndex,
+          stressLevel: metrics.liquidity.stressLevel,
+        },
+        reservePolicy: metrics.reservePolicy,
+        exposure: metrics.exposure,
+      },
+    };
+  } catch (error) {
+    request.log.error({ err: error, payload }, 'Failed to evaluate 1ze risk dashboard');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to evaluate 1ze risk dashboard',
+    };
   }
 });
 
@@ -12210,6 +15796,14 @@ app.post('/wallet/1ze/mint/quote', async (request, reply) => {
     return {
       ok: false,
       error: 'Payment settlement tables are unavailable. Run migrations first.',
+    };
+  }
+
+  if (!(await onezePricingTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze controlled pricing tables are unavailable. Run migrations first.',
     };
   }
 
@@ -12265,12 +15859,11 @@ app.post('/wallet/1ze/mint/quote', async (request, reply) => {
       }
     }
 
-    const goldRate = await resolveGoldRate(client, fiatCurrency, {
-      forceRefresh: payload.forceRefresh,
-    });
+    const pricingQuote = await resolveCountryPricingQuoteByCurrency(client, fiatCurrency);
+    const mintUnitPrice = pricingQuote.buyPrice;
 
     const amountMg = onezeAmountToMg(
-      Number((feeBreakdown.netFiatAmount / goldRate.ratePerGram).toFixed(6))
+      Number((feeBreakdown.netFiatAmount / mintUnitPrice).toFixed(6))
     );
 
     const gatewayId = payload.gatewayId ?? resolveDefaultGatewayForChannel('wallet_topup');
@@ -12348,14 +15941,17 @@ app.post('/wallet/1ze/mint/quote', async (request, reply) => {
         toFiatMinor(feeBreakdown.netFiatAmount, fiatCurrency),
         toFiatMinor(feeBreakdown.platformFeeAmount, fiatCurrency),
         amountMg,
-        goldRate.ratePerGram,
-        goldRate.source,
+        mintUnitPrice,
+        `internal_pricing:${pricingQuote.countryCode}:buy`,
         rateLockedAt.toISOString(),
         rateExpiresAt.toISOString(),
         toJsonString({
           quoteRequestedAt: rateLockedAt.toISOString(),
           quoteValidForSeconds: config.onezeMintQuoteTtlSeconds,
           feeBreakdown,
+          pricingCountry: pricingQuote.countryCode,
+          pricingCurrency: pricingQuote.currency,
+          pricingModel: 'controlled_anchor',
           ...(payload.metadata ?? {}),
         }),
       ]
@@ -12436,7 +16032,7 @@ app.post('/wallet/1ze/mint/quote', async (request, reply) => {
         gatewayIntent.scaExpiresAt ?? null,
         toJsonString({
           mintOperationId,
-          quoteRateSource: goldRate.source,
+          quoteRateSource: `internal_pricing:${pricingQuote.countryCode}:buy`,
           ...(payload.metadata ?? {}),
         }),
       ]
@@ -12721,6 +16317,14 @@ app.post('/wallet/1ze/mint', async (request, reply) => {
     };
   }
 
+  if (!(await onezePricingTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze controlled pricing tables are unavailable. Run migrations first.',
+    };
+  }
+
   try {
     await assertOnezeMintBurnNotHalted();
   } catch (error) {
@@ -12789,10 +16393,10 @@ app.post('/wallet/1ze/mint', async (request, reply) => {
       fundingGatewayId = settledIntent.gatewayId;
     }
 
-    const quote = await resolveGoldRate(client, payload.fiatCurrency, {
-      forceRefresh: false,
-    });
-    const izeAmount = Number((feeBreakdown.netFiatAmount / quote.ratePerGram).toFixed(6));
+    const fiatCurrency = payload.fiatCurrency.toUpperCase();
+    const pricingQuote = await resolveCountryPricingQuoteByCurrency(client, fiatCurrency);
+    const mintUnitPrice = pricingQuote.buyPrice;
+    const izeAmount = Number((feeBreakdown.netFiatAmount / mintUnitPrice).toFixed(6));
 
     if (!Number.isFinite(izeAmount) || izeAmount <= 0) {
       throw createApiError('IZE_MINT_INVALID', 'Unable to derive a valid 1ze mint amount');
@@ -12803,12 +16407,15 @@ app.post('/wallet/1ze/mint', async (request, reply) => {
       operationId,
       userId: actorUserId,
       fiatAmount: feeBreakdown.netFiatAmount,
-      fiatCurrency: payload.fiatCurrency.toUpperCase(),
+      fiatCurrency,
       izeAmount,
-      ratePerGram: quote.ratePerGram,
+      ratePerGram: mintUnitPrice,
       paymentIntentId: payload.paymentIntentId,
       metadata: {
         ...(payload.metadata ?? {}),
+        pricingCountry: pricingQuote.countryCode,
+        pricingModel: 'controlled_anchor',
+        pricingSource: `internal_pricing:${pricingQuote.countryCode}:buy`,
         walletTopup: {
           grossFiatAmount: feeBreakdown.grossFiatAmount,
           netFiatAmount: feeBreakdown.netFiatAmount,
@@ -12824,10 +16431,7 @@ app.post('/wallet/1ze/mint', async (request, reply) => {
 
     if (architectureEnabled) {
       const amountMg = onezeAmountToMg(izeAmount);
-      const inrRate = await resolveGoldRate(client, 'INR', {
-        forceRefresh: false,
-      });
-      const wallet = await ensureWallet(client, actorUserId, payload.fiatCurrency.toUpperCase());
+      const wallet = await ensureWallet(client, actorUserId, fiatCurrency);
       const walletTxId = createRuntimeId('wtx');
 
       architectureWalletId = wallet.id;
@@ -12839,19 +16443,32 @@ app.post('/wallet/1ze/mint', async (request, reply) => {
         kind: 'MINT',
         refType: 'wallet_ize_operation',
         refId: operationId,
-        goldRateInrPerG: inrRate.ratePerGram,
+        anchorValueInInr: pricingQuote.anchorValueInInr,
         metadata: {
           operationId,
           userId: actorUserId,
           paymentIntentId: payload.paymentIntentId ?? null,
           fiatAmount: feeBreakdown.netFiatAmount,
-          fiatCurrency: payload.fiatCurrency.toUpperCase(),
-          pricingReferenceSource: quote.source,
+          fiatCurrency,
+          pricingReferenceSource: `internal_pricing:${pricingQuote.countryCode}:buy`,
           ...(payload.metadata ?? {}),
         },
       });
 
-      await appendGoldPriceTick(client, `wallet_mint_reference:${quote.source}`, inrRate.ratePerGram);
+      await creditWalletSegmentBalance(client, {
+        wallet,
+        txId: walletTxId,
+        purchasedCreditMg: amountMg,
+        originCountry: normalizeOnezeCountryTag(
+          typeof payload.metadata?.originCountry === 'string'
+            ? payload.metadata.originCountry
+            : null
+        ),
+        metadata: {
+          operationId,
+          source: 'wallet_mint',
+        },
+      });
     }
 
     const [walletBalanceIze, reserveSnapshot] = await Promise.all([
@@ -12870,10 +16487,10 @@ app.post('/wallet/1ze/mint', async (request, reply) => {
         netFiatAmount: feeBreakdown.netFiatAmount,
         platformFeeRate: feeBreakdown.platformFeeRate,
         platformFeeAmount: feeBreakdown.platformFeeAmount,
-        fiatCurrency: payload.fiatCurrency.toUpperCase(),
+        fiatCurrency,
         izeAmount,
-        ratePerGram: quote.ratePerGram,
-        rateSource: quote.source,
+        ratePerGram: mintUnitPrice,
+        rateSource: `internal_pricing:${pricingQuote.countryCode}:buy`,
         fundingGatewayId,
       },
       balances: {
@@ -13019,30 +16636,72 @@ app.post('/wallet/1ze/burn', async (request, reply) => {
       payoutAmountGbp = payout.amountGbp;
     }
 
-    const quote = await resolveGoldRate(client, payload.fiatCurrency, {
-      forceRefresh: false,
-    });
-    const fiatAmount = Number((payload.izeAmount * quote.ratePerGram).toFixed(6));
+    const fiatCurrency = payload.fiatCurrency.toUpperCase();
+    const normalizedIzeAmount = Number(payload.izeAmount.toFixed(6));
+    const amountMg = onezeAmountToMg(normalizedIzeAmount);
+    const pricingQuote = await resolveCountryPricingQuoteByCurrency(client, fiatCurrency);
+    const pricingProfile = await getCountryPricingProfile(client, pricingQuote.countryCode);
 
-    if (payoutAmountCurrency && payoutAmountCurrency !== payload.fiatCurrency.toUpperCase()) {
+    if (!pricingProfile) {
+      throw createApiError('PRICING_PROFILE_NOT_FOUND', 'Country pricing profile is unavailable for burn execution', {
+        fiatCurrency,
+      });
+    }
+
+    const redeemCountry = normalizeOnezeCountryTag(
+      typeof payload.metadata?.redeemCountry === 'string'
+        ? payload.metadata.redeemCountry
+        : pricingQuote.countryCode
+    );
+    const originCountry = normalizeOnezeCountryTag(
+      typeof payload.metadata?.originCountry === 'string'
+        ? payload.metadata.originCountry
+        : redeemCountry
+    );
+    const isCrossBorder = originCountry !== redeemCountry;
+    const redemptionUnitPrice = isCrossBorder
+      ? pricingQuote.crossBorderSellPrice
+      : pricingQuote.sellPrice;
+    const fiatAmount = Number((normalizedIzeAmount * redemptionUnitPrice).toFixed(6));
+
+    const [dailyBurnedIze, weeklyBurnedIze] = await Promise.all([
+      getCommittedBurnIzeInWindow(client, actorUserId, 24),
+      getCommittedBurnIzeInWindow(client, actorUserId, 7 * 24),
+    ]);
+
+    if (dailyBurnedIze + normalizedIzeAmount > pricingProfile.dailyRedeemLimitIze) {
+      throw createApiError('DAILY_REDEEM_LIMIT_EXCEEDED', 'Daily redemption cap exceeded for this country profile', {
+        dailyRedeemLimitIze: pricingProfile.dailyRedeemLimitIze,
+        dailyBurnedIze,
+        requestedIze: normalizedIzeAmount,
+      });
+    }
+
+    if (weeklyBurnedIze + normalizedIzeAmount > pricingProfile.weeklyRedeemLimitIze) {
+      throw createApiError('WEEKLY_REDEEM_LIMIT_EXCEEDED', 'Weekly redemption cap exceeded for this country profile', {
+        weeklyRedeemLimitIze: pricingProfile.weeklyRedeemLimitIze,
+        weeklyBurnedIze,
+        requestedIze: normalizedIzeAmount,
+      });
+    }
+
+    if (payoutAmountCurrency && payoutAmountCurrency !== fiatCurrency) {
       throw createApiError(
         'PAYOUT_REQUEST_CURRENCY_MISMATCH',
         'Payout request currency does not match requested 1ze burn currency',
         {
           payoutRequestId: payload.payoutRequestId,
           payoutAmountCurrency,
-          burnCurrency: payload.fiatCurrency.toUpperCase(),
+          burnCurrency: fiatCurrency,
         }
       );
     }
 
     if (payoutAmountGbp !== null) {
       let redemptionAmountGbp = fiatAmount;
-      if (payload.fiatCurrency.toUpperCase() !== 'GBP') {
-        const gbpQuote = await resolveGoldRate(client, 'GBP', {
-          forceRefresh: false,
-        });
-        redemptionAmountGbp = Number((payload.izeAmount * gbpQuote.ratePerGram).toFixed(6));
+      if (fiatCurrency !== 'GBP') {
+        const gbpFx = await resolveInternalFxRate(client, fiatCurrency, 'GBP');
+        redemptionAmountGbp = Number((fiatAmount * gbpFx.rate).toFixed(6));
       }
 
       const tolerance = Math.max(0.5, payoutAmountGbp * 0.03);
@@ -13060,31 +16719,61 @@ app.post('/wallet/1ze/burn', async (request, reply) => {
       }
     }
 
+    const architectureEnabled = await onezeArchitectureTablesAvailable(client);
+    let architectureWalletId: string | null = null;
+    let architectureWalletBalanceMg: number | null = null;
+    let segmentDebitResult:
+      | {
+          purchasedDebitedMg: number;
+          earnedDebitedMg: number;
+          lockedPurchasedMg: number;
+          redeemableMg: number;
+          purchasedBalanceMg: number;
+          earnedBalanceMg: number;
+        }
+      | null = null;
+
+    if (architectureEnabled) {
+      const wallet = await ensureWallet(client, actorUserId, fiatCurrency);
+      segmentDebitResult = await debitWalletSegmentBalance(client, {
+        wallet,
+        txId: `seg_${createRuntimeId('ize_burn')}`,
+        amountMg,
+        originCountry,
+        lockHours: pricingProfile.withdrawalLockHours,
+        metadata: {
+          operation: 'burn',
+          redeemCountry,
+          isCrossBorder,
+          payoutRequestId: payload.payoutRequestId ?? null,
+        },
+      });
+
+      architectureWalletId = wallet.id;
+    }
+
     const operationId = createRuntimeId('ize_burn');
     await recordIzeBurn(client, {
       operationId,
       userId: actorUserId,
       fiatAmount,
-      fiatCurrency: payload.fiatCurrency.toUpperCase(),
-      izeAmount: Number(payload.izeAmount.toFixed(6)),
-      ratePerGram: quote.ratePerGram,
+      fiatCurrency,
+      izeAmount: normalizedIzeAmount,
+      ratePerGram: redemptionUnitPrice,
       payoutRequestId: payload.payoutRequestId,
-      metadata: payload.metadata,
+      metadata: {
+        ...(payload.metadata ?? {}),
+        country: pricingQuote.countryCode,
+        originCountry,
+        redeemCountry,
+        isCrossBorder,
+      },
     });
 
-    const architectureEnabled = await onezeArchitectureTablesAvailable(client);
-    let architectureWalletId: string | null = null;
-    let architectureWalletBalanceMg: number | null = null;
-
     if (architectureEnabled) {
-      const amountMg = onezeAmountToMg(Number(payload.izeAmount.toFixed(6)));
-      const inrRate = await resolveGoldRate(client, 'INR', {
-        forceRefresh: false,
-      });
-      const wallet = await ensureWallet(client, actorUserId, payload.fiatCurrency.toUpperCase());
+      const wallet = await ensureWallet(client, actorUserId, fiatCurrency);
       const walletTxId = createRuntimeId('wtx');
 
-      architectureWalletId = wallet.id;
       architectureWalletBalanceMg = await applyWalletLedgerDelta(client, {
         walletId: wallet.id,
         txId: walletTxId,
@@ -13093,19 +16782,17 @@ app.post('/wallet/1ze/burn', async (request, reply) => {
         kind: 'BURN',
         refType: 'wallet_ize_operation',
         refId: operationId,
-        goldRateInrPerG: inrRate.ratePerGram,
+        anchorValueInInr: pricingQuote.anchorValueInInr,
         metadata: {
           operationId,
           userId: actorUserId,
           payoutRequestId: payload.payoutRequestId ?? null,
           fiatAmount,
-          fiatCurrency: payload.fiatCurrency.toUpperCase(),
-          pricingReferenceSource: quote.source,
+          fiatCurrency,
+          pricingReferenceSource: `internal_pricing:${pricingQuote.countryCode}:${isCrossBorder ? 'cross_border_sell' : 'sell'}`,
           ...(payload.metadata ?? {}),
         },
       });
-
-      await appendGoldPriceTick(client, `wallet_burn_reference:${quote.source}`, inrRate.ratePerGram);
     }
 
     const [walletBalanceIze, reserveSnapshot] = await Promise.all([
@@ -13120,14 +16807,20 @@ app.post('/wallet/1ze/burn', async (request, reply) => {
         type: 'burn',
         userId: actorUserId,
         fiatAmount,
-        fiatCurrency: payload.fiatCurrency.toUpperCase(),
-        izeAmount: Number(payload.izeAmount.toFixed(6)),
-        ratePerGram: quote.ratePerGram,
-        rateSource: quote.source,
+        fiatCurrency,
+        izeAmount: normalizedIzeAmount,
+        ratePerGram: redemptionUnitPrice,
+        rateSource: `internal_pricing:${pricingQuote.countryCode}:${isCrossBorder ? 'cross_border_sell' : 'sell'}`,
+        country: pricingQuote.countryCode,
+        originCountry,
+        redeemCountry,
+        isCrossBorder,
         payoutGatewayId,
         payoutStatus,
         payoutAmountCurrency,
         payoutAmountGbp,
+        dailyRedeemLimitIze: pricingProfile.dailyRedeemLimitIze,
+        weeklyRedeemLimitIze: pricingProfile.weeklyRedeemLimitIze,
       },
       balances: {
         userIze: walletBalanceIze,
@@ -13145,6 +16838,7 @@ app.post('/wallet/1ze/burn', async (request, reply) => {
               architectureWalletBalanceMg === null
                 ? null
                 : mgToOnezeAmount(architectureWalletBalanceMg),
+            segmentDebit: segmentDebitResult,
           }
         : null,
     };
@@ -13263,24 +16957,12 @@ app.post('/wallet/1ze/transfer', async (request, reply) => {
     }
 
     const fiatCurrency = payload.fiatCurrency.toUpperCase();
-    const fiatRate = await resolveGoldRate(client, fiatCurrency, {
-      forceRefresh: false,
-    });
-
-    const inrRate = await resolveGoldRate(client, 'INR', {
-      forceRefresh: false,
-    });
-
-    const gbpRate =
-      fiatCurrency === 'GBP'
-        ? fiatRate
-        : await resolveGoldRate(client, 'GBP', {
-            forceRefresh: false,
-          });
+    const pricingQuote = await resolveCountryPricingQuoteByCurrency(client, fiatCurrency);
+    const fxToGbp = await resolveInternalFxRate(client, fiatCurrency, 'GBP');
 
     const onezeAmountFromMg = mgToOnezeAmount(amountMg);
-    const fiatAmount = Number((onezeAmountFromMg * fiatRate.ratePerGram).toFixed(6));
-    const amountGbp = Number((onezeAmountFromMg * gbpRate.ratePerGram).toFixed(6));
+    const fiatAmount = Number((onezeAmountFromMg * pricingQuote.buyPrice).toFixed(6));
+    const amountGbp = Number((fiatAmount * fxToGbp.rate).toFixed(6));
     const eligibilityAmountGbp = roundTo(amountGbp, 2);
 
     const policyDecision = await evaluateP2pPolicyEligibility(client, {
@@ -13341,7 +17023,7 @@ app.post('/wallet/1ze/transfer', async (request, reply) => {
           izeAmount: normalizedIzeAmount,
           fiatAmount,
           fiatCurrency,
-          ratePerGram: fiatRate.ratePerGram,
+          ratePerGram: pricingQuote.buyPrice,
         },
         assessment: amlAssessment,
       });
@@ -13363,7 +17045,7 @@ app.post('/wallet/1ze/transfer', async (request, reply) => {
       izeAmount: normalizedIzeAmount,
       fiatAmount,
       fiatCurrency,
-      ratePerGram: fiatRate.ratePerGram,
+      ratePerGram: pricingQuote.buyPrice,
       eligibilityCode: 'ALLOWED',
       amlRiskScore: amlAssessment.riskScore,
       amlRiskLevel: amlAssessment.riskLevel,
@@ -13407,11 +17089,12 @@ app.post('/wallet/1ze/transfer', async (request, reply) => {
         kind: 'TRANSFER_SEND',
         refType: payload.contextType ?? 'p2p_transfer',
         refId: payload.contextId ?? transferId,
-        goldRateInrPerG: inrRate.ratePerGram,
+        anchorValueInInr: pricingQuote.anchorValueInInr,
         metadata: {
           transferId,
           counterpartyUserId: recipientUserId,
           note: payload.note ?? null,
+          pricingSource: `internal_pricing:${pricingQuote.countryCode}:buy`,
         },
       }),
       applyWalletLedgerDelta(client, {
@@ -13422,14 +17105,39 @@ app.post('/wallet/1ze/transfer', async (request, reply) => {
         kind: 'TRANSFER_RECEIVE',
         refType: payload.contextType ?? 'p2p_transfer',
         refId: payload.contextId ?? transferId,
-        goldRateInrPerG: inrRate.ratePerGram,
+        anchorValueInInr: pricingQuote.anchorValueInInr,
         metadata: {
           transferId,
           counterpartyUserId: senderUserId,
           note: payload.note ?? null,
+          pricingSource: `internal_pricing:${pricingQuote.countryCode}:buy`,
         },
       }),
     ]);
+
+    await debitWalletSegmentBalance(client, {
+      wallet: senderWallet,
+      txId: walletTxId,
+      amountMg,
+      originCountry: policyDecision.senderCountry,
+      metadata: {
+        operation: 'transfer_send',
+        transferId,
+        counterpartyUserId: recipientUserId,
+      },
+    });
+
+    await creditWalletSegmentBalance(client, {
+      wallet: recipientWallet,
+      txId: walletTxId,
+      earnedCreditMg: amountMg,
+      originCountry: policyDecision.senderCountry,
+      metadata: {
+        operation: 'transfer_receive',
+        transferId,
+        counterpartyUserId: senderUserId,
+      },
+    });
 
     const [senderIzeBalance, recipientIzeBalance] = await Promise.all([
       getLedgerAccountBalance(client, 'user', senderUserId, 'ize_wallet', 'IZE'),
@@ -13447,8 +17155,10 @@ app.post('/wallet/1ze/transfer', async (request, reply) => {
         fiatAmount,
         fiatCurrency,
         amountGbp: eligibilityAmountGbp,
-        ratePerGram: fiatRate.ratePerGram,
-        rateSource: fiatRate.source,
+        ratePerGram: pricingQuote.buyPrice,
+        rateSource: `internal_pricing:${pricingQuote.countryCode}:buy`,
+        fxRateToGbp: fxToGbp.rate,
+        fxSourceToGbp: fxToGbp.source,
         senderEligibilityCode: senderEligibility.code,
         recipientEligibilityCode: recipientEligibility.code,
         senderCountry: policyDecision.senderCountry,
@@ -13630,7 +17340,7 @@ app.post('/wallet/1ze/withdrawals/quote', async (request, reply) => {
       });
     }
 
-    const fxRate = await resolveXauFxRate(client, targetCurrency, {
+    const fxRate = await resolveOnezeFiatFxRate(client, targetCurrency, {
       forceRefresh: payload.forceRefresh,
     });
 
@@ -13939,9 +17649,7 @@ app.post('/wallet/1ze/withdrawals/:withdrawalId/accept', async (request, reply) 
     const amountMg = Number(withdrawal.amount_mg);
     const requiresQueuedExecution = amountMg > config.onezeWithdrawalInstantLimitMg;
     const wallet = await ensureWallet(client, withdrawal.user_id, withdrawal.target_currency);
-    const inrRate = await resolveGoldRate(client, 'INR', {
-      forceRefresh: false,
-    });
+    const pricingQuote = await resolveCountryPricingQuoteByCurrency(client, withdrawal.target_currency);
     const burnTxId = withdrawal.burn_tx_id ?? createRuntimeId('wdburn');
 
     const walletBalanceAfterMg = await applyWalletLedgerDelta(client, {
@@ -13952,11 +17660,12 @@ app.post('/wallet/1ze/withdrawals/:withdrawalId/accept', async (request, reply) 
       kind: 'WITHDRAWAL_RESERVED',
       refType: 'withdrawal',
       refId: withdrawal.id,
-      goldRateInrPerG: inrRate.ratePerGram,
+      anchorValueInInr: pricingQuote.anchorValueInInr,
       metadata: {
         withdrawalId: withdrawal.id,
         actorUserId,
         targetCurrency: withdrawal.target_currency,
+        pricingSource: `internal_pricing:${pricingQuote.countryCode}:sell`,
         ...(payload.metadata ?? {}),
       },
     });
@@ -14232,9 +17941,7 @@ app.post('/wallet/1ze/withdrawals/:withdrawalId/fail', async (request, reply) =>
     let walletInfo: { walletId: string; onezeBalanceMg: number; onezeBalance: number } | null = null;
 
     if (withdrawal.status === 'RESERVED') {
-      const inrRate = await resolveGoldRate(client, 'INR', {
-        forceRefresh: false,
-      });
+      const pricingQuote = await resolveCountryPricingQuoteByCurrency(client, withdrawal.target_currency);
 
       const wallet = await ensureWallet(client, withdrawal.user_id, withdrawal.target_currency);
       const walletBalanceAfterMg = await applyWalletLedgerDelta(client, {
@@ -14245,10 +17952,11 @@ app.post('/wallet/1ze/withdrawals/:withdrawalId/fail', async (request, reply) =>
         kind: 'WITHDRAWAL_REVERSED',
         refType: 'withdrawal',
         refId: withdrawal.id,
-        goldRateInrPerG: inrRate.ratePerGram,
+        anchorValueInInr: pricingQuote.anchorValueInInr,
         metadata: {
           withdrawalId,
           reason: payload.reason ?? 'execution_failed',
+          pricingSource: `internal_pricing:${pricingQuote.countryCode}:sell`,
           ...(payload.metadata ?? {}),
         },
       });
@@ -14473,7 +18181,30 @@ app.get('/wallet/1ze/:userId/balance', async (request, reply) => {
               ?? computedSupplyDeltaMg,
             toleranceMg: asFiniteNumber(latestSnapshotMetadata.toleranceMg),
             operationalLiquidityMg: asFiniteNumber(latestSnapshotMetadata.operationalLiquidityMg),
-            withinSupplyTolerance: latestSnapshot.within_invariant,
+            configuredOperationalReserveMg: asFiniteNumber(
+              asObject(latestSnapshotMetadata.reservePolicy).configuredOperationalReserveMg
+            ),
+            reservedWithdrawalMg: asFiniteNumber(
+              asObject(latestSnapshotMetadata.reservePolicy).reservedWithdrawalMg
+            ),
+            configuredReserveRatio: asFiniteNumber(
+              asObject(latestSnapshotMetadata.reservePolicy).configuredReserveRatio
+            ),
+            effectiveReserveRatio: asFiniteNumber(
+              asObject(latestSnapshotMetadata.reservePolicy).effectiveReserveRatio
+            ),
+            withinReservePolicy:
+              typeof asObject(latestSnapshotMetadata.reservePolicy).withinPolicy === 'boolean'
+                ? (asObject(latestSnapshotMetadata.reservePolicy).withinPolicy as boolean)
+                : null,
+            withinSupplyTolerance:
+              typeof latestSnapshotMetadata.withinSupplyInvariant === 'boolean'
+                ? (latestSnapshotMetadata.withinSupplyInvariant as boolean)
+                : latestSnapshot.within_invariant,
+            withinSupplyInvariant:
+              typeof latestSnapshotMetadata.withinSupplyInvariant === 'boolean'
+                ? (latestSnapshotMetadata.withinSupplyInvariant as boolean)
+                : latestSnapshot.within_invariant,
             reserveActiveMg: Number(latestSnapshot.reserve_active_mg),
             withinInvariant: latestSnapshot.within_invariant,
             createdAt: latestSnapshot.created_at,
@@ -14543,7 +18274,7 @@ app.get('/wallet/1ze/:userId/ledger', async (request, reply) => {
           kind,
           ref_type,
           ref_id,
-          gold_rate_inr_per_g::text,
+            anchor_value_in_inr::text,
           metadata,
           created_at::text
         FROM wallet_ledger
@@ -14666,11 +18397,23 @@ app.get('/wallet/1ze/:userId/position', async (request, reply) => {
     };
   }
 
-  const [quote, userIze, reserveSnapshot] = await Promise.all([
-    resolveGoldRate(db, fiatCurrency, { forceRefresh: false }),
+  const [pricingQuote, userIze, reserveSnapshot] = await Promise.all([
+    resolveCountryPricingQuoteByCurrency(db, fiatCurrency),
     getLedgerAccountBalance(db, 'user', userId, 'ize_wallet', 'IZE'),
     getPlatformIzeReserveSnapshot(db),
   ]);
+
+  const quote = {
+    currency: pricingQuote.currency,
+    ratePerGram: pricingQuote.sellPrice,
+    source: `internal_pricing:${pricingQuote.countryCode}:sell`,
+    fetchedAt: new Date().toISOString(),
+    expiresAt: null,
+    isFallback: false,
+    isOverride: false,
+    country: pricingQuote.countryCode,
+    model: 'controlled_anchor',
+  };
 
   return {
     ok: true,
@@ -14678,7 +18421,7 @@ app.get('/wallet/1ze/:userId/position', async (request, reply) => {
     rate: quote,
     balances: {
       userIze,
-      userFiatValue: Number((userIze * quote.ratePerGram).toFixed(2)),
+      userFiatValue: Number((userIze * pricingQuote.sellPrice).toFixed(2)),
       outstandingIze: reserveSnapshot.outstandingIze,
       circulatingIze: reserveSnapshot.circulatingIze,
       supplyDeltaIze: reserveSnapshot.supplyDeltaIze,
@@ -14695,7 +18438,7 @@ app.post('/wallet/1ze/reconcile', async (request, reply) => {
 
   try {
     const operatorToken = request.headers['x-platform-operator-token'] as string | undefined;
-    assertOperatorToken(operatorToken);
+    assertOnezeOperatorToken(operatorToken);
   } catch {
     reply.code(401);
     return {
@@ -14722,22 +18465,30 @@ app.post('/wallet/1ze/reconcile', async (request, reply) => {
       ...(payload.metadata ?? {}),
     });
 
-    const attestation = await createIzeReconciliationAttestation(client, {
+    const attestation = await createOnezeReconciliationAttestation(client, {
       attestedBy: 'operator',
       metadata: {
         source: 'wallet_reconcile_endpoint',
         snapshotId: snapshot.id,
         ...(payload.metadata ?? {}),
       },
-      thresholdIze: config.goldReserveDriftThresholdGrams,
+      thresholdIze: config.onezeSupplyDriftThresholdIze,
     });
+
+    const warnings: string[] = [];
+    if (!snapshot.withinSupplyInvariant) {
+      warnings.push('supply_invariant_violation');
+    }
+    if (!snapshot.withinReservePolicy) {
+      warnings.push('reserve_policy_violation');
+    }
 
     await client.query('COMMIT');
     return {
       ok: true,
       snapshot,
       attestation,
-      warnings: [],
+      warnings,
     };
   } catch (error) {
     await client.query('ROLLBACK');
@@ -15419,13 +19170,15 @@ app.get('/payments/platform/summary', async () => {
       ok: true,
       balances: {
         platformRevenueGbp: 0,
+        platformOperatingGbp: 0,
         escrowLiabilityGbp: 0,
       },
     };
   }
 
-  const [platformRevenueGbp, escrowLiabilityGbp] = await Promise.all([
+  const [platformRevenueGbp, platformOperatingGbp, escrowLiabilityGbp] = await Promise.all([
     getLedgerAccountBalance(db, 'platform', 'platform', 'platform_revenue'),
+    getLedgerAccountBalance(db, 'platform', 'platform', 'platform_operating'),
     getLedgerAccountBalance(db, 'platform', 'platform', 'escrow_liability'),
   ]);
 
@@ -15433,6 +19186,7 @@ app.get('/payments/platform/summary', async () => {
     ok: true,
     balances: {
       platformRevenueGbp,
+      platformOperatingGbp,
       escrowLiabilityGbp,
     },
   };
@@ -15802,6 +19556,20 @@ app.post('/users/:userId/payout-requests', async (request, reply) => {
     };
   }
 
+  const payoutPauseState = await getPayoutPauseState();
+  if (payoutPauseState.paused) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: 'Payouts temporarily paused for reconciliation review.',
+      pause: {
+        reason: payoutPauseState.reason ?? null,
+        reconciliationRunId: payoutPauseState.reconciliationRunId ?? null,
+        mismatchGbp: payoutPauseState.mismatchGbp ?? null,
+      },
+    };
+  }
+
   const requestId = createRuntimeId('po');
   const client = await db.connect();
 
@@ -15815,9 +19583,10 @@ app.post('/users/:userId/payout-requests', async (request, reply) => {
       gateway_id: string;
       status: 'pending' | 'active' | 'disabled';
       currency: string;
+      metadata: Record<string, unknown>;
     }>(
       `
-        SELECT id, user_id, gateway_id, status, currency
+        SELECT id, user_id, gateway_id, status, currency, metadata
         FROM payout_accounts
         WHERE id = $1 AND user_id = $2
         LIMIT 1
@@ -15875,23 +19644,18 @@ app.post('/users/:userId/payout-requests', async (request, reply) => {
     } else if (payoutCurrency === 'GBP') {
       amountGbp = roundTo(requestedAmount, 2);
     } else {
-      if (!(await onezeTablesAvailable(client))) {
+      if (!(await onezePricingTablesAvailable(client))) {
         await client.query('ROLLBACK');
         reply.code(503);
         return {
           ok: false,
-          error: 'Gold oracle tables are unavailable for payout currency conversion. Run migrations first.',
+          error: '1ze controlled pricing tables are unavailable for payout currency conversion. Run migrations first.',
         };
       }
 
-      const [sourceRate, gbpRate] = await Promise.all([
-        resolveGoldRate(client, payoutCurrency, { forceRefresh: false }),
-        resolveGoldRate(client, 'GBP', { forceRefresh: false }),
-      ]);
-
-      const gbpPerUnit = gbpRate.ratePerGram / sourceRate.ratePerGram;
-      conversionFxRate = Number(gbpPerUnit.toFixed(8));
-      amountGbp = roundTo(requestedAmount * gbpPerUnit, 2);
+      const fx = await resolveInternalFxRate(client, payoutCurrency, 'GBP');
+      conversionFxRate = Number(fx.rate.toFixed(8));
+      amountGbp = roundTo(requestedAmount * fx.rate, 2);
     }
 
     if (!Number.isFinite(amountGbp) || amountGbp <= 0) {
@@ -15903,12 +19667,97 @@ app.post('/users/:userId/payout-requests', async (request, reply) => {
       };
     }
 
+    const todayVelocityResult = await client.query<{ total: string }>(
+      `
+        SELECT COALESCE(SUM(amount_gbp), 0)::text AS total
+        FROM payout_requests
+        WHERE user_id = $1
+          AND created_at::date = CURRENT_DATE
+          AND status IN ('requested', 'processing', 'paid')
+      `,
+      [userId]
+    );
+
+    const velocityUsedTodayGbp = Number(todayVelocityResult.rows[0]?.total ?? '0');
+    const projectedVelocityGbp = roundTo(velocityUsedTodayGbp + amountGbp, 2);
+    if (projectedVelocityGbp > config.dailyPayoutVelocityLimitGbp + 1e-6) {
+      await client.query('ROLLBACK');
+      reply.code(429);
+      return {
+        ok: false,
+        error: 'Daily payout velocity limit exceeded',
+        limits: {
+          dailyLimitGbp: config.dailyPayoutVelocityLimitGbp,
+          usedTodayGbp: velocityUsedTodayGbp,
+          attemptedGbp: amountGbp,
+          projectedGbp: projectedVelocityGbp,
+        },
+      };
+    }
+
+    const manualReviewRequired = amountGbp > config.payoutManualReviewThresholdGbp;
+
+    const payoutAccountMetadata = asObject(payoutAccountRow.metadata);
+    const accountHolderName =
+      (typeof payoutAccountMetadata.accountHolderName === 'string' && payoutAccountMetadata.accountHolderName.trim())
+      || (typeof payoutAccountMetadata.account_holder_name === 'string' && payoutAccountMetadata.account_holder_name.trim())
+      || (typeof payoutAccountMetadata.beneficiaryName === 'string' && payoutAccountMetadata.beneficiaryName.trim())
+      || null;
+
+    let legalName: string | null = null;
+    try {
+      if (await onezeP2pTablesAvailable(client)) {
+        const profileName = await client.query<{ legal_name: string | null }>(
+          `
+            SELECT legal_name
+            FROM user_compliance_profiles
+            WHERE user_id = $1
+            LIMIT 1
+          `,
+          [userId]
+        );
+        legalName = profileName.rows[0]?.legal_name ?? null;
+      }
+    } catch {
+      legalName = null;
+    }
+
+    const normalizeName = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const nameMismatch = Boolean(
+      legalName
+      && accountHolderName
+      && normalizeName(legalName) !== normalizeName(accountHolderName)
+    );
+
+    if (nameMismatch) {
+      request.log.warn(
+        {
+          userId,
+          payoutAccountId: payload.payoutAccountId,
+          legalName,
+          accountHolderName,
+        },
+        'Payout account holder name mismatch with compliance profile legal name'
+      );
+    }
+
     const payoutRequestMetadata = {
       ...(payload.metadata ?? {}),
       amountSource: payload.amountGbp !== undefined ? 'amount_gbp' : 'amount_currency',
       requestedAmount,
       requestedAmountCurrency: payoutCurrency,
       conversionFxRate,
+      safeguards: {
+        manualReviewRequired,
+        nameMismatch,
+        dailyVelocityLimitGbp: config.dailyPayoutVelocityLimitGbp,
+        usedTodayGbp: velocityUsedTodayGbp,
+        projectedTodayGbp: projectedVelocityGbp,
+      },
+      manualReviewRequired,
+      nameMismatch,
+      legalNameReference: legalName,
+      accountHolderNameReference: accountHolderName,
     };
 
     let sellerPayableBalanceBefore = 0;
@@ -16003,6 +19852,15 @@ app.post('/users/:userId/payout-requests', async (request, reply) => {
         sellerPayableBeforeRequestGbp: sellerPayableBalanceBefore,
         sellerPayableAfterRequestGbp: roundTo(Math.max(0, sellerPayableBalanceBefore - amountGbp), 2),
       },
+      safeguards: {
+        payoutsPaused: false,
+        manualReviewRequired,
+        nameMismatch,
+        payoutManualReviewThresholdGbp: config.payoutManualReviewThresholdGbp,
+        dailyVelocityLimitGbp: config.dailyPayoutVelocityLimitGbp,
+        usedTodayGbp: velocityUsedTodayGbp,
+        projectedTodayGbp: projectedVelocityGbp,
+      },
     };
   } catch (error) {
     await client.query('ROLLBACK');
@@ -16056,6 +19914,24 @@ app.post('/users/:userId/payout-requests/:requestId/status', async (request, rep
 
     await client.query('COMMIT');
 
+    if (!settled.idempotent && settled.payoutRequest.status === 'paid') {
+      try {
+        await queuePayoutProcessedNotification({
+          payoutRequest: settled.payoutRequest,
+          source: 'manual_status',
+        });
+      } catch (notificationError) {
+        request.log.error(
+          {
+            err: notificationError,
+            requestId,
+            userId,
+          },
+          'Failed to queue payout notification after manual status update'
+        );
+      }
+    }
+
     return {
       ok: true,
       idempotent: settled.idempotent,
@@ -16081,6 +19957,24 @@ app.post('/users/:userId/payout-requests/:requestId/status', async (request, rep
       };
     }
 
+    if (apiError?.code === 'PAYOUT_REVIEW_REQUIRED') {
+      reply.code(409);
+      return {
+        ok: false,
+        error: apiError.message,
+        details: apiError.details,
+      };
+    }
+
+    if (apiError?.code === 'PAYOUTS_PAUSED') {
+      reply.code(503);
+      return {
+        ok: false,
+        error: apiError.message,
+        pause: apiError.details,
+      };
+    }
+
     if (apiError?.code === 'PAYOUT_PENDING_INSUFFICIENT') {
       reply.code(409);
       return {
@@ -16101,6 +19995,776 @@ app.post('/users/:userId/payout-requests/:requestId/status', async (request, rep
   }
 });
 
+app.get('/admin/payouts/pending-review', async (request, reply) => {
+  const securityError = ensureSecurityAdminAccess(request, reply);
+  if (securityError) {
+    return securityError;
+  }
+
+  const querySchema = z.object({
+    limit: z.coerce.number().int().min(1).max(200).default(100),
+  });
+  const { limit } = querySchema.parse(request.query);
+
+  if (!(await paymentTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: 'Payment settlement tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const result = await db.query<{
+    id: string;
+    user_id: string;
+    payout_account_id: number;
+    amount_gbp: number | string;
+    amount_currency: string;
+    status: PayoutRequestStatus;
+    provider_payout_ref: string | null;
+    failure_reason: string | null;
+    metadata: Record<string, unknown>;
+    created_at: string;
+    updated_at: string;
+    gateway_id: string;
+  }>(
+    `
+      SELECT
+        pr.id,
+        pr.user_id,
+        pr.payout_account_id,
+        pr.amount_gbp,
+        pr.amount_currency,
+        pr.status,
+        pr.provider_payout_ref,
+        pr.failure_reason,
+        pr.metadata,
+        pr.created_at::text,
+        pr.updated_at::text,
+        pa.gateway_id
+      FROM payout_requests pr
+      INNER JOIN payout_accounts pa ON pa.id = pr.payout_account_id
+      WHERE pr.status = 'requested'
+        AND (
+          pr.amount_gbp > $1
+          OR pr.metadata @> '{"manualReviewRequired": true}'::jsonb
+          OR pr.metadata @> '{"nameMismatch": true}'::jsonb
+        )
+      ORDER BY pr.created_at ASC
+      LIMIT $2
+    `,
+    [config.payoutManualReviewThresholdGbp, limit]
+  );
+
+  return {
+    ok: true,
+    items: result.rows.map((row) => ({
+      ...toPayoutRequestPayload(row),
+      gatewayId: row.gateway_id,
+      flags: {
+        manualReviewRequired: Boolean(asObject(row.metadata).manualReviewRequired),
+        nameMismatch: Boolean(asObject(row.metadata).nameMismatch),
+      },
+    })),
+  };
+});
+
+app.get('/admin/reconciliation/report', async (request, reply) => {
+  const securityError = ensureSecurityAdminAccess(request, reply);
+  if (securityError) {
+    return securityError;
+  }
+
+  const [latest, pauseState] = await Promise.all([
+    getLatestReconciliationRun(db),
+    getPayoutPauseState(),
+  ]);
+  const clusters = getConfiguredClusters();
+  const activeClusters = clusters.filter((cluster) => cluster.configured);
+
+  const client = await db.connect();
+  let strandedEscrowCount = 0;
+  let lostDisputesCount = 0;
+  let parcelEventsAvailable = false;
+  let disputesTableAvailable = false;
+
+  try {
+    [parcelEventsAvailable, disputesTableAvailable] = await Promise.all([
+      orderParcelEventsTableAvailable(client),
+      paymentDisputesTableAvailable(client),
+    ]);
+
+    const strandedResult = parcelEventsAvailable
+      ? await client.query<{ count: string }>(
+        `
+          SELECT COUNT(*)::text AS count
+          FROM orders o
+          WHERE o.status IN ('paid', 'shipped')
+            AND COALESCE(o.shipped_at, o.updated_at, o.created_at) <= NOW() - INTERVAL '30 days'
+            AND NOT EXISTS (
+              SELECT 1
+              FROM order_parcel_events ope
+              WHERE ope.order_id = o.id
+                AND ope.event_type IN ('delivered', 'collection_confirmed')
+            )
+        `
+      )
+      : await client.query<{ count: string }>(
+        `
+          SELECT COUNT(*)::text AS count
+          FROM orders o
+          WHERE o.status IN ('paid', 'shipped')
+            AND COALESCE(o.shipped_at, o.updated_at, o.created_at) <= NOW() - INTERVAL '30 days'
+        `
+      );
+
+    strandedEscrowCount = Number(strandedResult.rows[0]?.count ?? '0');
+
+    if (disputesTableAvailable) {
+      const disputesResult = await client.query<{ count: string }>(
+        `
+          SELECT COUNT(*)::text AS count
+          FROM payment_disputes
+          WHERE status = 'lost'
+        `
+      );
+
+      lostDisputesCount = Number(disputesResult.rows[0]?.count ?? '0');
+    }
+  } finally {
+    client.release();
+  }
+
+  return {
+    ok: true,
+    generatedAt: new Date().toISOString(),
+    latest,
+    payouts: {
+      paused: pauseState.paused,
+      reason: pauseState.reason ?? null,
+      reconciliationRunId: pauseState.reconciliationRunId ?? null,
+      mismatchGbp: pauseState.mismatchGbp ?? null,
+    },
+    clusters: {
+      active: activeClusters,
+      all: clusters,
+    },
+    operational: {
+      strandedEscrow: {
+        thresholdDays: 30,
+        count: strandedEscrowCount,
+        source: parcelEventsAvailable ? 'orders_with_parcel_events' : 'orders_status_age_only',
+      },
+      disputes: {
+        lostCount: lostDisputesCount,
+        tableAvailable: disputesTableAvailable,
+      },
+    },
+  };
+});
+
+app.post('/admin/payouts/:requestId/review', async (request, reply) => {
+  const securityError = ensureSecurityAdminAccess(request, reply);
+  if (securityError) {
+    return securityError;
+  }
+
+  const paramsSchema = z.object({
+    requestId: z.string().min(4).max(140),
+  });
+  const bodySchema = z.object({
+    status: z.enum(['processing', 'paid', 'failed', 'cancelled']),
+    note: z.string().max(400).optional(),
+    providerPayoutRef: z.string().min(4).max(140).optional(),
+    failureReason: z.string().max(240).optional(),
+    metadata: z.record(z.unknown()).optional(),
+  });
+
+  const { requestId } = paramsSchema.parse(request.params);
+  const payload = bodySchema.parse(request.body);
+
+  if (!(await paymentTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: 'Payment settlement tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const lookup = await db.query<{ id: string; user_id: string }>(
+    'SELECT id, user_id FROM payout_requests WHERE id = $1 LIMIT 1',
+    [requestId]
+  );
+
+  if (!lookup.rowCount) {
+    reply.code(404);
+    return {
+      ok: false,
+      error: 'Payout request not found',
+    };
+  }
+
+  if ((payload.status === 'processing' || payload.status === 'paid')) {
+    const pauseState = await getPayoutPauseState();
+    if (pauseState.paused) {
+      reply.code(409);
+      return {
+        ok: false,
+        error: 'Payouts are temporarily paused for reconciliation review.',
+        pause: {
+          reason: pauseState.reason ?? null,
+          reconciliationRunId: pauseState.reconciliationRunId ?? null,
+          mismatchGbp: pauseState.mismatchGbp ?? null,
+        },
+      };
+    }
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    const settled = await settlePayoutRequest(client, {
+      userId: lookup.rows[0].user_id,
+      requestId,
+      targetStatus: payload.status,
+      providerPayoutRef: payload.providerPayoutRef,
+      failureReason: payload.failureReason,
+      metadata: {
+        ...(payload.metadata ?? {}),
+        review: {
+          note: payload.note ?? null,
+          reviewedAt: new Date().toISOString(),
+          reviewedBy: request.authUser?.userId ?? 'admin_token',
+        },
+      },
+      source: 'admin_review',
+    });
+
+    await client.query('COMMIT');
+
+    if (!settled.idempotent && settled.payoutRequest.status === 'paid') {
+      try {
+        await queuePayoutProcessedNotification({
+          payoutRequest: settled.payoutRequest,
+          source: 'admin_review',
+        });
+      } catch (notificationError) {
+        request.log.error(
+          {
+            err: notificationError,
+            requestId,
+            userId: lookup.rows[0].user_id,
+          },
+          'Failed to queue payout notification after admin payout review update'
+        );
+      }
+    }
+
+    return {
+      ok: true,
+      idempotent: settled.idempotent,
+      payoutRequest: settled.payoutRequest,
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+
+    const apiError = getApiError(error);
+    if (
+      apiError?.code === 'PAYOUT_INVALID_TRANSITION'
+      || apiError?.code === 'PAYOUT_PENDING_INSUFFICIENT'
+      || apiError?.code === 'PAYOUT_REVIEW_REQUIRED'
+      || apiError?.code === 'PAYOUTS_PAUSED'
+    ) {
+      reply.code(409);
+      return {
+        ok: false,
+        error: apiError.message,
+        details: apiError.details,
+      };
+    }
+
+    request.log.error({ err: error, requestId }, 'Unable to review payout request');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to review payout request',
+    };
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/admin/payouts/:requestId/approve', async (request, reply) => {
+  const securityError = ensureSecurityAdminAccess(request, reply);
+  if (securityError) {
+    return securityError;
+  }
+
+  const paramsSchema = z.object({
+    requestId: z.string().min(4).max(140),
+  });
+  const bodySchema = z.object({
+    note: z.string().max(400).optional(),
+    providerPayoutRef: z.string().min(4).max(140).optional(),
+    metadata: z.record(z.unknown()).optional(),
+  });
+
+  const { requestId } = paramsSchema.parse(request.params);
+  const payload = bodySchema.parse(request.body ?? {});
+
+  if (!(await paymentTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: 'Payment settlement tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const lookup = await db.query<{ id: string; user_id: string }>(
+    'SELECT id, user_id FROM payout_requests WHERE id = $1 LIMIT 1',
+    [requestId]
+  );
+
+  if (!lookup.rowCount) {
+    reply.code(404);
+    return {
+      ok: false,
+      error: 'Payout request not found',
+    };
+  }
+
+  const pauseState = await getPayoutPauseState();
+  if (pauseState.paused) {
+    reply.code(409);
+    return {
+      ok: false,
+      error: 'Payouts are temporarily paused for reconciliation review.',
+      pause: {
+        reason: pauseState.reason ?? null,
+        reconciliationRunId: pauseState.reconciliationRunId ?? null,
+        mismatchGbp: pauseState.mismatchGbp ?? null,
+      },
+    };
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    const settled = await settlePayoutRequest(client, {
+      userId: lookup.rows[0].user_id,
+      requestId,
+      targetStatus: 'paid',
+      providerPayoutRef: payload.providerPayoutRef,
+      metadata: {
+        ...(payload.metadata ?? {}),
+        review: {
+          action: 'approve',
+          note: payload.note ?? null,
+          reviewedAt: new Date().toISOString(),
+          reviewedBy: request.authUser?.userId ?? 'admin_token',
+        },
+      },
+      source: 'admin_review',
+    });
+
+    await client.query('COMMIT');
+
+    if (!settled.idempotent && settled.payoutRequest.status === 'paid') {
+      try {
+        await queuePayoutProcessedNotification({
+          payoutRequest: settled.payoutRequest,
+          source: 'admin_review',
+        });
+      } catch (notificationError) {
+        request.log.error(
+          {
+            err: notificationError,
+            requestId,
+            userId: lookup.rows[0].user_id,
+          },
+          'Failed to queue payout notification after admin payout approval'
+        );
+      }
+    }
+
+    return {
+      ok: true,
+      idempotent: settled.idempotent,
+      payoutRequest: settled.payoutRequest,
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+
+    const apiError = getApiError(error);
+    if (
+      apiError?.code === 'PAYOUT_INVALID_TRANSITION'
+      || apiError?.code === 'PAYOUT_PENDING_INSUFFICIENT'
+      || apiError?.code === 'PAYOUT_REVIEW_REQUIRED'
+      || apiError?.code === 'PAYOUTS_PAUSED'
+    ) {
+      reply.code(409);
+      return {
+        ok: false,
+        error: apiError.message,
+        details: apiError.details,
+      };
+    }
+
+    request.log.error({ err: error, requestId }, 'Unable to approve payout request');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to approve payout request',
+    };
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/admin/payouts/:requestId/reject', async (request, reply) => {
+  const securityError = ensureSecurityAdminAccess(request, reply);
+  if (securityError) {
+    return securityError;
+  }
+
+  const paramsSchema = z.object({
+    requestId: z.string().min(4).max(140),
+  });
+  const bodySchema = z.object({
+    reason: z.string().min(2).max(240),
+    note: z.string().max(400).optional(),
+    metadata: z.record(z.unknown()).optional(),
+  });
+
+  const { requestId } = paramsSchema.parse(request.params);
+  const payload = bodySchema.parse(request.body ?? {});
+
+  if (!(await paymentTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: 'Payment settlement tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const lookup = await db.query<{ id: string; user_id: string }>(
+    'SELECT id, user_id FROM payout_requests WHERE id = $1 LIMIT 1',
+    [requestId]
+  );
+
+  if (!lookup.rowCount) {
+    reply.code(404);
+    return {
+      ok: false,
+      error: 'Payout request not found',
+    };
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    const settled = await settlePayoutRequest(client, {
+      userId: lookup.rows[0].user_id,
+      requestId,
+      targetStatus: 'failed',
+      failureReason: payload.reason,
+      metadata: {
+        ...(payload.metadata ?? {}),
+        review: {
+          action: 'reject',
+          note: payload.note ?? null,
+          reason: payload.reason,
+          reviewedAt: new Date().toISOString(),
+          reviewedBy: request.authUser?.userId ?? 'admin_token',
+        },
+      },
+      source: 'admin_review',
+    });
+
+    await client.query('COMMIT');
+
+    return {
+      ok: true,
+      idempotent: settled.idempotent,
+      payoutRequest: settled.payoutRequest,
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+
+    const apiError = getApiError(error);
+    if (
+      apiError?.code === 'PAYOUT_INVALID_TRANSITION'
+      || apiError?.code === 'PAYOUT_PENDING_INSUFFICIENT'
+      || apiError?.code === 'PAYOUT_REVIEW_REQUIRED'
+      || apiError?.code === 'PAYOUTS_PAUSED'
+    ) {
+      reply.code(409);
+      return {
+        ok: false,
+        error: apiError.message,
+        details: apiError.details,
+      };
+    }
+
+    request.log.error({ err: error, requestId }, 'Unable to reject payout request');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to reject payout request',
+    };
+  } finally {
+    client.release();
+  }
+});
+
+app.post('/admin/orders/:orderId/force-status', async (request, reply) => {
+  const securityError = ensureSecurityAdminAccess(request, reply);
+  if (securityError) {
+    return securityError;
+  }
+
+  const paramsSchema = z.object({
+    orderId: z.string().min(4).max(64),
+  });
+  const bodySchema = z.object({
+    status: z.enum(COMMERCE_ORDER_STATUSES),
+    note: z.string().max(400).optional(),
+    metadata: z.record(z.unknown()).optional(),
+  });
+
+  const { orderId } = paramsSchema.parse(request.params);
+  const payload = bodySchema.parse(request.body ?? {});
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    const existing = await client.query<{ id: string; status: CommerceOrderStatus }>(
+      'SELECT id, status FROM orders WHERE id = $1 LIMIT 1 FOR UPDATE',
+      [orderId]
+    );
+
+    if (!existing.rowCount) {
+      await client.query('ROLLBACK');
+      reply.code(404);
+      return {
+        ok: false,
+        error: 'Order not found',
+      };
+    }
+
+    const previousStatus = existing.rows[0].status;
+    const updated = await client.query<{
+      id: string;
+      status: CommerceOrderStatus;
+      updated_at: string;
+    }>(
+      `
+        UPDATE orders
+        SET
+          status = $2,
+          shipped_at = CASE
+            WHEN $2 = 'shipped' THEN COALESCE(shipped_at, NOW())
+            ELSE shipped_at
+          END,
+          delivered_at = CASE
+            WHEN $2 = 'delivered' THEN COALESCE(delivered_at, NOW())
+            ELSE delivered_at
+          END,
+          shipping_metadata = COALESCE(shipping_metadata, '{}'::jsonb) || $3::jsonb,
+          updated_at = NOW()
+        WHERE id = $1
+        RETURNING id, status, updated_at::text
+      `,
+      [
+        orderId,
+        payload.status,
+        toJsonString({
+          forceStatus: {
+            previousStatus,
+            nextStatus: payload.status,
+            note: payload.note ?? null,
+            actedBy: request.authUser?.userId ?? 'admin_token',
+            actedAt: new Date().toISOString(),
+            ...(payload.metadata ?? {}),
+          },
+        }),
+      ]
+    );
+
+    await client.query('COMMIT');
+
+    return {
+      ok: true,
+      id: updated.rows[0].id,
+      previousStatus,
+      status: updated.rows[0].status,
+      forced: previousStatus !== updated.rows[0].status,
+      updatedAt: updated.rows[0].updated_at,
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    request.log.error({ err: error, orderId }, 'Unable to force order status transition');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to force order status transition',
+    };
+  } finally {
+    client.release();
+  }
+});
+
+app.get('/admin/orders/stuck', async (request, reply) => {
+  const securityError = ensureSecurityAdminAccess(request, reply);
+  if (securityError) {
+    return securityError;
+  }
+
+  const querySchema = z.object({
+    paidOlderHours: z.coerce.number().int().min(1).max(240).default(24),
+    limit: z.coerce.number().int().min(1).max(400).default(200),
+  });
+  const { paidOlderHours, limit } = querySchema.parse(request.query);
+
+  const client = await db.connect();
+  try {
+    const parcelEventsAvailable = await orderParcelEventsTableAvailable(client);
+    const result = parcelEventsAvailable
+      ? await client.query<{
+        id: string;
+        buyer_id: string;
+        seller_id: string;
+        listing_id: string;
+        status: string;
+        total_gbp: number | string;
+        tracking_number: string | null;
+        created_at: string;
+        updated_at: string;
+        shipped_at: string | null;
+        latest_parcel_event_type: string | null;
+        latest_parcel_event_at: string | null;
+        age_hours: string;
+      }>(
+        `
+          WITH latest_parcel_event AS (
+            SELECT DISTINCT ON (ope.order_id)
+              ope.order_id,
+              ope.event_type,
+              COALESCE(ope.occurred_at, ope.created_at) AS event_at
+            FROM order_parcel_events ope
+            ORDER BY ope.order_id, COALESCE(ope.occurred_at, ope.created_at) DESC
+          )
+          SELECT
+            o.id,
+            o.buyer_id,
+            o.seller_id,
+            o.listing_id,
+            o.status,
+            o.total_gbp,
+            o.tracking_number,
+            o.created_at::text,
+            o.updated_at::text,
+            o.shipped_at::text,
+            lpe.event_type AS latest_parcel_event_type,
+            lpe.event_at::text AS latest_parcel_event_at,
+            EXTRACT(EPOCH FROM (NOW() - COALESCE(o.shipped_at, o.updated_at))) / 3600 AS age_hours
+          FROM orders o
+          LEFT JOIN latest_parcel_event lpe ON lpe.order_id = o.id
+          WHERE
+            (o.status = 'created' AND o.created_at <= NOW() - INTERVAL '2 hours')
+            OR (
+              o.status = 'paid'
+              AND (
+                o.updated_at <= NOW() - make_interval(hours => $1::int)
+                OR COALESCE(lpe.event_type, '') IN (
+                  'picked_up',
+                  'in_transit',
+                  'out_for_delivery',
+                  'delivered',
+                  'collection_confirmed'
+                )
+              )
+            )
+            OR (
+              o.status = 'shipped'
+              AND (
+                COALESCE(o.shipped_at, o.updated_at) <= NOW() - INTERVAL '7 days'
+                OR COALESCE(lpe.event_type, '') IN ('delivered', 'collection_confirmed')
+              )
+            )
+          ORDER BY o.updated_at ASC
+          LIMIT $2
+        `,
+        [paidOlderHours, limit]
+      )
+      : await client.query<{
+        id: string;
+        buyer_id: string;
+        seller_id: string;
+        listing_id: string;
+        status: string;
+        total_gbp: number | string;
+        tracking_number: string | null;
+        created_at: string;
+        updated_at: string;
+        shipped_at: string | null;
+        latest_parcel_event_type: string | null;
+        latest_parcel_event_at: string | null;
+        age_hours: string;
+      }>(
+        `
+          SELECT
+            o.id,
+            o.buyer_id,
+            o.seller_id,
+            o.listing_id,
+            o.status,
+            o.total_gbp,
+            o.tracking_number,
+            o.created_at::text,
+            o.updated_at::text,
+            o.shipped_at::text,
+            NULL::text AS latest_parcel_event_type,
+            NULL::text AS latest_parcel_event_at,
+            EXTRACT(EPOCH FROM (NOW() - COALESCE(o.shipped_at, o.updated_at))) / 3600 AS age_hours
+          FROM orders o
+          WHERE
+            (o.status = 'created' AND o.created_at <= NOW() - INTERVAL '2 hours')
+            OR (o.status = 'paid' AND o.updated_at <= NOW() - make_interval(hours => $1::int))
+            OR (o.status = 'shipped' AND COALESCE(o.shipped_at, o.updated_at) <= NOW() - INTERVAL '7 days')
+          ORDER BY o.updated_at ASC
+          LIMIT $2
+        `,
+        [paidOlderHours, limit]
+      );
+
+    return {
+      ok: true,
+      items: result.rows.map((row) => ({
+        id: row.id,
+        buyerId: row.buyer_id,
+        sellerId: row.seller_id,
+        listingId: row.listing_id,
+        status: row.status,
+        totalGbp: Number(row.total_gbp),
+        trackingNumber: row.tracking_number,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+        shippedAt: row.shipped_at,
+        latestParcelEventType: row.latest_parcel_event_type,
+        latestParcelEventAt: row.latest_parcel_event_at,
+        ageHours: roundTo(Number(row.age_hours), 2),
+      })),
+    };
+  } finally {
+    client.release();
+  }
+});
+
 app.post('/payments/intents', async (request, reply) => {
   const bodySchema = z.object({
     userId: z.string().min(2).optional(),
@@ -16108,7 +20772,7 @@ app.post('/payments/intents', async (request, reply) => {
     instrumentId: z.coerce.number().int().positive().optional(),
     orderId: z.string().min(4).max(64).optional(),
     coOwnOrderId: z.coerce.number().int().positive().optional(),
-    channel: z.enum(['wallet_topup', 'wallet_withdrawal']).optional(),
+    channel: z.enum(['commerce', 'co-own', 'wallet_topup', 'wallet_withdrawal']).optional(),
     amountGbp: z.number().positive().optional(),
     amountCurrency: z.string().length(3).default('GBP'),
     idempotencyKey: z.string().min(6).max(140).optional(),
@@ -16308,6 +20972,16 @@ app.post('/payments/intents', async (request, reply) => {
       return {
         ok: false,
         error: 'Gateway is unavailable in your country policy for this payment channel',
+      };
+    }
+
+    if (!isGatewayConfigured(gatewayId)) {
+      await client.query('ROLLBACK');
+      reply.code(503);
+      return {
+        ok: false,
+        error: 'Payment gateway for your region is not yet available. Contact support.',
+        gatewayId,
       };
     }
 
@@ -16608,6 +21282,24 @@ app.post('/payments/intents/:intentId/confirm', async (request, reply) => {
     });
 
     await client.query('COMMIT');
+
+    if (!settled.alreadyFinal && payload.simulateStatus === 'succeeded' && settled.orderSettlement?.orderId) {
+      try {
+        await queueCommercePaymentNotifications({
+          orderId: settled.orderSettlement.orderId,
+          source: 'manual_confirm',
+        });
+      } catch (notificationError) {
+        request.log.error(
+          {
+            err: notificationError,
+            orderId: settled.orderSettlement.orderId,
+          },
+          'Failed to queue payment notifications after manual payment confirm'
+        );
+      }
+    }
+
     return {
       ok: true,
       alreadyFinal: settled.alreadyFinal,
@@ -16774,6 +21466,27 @@ app.post('/payments/intents/:intentId/refunds', async (request, reply) => {
     });
 
     await client.query('COMMIT');
+
+    if (refundStatus === 'succeeded') {
+      try {
+        await queueRefundCompletedNotification({
+          userId: intent.user_id,
+          amountGbp: amount,
+          orderId: intent.order_id,
+          source: 'manual_refund_request',
+        });
+      } catch (notificationError) {
+        request.log.error(
+          {
+            err: notificationError,
+            intentId,
+            orderId: intent.order_id,
+          },
+          'Failed to queue refund notifications after manual refund request'
+        );
+      }
+    }
+
     reply.code(201);
     return {
       ok: true,
@@ -16952,6 +21665,14 @@ app.get('/payments/disputes', async (request, reply) => {
 });
 
 app.post('/payments/webhooks/mock', async (request, reply) => {
+  if (config.nodeEnv === 'production') {
+    reply.code(404);
+    return {
+      ok: false,
+      error: 'Mock endpoints are disabled in production',
+    };
+  }
+
   const bodySchema = z.object({
     gatewayId: z.string().min(2).max(80).default('mock_fiat_gbp'),
     providerEventId: z.string().min(4).max(140),
@@ -17099,6 +21820,14 @@ app.post('/payments/webhooks/mock', async (request, reply) => {
 });
 
 app.post('/payouts/webhooks/mock', async (request, reply) => {
+  if (config.nodeEnv === 'production') {
+    reply.code(404);
+    return {
+      ok: false,
+      error: 'Mock endpoints are disabled in production',
+    };
+  }
+
   const bodySchema = z.object({
     gatewayId: z.string().min(2).max(80).default('mock_fiat_gbp'),
     providerEventId: z.string().min(4).max(140),
@@ -17397,6 +22126,11 @@ app.post('/webhooks/:provider', async (request, reply) => {
 
     let settledIntent: ReturnType<typeof toPaymentIntentPayload> | undefined;
     let settledPayout: ReturnType<typeof toPayoutRequestPayload> | undefined;
+    let settledPayoutIdempotent = false;
+    let settledCommerceOrderId: string | null = null;
+    let refundCompletedUserId: string | null = null;
+    let refundCompletedAmountGbp: number | null = null;
+    let refundCompletedOrderId: string | null = null;
     let mintOperation: ReturnType<typeof toMintOperationPayload> | undefined;
     let mintReserveEnqueueOperationId: string | null = null;
 
@@ -17416,6 +22150,7 @@ app.post('/webhooks/:provider', async (request, reply) => {
           },
         });
         settledIntent = settled.intent;
+        settledCommerceOrderId = settled.orderSettlement?.orderId ?? settledCommerceOrderId;
       } else {
         const transitioned = await transitionPaymentIntentStatus(client, {
           intentId: intentRow.id,
@@ -17464,6 +22199,30 @@ app.post('/webhooks/:provider', async (request, reply) => {
           eventType: event.eventType,
         },
       });
+
+      if (event.refund.status === 'succeeded' && intentRow.order_id && (await ledgerTablesAvailable(client))) {
+        await postCommerceOrderRefundLedgerReversal(
+          client,
+          intentRow.order_id,
+          intentRow.user_id,
+          Number(intentRow.amount_gbp)
+        );
+      }
+
+      if (event.refund.status === 'succeeded') {
+        refundCompletedUserId = intentRow.user_id;
+        refundCompletedOrderId = intentRow.order_id;
+        const refundCurrency = (event.refund.currency ?? '').toUpperCase();
+        const refundAmount =
+          typeof event.refund.amount === 'number'
+            ? event.refund.amount
+            : Number(intentRow.amount_gbp);
+        if (refundCurrency === 'GBP') {
+          refundCompletedAmountGbp = roundTo(refundAmount, 2);
+        } else {
+          refundCompletedAmountGbp = roundTo(Number(intentRow.amount_gbp), 2);
+        }
+      }
     }
 
     if (event.dispute) {
@@ -17480,6 +22239,38 @@ app.post('/webhooks/:provider', async (request, reply) => {
           eventType: event.eventType,
         },
       });
+
+      if (event.dispute.status === 'lost' && intentRow?.order_id && (await ledgerTablesAvailable(client))) {
+        await postCommerceOrderRefundLedgerReversal(
+          client,
+          intentRow.order_id,
+          intentRow.user_id,
+          Number(intentRow.amount_gbp)
+        );
+
+        await client.query(
+          `
+            UPDATE orders
+            SET
+              shipping_metadata = COALESCE(shipping_metadata, '{}'::jsonb) || $2::jsonb,
+              updated_at = NOW()
+            WHERE id = $1
+          `,
+          [
+            intentRow.order_id,
+            toJsonString({
+              paymentDispute: {
+                status: 'lost',
+                reviewRequired: true,
+                provider,
+                providerDisputeRef: event.dispute.providerDisputeRef,
+                eventType: event.eventType,
+                flaggedAt: new Date().toISOString(),
+              },
+            }),
+          ]
+        );
+      }
     }
 
     if (event.payoutRequestId && event.payoutStatus) {
@@ -17502,6 +22293,7 @@ app.post('/webhooks/:provider', async (request, reply) => {
           source: 'provider_webhook',
         });
         settledPayout = payoutSettled.payoutRequest;
+        settledPayoutIdempotent = payoutSettled.idempotent;
       }
     }
 
@@ -17525,6 +22317,60 @@ app.post('/webhooks/:provider', async (request, reply) => {
             mintOperationId: mintReserveEnqueueOperationId,
           },
           'Failed to enqueue mint reserve allocation after payment webhook confirmation'
+        );
+      }
+    }
+
+    if (settledCommerceOrderId) {
+      try {
+        await queueCommercePaymentNotifications({
+          orderId: settledCommerceOrderId,
+          source: 'provider_webhook',
+        });
+      } catch (notificationError) {
+        request.log.error(
+          {
+            err: notificationError,
+            orderId: settledCommerceOrderId,
+          },
+          'Failed to queue payment notifications after provider webhook settlement'
+        );
+      }
+    }
+
+    if (settledPayout && settledPayout.status === 'paid' && !settledPayoutIdempotent) {
+      try {
+        await queuePayoutProcessedNotification({
+          payoutRequest: settledPayout,
+          source: 'provider_webhook',
+        });
+      } catch (notificationError) {
+        request.log.error(
+          {
+            err: notificationError,
+            payoutRequestId: settledPayout.id,
+          },
+          'Failed to queue payout notification after provider webhook settlement'
+        );
+      }
+    }
+
+    if (refundCompletedUserId && refundCompletedAmountGbp !== null) {
+      try {
+        await queueRefundCompletedNotification({
+          userId: refundCompletedUserId,
+          amountGbp: refundCompletedAmountGbp,
+          orderId: refundCompletedOrderId,
+          source: 'provider_webhook',
+        });
+      } catch (notificationError) {
+        request.log.error(
+          {
+            err: notificationError,
+            userId: refundCompletedUserId,
+            orderId: refundCompletedOrderId,
+          },
+          'Failed to queue refund notification after provider webhook settlement'
         );
       }
     }
@@ -17571,6 +22417,405 @@ app.post('/webhooks/:provider', async (request, reply) => {
   }
 });
 
+app.post('/shipping/serviceability', async (request, reply) => {
+  const bodySchema = z.object({
+    buyerId: z.string().min(2).optional(),
+    fromPostcode: z.string().min(2).max(24).optional(),
+    toPostcode: z.string().min(2).max(24).optional(),
+    countryCode: z.string().length(2).optional(),
+    residencyCountryCode: z.string().length(2).nullable().optional(),
+  });
+
+  const payload = bodySchema.parse(request.body);
+  const authUser = request.authUser;
+  if (!authUser) {
+    reply.code(401);
+    return {
+      ok: false,
+      error: 'Unauthorized',
+    };
+  }
+
+  if (payload.buyerId && authUser.role !== 'admin' && authUser.userId !== payload.buyerId) {
+    reply.code(403);
+    return {
+      ok: false,
+      error: 'Forbidden: user context mismatch',
+    };
+  }
+
+  const actorUserId = payload.buyerId ?? authUser.userId;
+
+  let capabilities = resolveCountryCapabilities({
+    countryCode: payload.countryCode ?? 'GB',
+    residencyCountryCode: payload.residencyCountryCode,
+  });
+
+  if (actorUserId) {
+    try {
+      if (await onezeP2pTablesAvailable(db)) {
+        const profile = await getOrCreateComplianceProfile(db, actorUserId);
+        capabilities = resolveCountryCapabilities({
+          countryCode: profile.countryCode,
+          residencyCountryCode: profile.residencyCountryCode,
+        });
+      }
+    } catch {
+      // Falls back to countryCode/default policy.
+    }
+  }
+
+  const carriers = capabilities.postage.carriers.map((carrier) => ({
+    id: carrier.id,
+    label: carrier.label,
+    priceFromGbp: carrier.priceFromGbp,
+    etaMinDays: carrier.etaMinDays,
+    etaMaxDays: carrier.etaMaxDays,
+    tracking: carrier.tracking,
+    liveConfigured: isCarrierLiveConfigured(carrier.id),
+  }));
+
+  const fromPostcode = payload.fromPostcode ? normalizePostcode(payload.fromPostcode) : null;
+  const toPostcode = payload.toPostcode ? normalizePostcode(payload.toPostcode) : null;
+  const serviceable = true;
+
+  return {
+    ok: true,
+    capabilities: {
+      countryCluster: capabilities.countryCluster,
+      countryCode: capabilities.countryCode,
+      effectiveCountryCode: capabilities.effectiveCountryCode,
+      policyVersion: capabilities.policyVersion,
+    },
+    serviceability: {
+      fromPostcode,
+      toPostcode,
+      serviceable,
+    },
+    carriers,
+  };
+});
+
+app.post('/shipping/quote', async (request, reply) => {
+  const bodySchema = z.object({
+    buyerId: z.string().min(2).optional(),
+    listingId: z.string().min(2).optional(),
+    sellerId: z.string().min(2).optional(),
+    addressId: z.coerce.number().int().positive().optional(),
+    originPostcode: z.string().min(2).max(24).optional(),
+    destinationPostcode: z.string().min(2).max(24).optional(),
+    preferredCarrierId: z.string().min(2).max(80).optional(),
+    parcelWeightKg: z.number().positive().max(40).optional(),
+    declaredValueGbp: z.number().positive().max(20000).optional(),
+  });
+
+  const payload = bodySchema.parse(request.body);
+
+  const authUser = request.authUser;
+  if (!authUser) {
+    reply.code(401);
+    return {
+      ok: false,
+      error: 'Unauthorized',
+    };
+  }
+
+  if (payload.buyerId && authUser.role !== 'admin' && authUser.userId !== payload.buyerId) {
+    reply.code(403);
+    return {
+      ok: false,
+      error: 'Forbidden: user context mismatch',
+    };
+  }
+
+  const actorUserId = payload.buyerId ?? authUser.userId;
+
+  await ensureUserExists(actorUserId);
+
+  let sellerId = payload.sellerId ?? null;
+  if (!sellerId && payload.listingId) {
+    const listing = await db.query<{ seller_id: string }>(
+      'SELECT seller_id FROM listings WHERE id = $1 LIMIT 1',
+      [payload.listingId]
+    );
+    sellerId = listing.rows[0]?.seller_id ?? null;
+  }
+
+  if (!sellerId && !payload.originPostcode) {
+    reply.code(400);
+    return {
+      ok: false,
+      error: 'Seller context is required (sellerId, listingId, or originPostcode)',
+    };
+  }
+
+  let destinationPostcode = payload.destinationPostcode
+    ? normalizePostcode(payload.destinationPostcode)
+    : null;
+
+  if (!destinationPostcode && payload.addressId) {
+    const address = await db.query<{ postcode: string }>(
+      'SELECT postcode FROM user_addresses WHERE id = $1 AND user_id = $2 LIMIT 1',
+      [payload.addressId, actorUserId]
+    );
+    destinationPostcode = address.rows[0]?.postcode ? normalizePostcode(address.rows[0].postcode) : null;
+  }
+
+  if (!destinationPostcode) {
+    destinationPostcode = await resolveUserPrimaryPostcode(db, actorUserId);
+    destinationPostcode = destinationPostcode ? normalizePostcode(destinationPostcode) : null;
+  }
+
+  let originPostcode = payload.originPostcode
+    ? normalizePostcode(payload.originPostcode)
+    : null;
+
+  if (!originPostcode && sellerId) {
+    const sellerPostcode = await resolveUserPrimaryPostcode(db, sellerId);
+    originPostcode = sellerPostcode ? normalizePostcode(sellerPostcode) : null;
+  }
+
+  if (!originPostcode || !destinationPostcode) {
+    reply.code(422);
+    return {
+      ok: false,
+      error: 'Unable to resolve origin and destination postcodes for shipping quote',
+    };
+  }
+
+  let capabilities = resolveCountryCapabilities({
+    countryCode: 'GB',
+  });
+
+  try {
+    if (await onezeP2pTablesAvailable(db)) {
+      const profile = await getOrCreateComplianceProfile(db, actorUserId);
+      capabilities = resolveCountryCapabilities({
+        countryCode: profile.countryCode,
+        residencyCountryCode: profile.residencyCountryCode,
+      });
+    }
+  } catch {
+    // Falls back to GB capability profile.
+  }
+
+  const carriers = [...capabilities.postage.carriers];
+
+  if (carriers.length === 0) {
+    return {
+      ok: true,
+      source: 'fallback',
+      originPostcode,
+      destinationPostcode,
+      recommendedQuote: null,
+      quotes: [],
+      unavailableReason: 'Shipping quote not available for your region',
+    };
+  }
+
+  if (payload.preferredCarrierId) {
+    carriers.sort((left, right) => {
+      if (left.id === payload.preferredCarrierId) {
+        return -1;
+      }
+      if (right.id === payload.preferredCarrierId) {
+        return 1;
+      }
+      return 0;
+    });
+  }
+
+  const quoteResult = await getShippingQuotes({
+    preferredCarriers: carriers.slice(0, 5),
+    originPostcode,
+    destinationPostcode,
+    parcelWeightKg: payload.parcelWeightKg,
+    declaredValueGbp: payload.declaredValueGbp,
+  });
+
+  const quotes = quoteResult.quotes.map((quote) => ({
+    carrierId: quote.carrierId,
+    label: quote.carrierLabel,
+    priceFromGbp: quote.priceGbp,
+    etaMinDays: quote.etaMinDays,
+    etaMaxDays: quote.etaMaxDays,
+    tracking: quote.tracking,
+    live: quote.live,
+    source: quote.source,
+    metadata: quote.metadata,
+  }));
+
+  const recommendedQuote = quotes[0] ?? null;
+
+  return {
+    ok: true,
+    source: quoteResult.source,
+    originPostcode,
+    destinationPostcode,
+    recommendedQuote,
+    quotes,
+  };
+});
+
+const handleShippingWebhook = async (request: FastifyRequest, reply: FastifyReply) => {
+  const paramsSchema = z.object({
+    carrier: z.string().min(2).max(40),
+  });
+
+  const { carrier } = paramsSchema.parse(request.params);
+
+  const rawBody =
+    typeof request.rawBody === 'string'
+      ? request.rawBody
+      : Buffer.isBuffer(request.rawBody)
+        ? request.rawBody.toString('utf8')
+        : toJsonString(request.body ?? {});
+
+  const verification = await normalizeAndVerifyShippingWebhook(
+    carrier,
+    request.headers as Record<string, unknown>,
+    rawBody,
+    request.body
+  );
+
+  if (!verification.verified || !verification.event) {
+    reply.code(401);
+    return {
+      ok: false,
+      error: verification.reason ?? 'Invalid shipping webhook payload',
+    };
+  }
+
+  const event = verification.event;
+
+  let orderId = event.orderId;
+  if (!orderId && event.trackingNumber) {
+    const orderByTracking = await db.query<{ id: string }>(
+      `
+        SELECT id
+        FROM orders
+        WHERE tracking_number = $1
+        LIMIT 1
+      `,
+      [event.trackingNumber]
+    );
+    orderId = orderByTracking.rows[0]?.id ?? null;
+  }
+
+  if (!orderId) {
+    return {
+      ok: true,
+      accepted: true,
+      unresolved: true,
+      reason: 'No order linked to shipping webhook payload',
+      event: {
+        provider: event.provider,
+        providerEventId: event.providerEventId,
+        trackingNumber: event.trackingNumber,
+      },
+    };
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+
+    const applied = await applyOrderParcelEvent(client, {
+      orderId,
+      provider: event.provider,
+      eventType: event.eventType,
+      providerEventId: event.providerEventId,
+      trackingId: event.trackingNumber ?? undefined,
+      occurredAt: event.occurredAt,
+      payload: {
+        ...event.metadata,
+        source: 'shipping_webhook',
+        carrier: event.provider,
+      },
+      source: 'shipping_webhook',
+    });
+
+    await client.query('COMMIT');
+
+    if (!applied.idempotent) {
+      try {
+        await queueCommerceParcelSettlementNotifications({
+          orderId: applied.order.id,
+          buyerId: applied.order.buyerId,
+          sellerId: applied.order.sellerId,
+          orderStatus: applied.order.status,
+          sellerPayableReleasedGbp: applied.settlement.sellerPayableReleasedGbp,
+          source: 'shipping_webhook',
+          provider: event.provider,
+          eventType: event.eventType,
+        });
+      } catch (notificationError) {
+        request.log.error(
+          {
+            err: notificationError,
+            orderId: applied.order.id,
+            provider: event.provider,
+            eventType: event.eventType,
+          },
+          'Failed to queue parcel settlement notifications from shipping webhook'
+        );
+      }
+    }
+
+    return {
+      ok: true,
+      accepted: true,
+      unresolved: false,
+      idempotent: applied.idempotent,
+      order: applied.order,
+      parcelEvent: applied.parcelEvent,
+      settlement: applied.settlement,
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+
+    const apiError = getApiError(error);
+    if (apiError?.code === 'ORDER_NOT_FOUND') {
+      reply.code(202);
+      return {
+        ok: true,
+        accepted: true,
+        unresolved: true,
+        reason: apiError.message,
+      };
+    }
+
+    if (apiError?.code === 'ORDER_NOT_READY' || apiError?.code === 'ORDER_INVALID_STATE') {
+      reply.code(409);
+      return {
+        ok: false,
+        error: apiError.message,
+      };
+    }
+
+    if (apiError?.code === 'ESCROW_INSUFFICIENT') {
+      reply.code(409);
+      return {
+        ok: false,
+        error: apiError.message,
+        details: apiError.details,
+      };
+    }
+
+    request.log.error({ err: error, carrier, orderId }, 'Unable to process shipping webhook');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Unable to process shipping webhook',
+    };
+  } finally {
+    client.release();
+  }
+};
+
+app.post('/webhooks/shipping/:carrier', async (request, reply) => handleShippingWebhook(request, reply));
+app.post('/shipping/webhooks/:carrier', async (request, reply) => handleShippingWebhook(request, reply));
+
 app.post('/orders', async (request, reply) => {
   const bodySchema = z.object({
     orderId: z.string().min(4).max(64).optional(),
@@ -17580,6 +22825,8 @@ app.post('/orders', async (request, reply) => {
     paymentMethodId: z.coerce.number().int().positive().optional(),
     platformChargeGbp: z.number().min(0).optional(),
     buyerProtectionFeeGbp: z.number().min(0).optional(),
+    postageFeeGbp: z.number().min(0).optional(),
+    shippingCarrierId: z.string().min(2).max(80).optional(),
   });
 
   const payload = bodySchema.parse(request.body);
@@ -17598,6 +22845,40 @@ app.post('/orders', async (request, reply) => {
   if (!listing) {
     reply.code(404);
     return { ok: false, error: 'Listing not found' };
+  }
+
+  if (await listingsStatusColumnAvailable(db)) {
+    const listingStatusResult = await db.query<{ status: string | null }>(
+      'SELECT status FROM listings WHERE id = $1 LIMIT 1',
+      [payload.listingId]
+    );
+    const listingStatus = (listingStatusResult.rows[0]?.status ?? '').toLowerCase();
+    if (['sold', 'cancelled', 'draft'].includes(listingStatus)) {
+      reply.code(409);
+      return {
+        ok: false,
+        error: `Listing cannot be purchased from status '${listingStatus}'`,
+      };
+    }
+  }
+
+  const existingOrderForListing = await db.query<{ id: string }>(
+    `
+      SELECT id
+      FROM orders
+      WHERE listing_id = $1
+        AND status NOT IN ('cancelled')
+      LIMIT 1
+    `,
+    [payload.listingId]
+  );
+
+  if (existingOrderForListing.rowCount) {
+    reply.code(409);
+    return {
+      ok: false,
+      error: 'This listing has already been purchased',
+    };
   }
 
   if (listing.seller_id === payload.buyerId) {
@@ -17634,7 +22915,8 @@ app.post('/orders', async (request, reply) => {
       : payload.buyerProtectionFeeGbp !== undefined
         ? roundTo(payload.buyerProtectionFeeGbp, 2)
         : calculateCommercePlatformChargeGbp(subtotalGbp);
-  const totalGbp = roundTo(subtotalGbp + platformChargeGbp, 2);
+  const postageFeeGbp = roundTo(Math.max(0, payload.postageFeeGbp ?? 0), 2);
+  const totalGbp = roundTo(subtotalGbp + platformChargeGbp + postageFeeGbp, 2);
 
   const orderId = payload.orderId ?? `ord_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
 
@@ -17645,10 +22927,18 @@ app.post('/orders', async (request, reply) => {
     listing_id: string;
     subtotal_gbp: number | string;
     buyer_protection_fee_gbp: number | string;
+    postage_fee_gbp: number | string;
     total_gbp: number | string;
     status: string;
     address_id: number | null;
     payment_method_id: number | null;
+    shipping_carrier_id: string | null;
+    shipping_provider: string | null;
+    tracking_number: string | null;
+    shipping_label_url: string | null;
+    shipping_quote_gbp: number | string | null;
+    shipped_at: string | null;
+    delivered_at: string | null;
     created_at: string;
     updated_at: string;
   }>(
@@ -17660,12 +22950,14 @@ app.post('/orders', async (request, reply) => {
         listing_id,
         subtotal_gbp,
         buyer_protection_fee_gbp,
+        postage_fee_gbp,
         total_gbp,
         status,
         address_id,
-        payment_method_id
+        payment_method_id,
+        shipping_carrier_id
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, 'created', $8, $9)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'created', $9, $10, $11)
       RETURNING
         id,
         buyer_id,
@@ -17673,12 +22965,20 @@ app.post('/orders', async (request, reply) => {
         listing_id,
         subtotal_gbp,
         buyer_protection_fee_gbp,
+        postage_fee_gbp,
         total_gbp,
         status,
         address_id,
         payment_method_id,
-        created_at,
-        updated_at
+        shipping_carrier_id,
+        shipping_provider,
+        tracking_number,
+        shipping_label_url,
+        shipping_quote_gbp,
+        shipped_at::text,
+        delivered_at::text,
+        created_at::text,
+        updated_at::text
     `,
     [
       orderId,
@@ -17687,9 +22987,11 @@ app.post('/orders', async (request, reply) => {
       payload.listingId,
       subtotalGbp,
       platformChargeGbp,
+      postageFeeGbp,
       totalGbp,
       payload.addressId ?? null,
       payload.paymentMethodId ?? null,
+      payload.shippingCarrierId ?? null,
     ]
   );
 
@@ -17704,10 +23006,18 @@ app.post('/orders', async (request, reply) => {
       subtotalGbp: Number(insertResult.rows[0].subtotal_gbp),
       buyerProtectionFeeGbp: Number(insertResult.rows[0].buyer_protection_fee_gbp),
       platformChargeGbp: Number(insertResult.rows[0].buyer_protection_fee_gbp),
+      postageFeeGbp: Number(insertResult.rows[0].postage_fee_gbp),
       totalGbp: Number(insertResult.rows[0].total_gbp),
       status: insertResult.rows[0].status,
       addressId: insertResult.rows[0].address_id,
       paymentMethodId: insertResult.rows[0].payment_method_id,
+      shippingCarrierId: insertResult.rows[0].shipping_carrier_id,
+      shippingProvider: insertResult.rows[0].shipping_provider,
+      trackingNumber: insertResult.rows[0].tracking_number,
+      shippingLabelUrl: insertResult.rows[0].shipping_label_url,
+      shippingQuoteGbp: insertResult.rows[0].shipping_quote_gbp === null ? null : Number(insertResult.rows[0].shipping_quote_gbp),
+      shippedAt: insertResult.rows[0].shipped_at,
+      deliveredAt: insertResult.rows[0].delivered_at,
       createdAt: insertResult.rows[0].created_at,
       updatedAt: insertResult.rows[0].updated_at,
     },
@@ -17715,6 +23025,15 @@ app.post('/orders', async (request, reply) => {
 });
 
 app.post('/orders/:orderId/pay', async (request, reply) => {
+  const securityAdminError = ensureSecurityAdminAccess(request, reply);
+  if (securityAdminError) {
+    reply.code(403);
+    return {
+      ok: false,
+      error: 'Orders are settled via payment confirmation. Use /payments/intents to initiate payment.',
+    };
+  }
+
   const paramsSchema = z.object({ orderId: z.string().min(4).max(64) });
   const { orderId } = paramsSchema.parse(request.params);
 
@@ -17728,9 +23047,13 @@ app.post('/orders/:orderId/pay', async (request, reply) => {
       updated_at: string;
       buyer_id: string;
       seller_id: string;
+      listing_id: string;
+      address_id: number | null;
       subtotal_gbp: number | string;
       buyer_protection_fee_gbp: number | string;
+      postage_fee_gbp: number | string;
       total_gbp: number | string;
+      shipping_carrier_id: string | null;
     }>(
       `
         UPDATE orders
@@ -17742,9 +23065,13 @@ app.post('/orders/:orderId/pay', async (request, reply) => {
           updated_at,
           buyer_id,
           seller_id,
+          listing_id,
+          address_id,
           subtotal_gbp,
           buyer_protection_fee_gbp,
-          total_gbp
+          postage_fee_gbp,
+          total_gbp,
+          shipping_carrier_id
       `,
       [orderId]
     );
@@ -17775,13 +23102,82 @@ app.post('/orders/:orderId/pay', async (request, reply) => {
         sellerId: paidRow.seller_id,
         subtotalGbp: Number(paidRow.subtotal_gbp),
         platformChargeGbp: Number(paidRow.buyer_protection_fee_gbp),
+        postageFeeGbp: Number(paidRow.postage_fee_gbp),
         totalGbp: Number(paidRow.total_gbp),
       });
     }
 
+    let shipment:
+      | {
+        provisioned: boolean;
+        reason?: string;
+        trackingNumber?: string | null;
+        shippingProvider?: string | null;
+        shippingLabelUrl?: string | null;
+        shippingQuoteGbp?: number | null;
+      }
+      | undefined;
+
+    try {
+      const provisionedShipment = await provisionOrderShipmentIfMissing(client, {
+        orderId: paidRow.id,
+        buyerId: paidRow.buyer_id,
+        sellerId: paidRow.seller_id,
+        addressId: paidRow.address_id,
+        listingId: paidRow.listing_id,
+        preferredCarrierId: paidRow.shipping_carrier_id,
+        postageFeeGbp: Number(paidRow.postage_fee_gbp),
+      });
+
+      shipment = provisionedShipment.provisioned
+        ? {
+          provisioned: true,
+          trackingNumber: provisionedShipment.trackingNumber,
+          shippingProvider: provisionedShipment.shippingProvider,
+          shippingLabelUrl: provisionedShipment.shippingLabelUrl,
+          shippingQuoteGbp: provisionedShipment.quoteGbp,
+        }
+        : {
+          provisioned: false,
+          reason: provisionedShipment.reason,
+          trackingNumber: provisionedShipment.trackingNumber,
+          shippingProvider: provisionedShipment.shippingProvider,
+          shippingLabelUrl: provisionedShipment.shippingLabelUrl,
+          shippingQuoteGbp: provisionedShipment.quoteGbp,
+        };
+    } catch (shipmentError) {
+      shipment = {
+        provisioned: false,
+        reason: 'shipment_provision_failed',
+      };
+      app.log.error(
+        {
+          err: shipmentError,
+          orderId: paidRow.id,
+        },
+        'Failed to provision shipment for manual order payment'
+      );
+    }
+
     await client.query('COMMIT');
 
+    try {
+      await queueCommercePaymentNotifications({
+        orderId: paidRow.id,
+        source: 'admin_manual_order_pay',
+      });
+    } catch (notificationError) {
+      request.log.error(
+        {
+          err: notificationError,
+          orderId: paidRow.id,
+        },
+        'Failed to queue payment notifications after manual order pay'
+      );
+    }
+
     const platformChargeCreditedGbp = Number(paidRow.buyer_protection_fee_gbp);
+    const postageFeeCreditedGbp = Number(paidRow.postage_fee_gbp);
 
     return {
       ok: true,
@@ -17793,8 +23189,10 @@ app.post('/orders/:orderId/pay', async (request, reply) => {
         sellerPayableCreditedGbp: 0,
         sellerEscrowHeldGbp: Number(paidRow.subtotal_gbp),
         sellerCashoutEligible: false,
-        platformCommissionCreditedGbp: platformChargeCreditedGbp,
+        platformCommissionCreditedGbp: roundTo(platformChargeCreditedGbp + postageFeeCreditedGbp, 2),
         platformChargeCreditedGbp,
+        postageFeeCreditedGbp,
+        shipment,
       },
     };
   } catch (error) {
@@ -17833,213 +23231,71 @@ app.post('/orders/:orderId/parcel/events', async (request, reply) => {
   try {
     await client.query('BEGIN');
 
-    const orderResult = await client.query<{
-      id: string;
-      buyer_id: string;
-      seller_id: string;
-      listing_id: string;
-      subtotal_gbp: number | string;
-      buyer_protection_fee_gbp: number | string;
-      total_gbp: number | string;
-      status: string;
-      address_id: number | null;
-      payment_method_id: number | null;
-      created_at: string;
-      updated_at: string;
-    }>(
-      `
-        SELECT
-          id,
-          buyer_id,
-          seller_id,
-          listing_id,
-          subtotal_gbp,
-          buyer_protection_fee_gbp,
-          total_gbp,
-          status,
-          address_id,
-          payment_method_id,
-          created_at,
-          updated_at
-        FROM orders
-        WHERE id = $1
-        LIMIT 1
-        FOR UPDATE
-      `,
-      [orderId]
-    );
-
-    const order = orderResult.rows[0];
-    if (!order) {
-      await client.query('ROLLBACK');
-      reply.code(404);
-      return {
-        ok: false,
-        error: 'Order not found',
-      };
-    }
-
-    if (order.status === 'created') {
-      await client.query('ROLLBACK');
-      reply.code(409);
-      return {
-        ok: false,
-        error: 'Order has not been paid yet, parcel events cannot be applied',
-      };
-    }
-
-    if (order.status === 'cancelled') {
-      await client.query('ROLLBACK');
-      reply.code(409);
-      return {
-        ok: false,
-        error: 'Order is cancelled and cannot accept parcel events',
-      };
-    }
-
-    let parcelEventRecorded = true;
-    let parcelEventDuplicate = false;
-    if (await orderParcelEventsTableAvailable(client)) {
-      const storedEvent = await client.query<{ id: number }>(
-        `
-          INSERT INTO order_parcel_events (
-            order_id,
-            provider,
-            event_type,
-            provider_event_id,
-            tracking_id,
-            occurred_at,
-            payload
-          )
-          VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
-          ON CONFLICT (provider, provider_event_id)
-          WHERE provider_event_id IS NOT NULL
-          DO NOTHING
-          RETURNING id
-        `,
-        [
-          orderId,
-          payload.provider,
-          payload.eventType,
-          payload.providerEventId ?? null,
-          payload.trackingId ?? null,
-          payload.occurredAt ?? null,
-          toJsonString(payload.payload ?? {}),
-        ]
-      );
-
-      const insertedEventCount = storedEvent.rowCount ?? 0;
-      parcelEventRecorded = insertedEventCount > 0 || !payload.providerEventId;
-      parcelEventDuplicate = Boolean(payload.providerEventId) && insertedEventCount === 0;
-    }
-
-    let nextStatus = order.status;
-    if (PARCEL_DELIVERY_RELEASE_EVENTS.has(payload.eventType)) {
-      if (order.status === 'paid' || order.status === 'shipped') {
-        nextStatus = 'delivered';
-      }
-    } else if (PARCEL_SHIPPING_PROGRESS_EVENTS.has(payload.eventType)) {
-      if (order.status === 'paid') {
-        nextStatus = 'shipped';
-      }
-    }
-
-    let status = order.status;
-    let updatedAt = order.updated_at;
-    let statusChanged = false;
-
-    if (nextStatus !== order.status) {
-      const updatedOrder = await client.query<{ status: string; updated_at: string }>(
-        `
-          UPDATE orders
-          SET status = $2, updated_at = NOW()
-          WHERE id = $1
-          RETURNING status, updated_at
-        `,
-        [orderId, nextStatus]
-      );
-
-      status = updatedOrder.rows[0]?.status ?? nextStatus;
-      updatedAt = updatedOrder.rows[0]?.updated_at ?? updatedAt;
-      statusChanged = true;
-    }
-
-    let sellerPayableReleasedGbp = 0;
-    let alreadyReleased = false;
-    if (PARCEL_DELIVERY_RELEASE_EVENTS.has(payload.eventType)) {
-      if (order.status !== 'paid' && order.status !== 'shipped' && order.status !== 'delivered') {
-        await client.query('ROLLBACK');
-        reply.code(409);
-        return {
-          ok: false,
-          error: `Order cannot be delivered from status '${order.status}'`,
-        };
-      }
-
-      if (await ledgerTablesAvailable(client)) {
-        const release = await releaseCommerceOrderEscrowToSeller(client, {
-          orderId: order.id,
-          sellerId: order.seller_id,
-          subtotalGbp: Number(order.subtotal_gbp),
-          parcelProvider: payload.provider,
-          parcelEventType: payload.eventType,
-          trackingId: payload.trackingId,
-          providerEventId: payload.providerEventId,
-        });
-
-        sellerPayableReleasedGbp = release.released ? Number(order.subtotal_gbp) : 0;
-        alreadyReleased = release.alreadyReleased;
-      }
-    }
+    const applied = await applyOrderParcelEvent(client, {
+      orderId,
+      provider: payload.provider,
+      eventType: payload.eventType,
+      providerEventId: payload.providerEventId,
+      trackingId: payload.trackingId,
+      occurredAt: payload.occurredAt,
+      payload: payload.payload,
+      source: 'admin',
+    });
 
     await client.query('COMMIT');
 
-    const platformChargeGbp = Number(order.buyer_protection_fee_gbp);
-    const sellerEscrowHeldGbp = Number(order.subtotal_gbp);
-    const idempotent =
-      !statusChanged &&
-      !sellerPayableReleasedGbp &&
-      (alreadyReleased || parcelEventDuplicate);
+    if (!applied.idempotent) {
+      try {
+        await queueCommerceParcelSettlementNotifications({
+          orderId: applied.order.id,
+          buyerId: applied.order.buyerId,
+          sellerId: applied.order.sellerId,
+          orderStatus: applied.order.status,
+          sellerPayableReleasedGbp: applied.settlement.sellerPayableReleasedGbp,
+          source: 'admin_parcel_event',
+          provider: payload.provider,
+          eventType: payload.eventType,
+        });
+      } catch (notificationError) {
+        request.log.error(
+          {
+            err: notificationError,
+            orderId: applied.order.id,
+            provider: payload.provider,
+            eventType: payload.eventType,
+          },
+          'Failed to queue parcel settlement notifications from admin parcel event'
+        );
+      }
+    }
 
     return {
       ok: true,
-      idempotent,
-      parcelEvent: {
-        provider: payload.provider,
-        eventType: payload.eventType,
-        providerEventId: payload.providerEventId ?? null,
-        trackingId: payload.trackingId ?? null,
-        occurredAt: payload.occurredAt ?? null,
-        recorded: parcelEventRecorded,
-        duplicate: parcelEventDuplicate,
-      },
-      order: {
-        id: order.id,
-        buyerId: order.buyer_id,
-        sellerId: order.seller_id,
-        listingId: order.listing_id,
-        subtotalGbp: sellerEscrowHeldGbp,
-        buyerProtectionFeeGbp: platformChargeGbp,
-        platformChargeGbp,
-        totalGbp: Number(order.total_gbp),
-        status,
-        addressId: order.address_id,
-        paymentMethodId: order.payment_method_id,
-        createdAt: order.created_at,
-        updatedAt,
-      },
-      settlement: {
-        releasePolicy: 'parcel_delivery_confirmation',
-        sellerEscrowHeldGbp,
-        sellerPayableReleasedGbp,
-        sellerCashoutEligible: status === 'delivered',
-        alreadyReleased,
-      },
+      idempotent: applied.idempotent,
+      parcelEvent: applied.parcelEvent,
+      order: applied.order,
+      settlement: applied.settlement,
     };
   } catch (error) {
     await client.query('ROLLBACK');
 
     const apiError = getApiError(error);
+    if (apiError?.code === 'ORDER_NOT_FOUND') {
+      reply.code(404);
+      return {
+        ok: false,
+        error: apiError.message,
+      };
+    }
+
+    if (apiError?.code === 'ORDER_NOT_READY' || apiError?.code === 'ORDER_INVALID_STATE') {
+      reply.code(409);
+      return {
+        ok: false,
+        error: apiError.message,
+      };
+    }
+
     if (apiError?.code === 'ESCROW_INSUFFICIENT') {
       reply.code(409);
       return {
@@ -18058,6 +23314,111 @@ app.post('/orders/:orderId/parcel/events', async (request, reply) => {
   } finally {
     client.release();
   }
+});
+
+app.get('/orders/:orderId/parcel/events', async (request, reply) => {
+  const paramsSchema = z.object({ orderId: z.string().min(4).max(64) });
+  const { orderId } = paramsSchema.parse(request.params);
+
+  const orderResult = await db.query<{
+    id: string;
+    status: string;
+    tracking_number: string | null;
+    shipping_provider: string | null;
+    shipped_at: string | null;
+    delivered_at: string | null;
+  }>(
+    `
+      SELECT
+        id,
+        status,
+        tracking_number,
+        shipping_provider,
+        shipped_at::text,
+        delivered_at::text
+      FROM orders
+      WHERE id = $1
+      LIMIT 1
+    `,
+    [orderId]
+  );
+
+  if (!orderResult.rowCount) {
+    reply.code(404);
+    return {
+      ok: false,
+      error: 'Order not found',
+    };
+  }
+
+  const order = orderResult.rows[0];
+  const parcelEventsAvailable = await orderParcelEventsTableAvailable(db);
+
+  if (!parcelEventsAvailable) {
+    return {
+      ok: true,
+      source: 'orders_status_only',
+      order: {
+        id: order.id,
+        status: order.status,
+        trackingNumber: order.tracking_number,
+        shippingProvider: order.shipping_provider,
+        shippedAt: order.shipped_at,
+        deliveredAt: order.delivered_at,
+      },
+      items: [],
+    };
+  }
+
+  const eventsResult = await db.query<{
+    id: number;
+    provider: string;
+    event_type: ParcelEventType;
+    provider_event_id: string | null;
+    tracking_id: string | null;
+    occurred_at: string | null;
+    received_at: string;
+    payload: Record<string, unknown>;
+  }>(
+    `
+      SELECT
+        id,
+        provider,
+        event_type,
+        provider_event_id,
+        tracking_id,
+        occurred_at::text,
+        received_at::text,
+        payload
+      FROM order_parcel_events
+      WHERE order_id = $1
+      ORDER BY COALESCE(occurred_at, received_at) ASC, id ASC
+    `,
+    [orderId]
+  );
+
+  return {
+    ok: true,
+    source: 'orders_with_parcel_events',
+    order: {
+      id: order.id,
+      status: order.status,
+      trackingNumber: order.tracking_number,
+      shippingProvider: order.shipping_provider,
+      shippedAt: order.shipped_at,
+      deliveredAt: order.delivered_at,
+    },
+    items: eventsResult.rows.map((row) => ({
+      id: row.id,
+      provider: row.provider,
+      eventType: row.event_type,
+      providerEventId: row.provider_event_id,
+      trackingId: row.tracking_id,
+      occurredAt: row.occurred_at,
+      receivedAt: row.received_at,
+      payload: row.payload,
+    })),
+  };
 });
 
 app.get('/orders/:orderId/ledger', async (request) => {
@@ -18145,10 +23506,18 @@ app.get('/orders/:orderId', async (request, reply) => {
     listing_id: string;
     subtotal_gbp: number | string;
     buyer_protection_fee_gbp: number | string;
+    postage_fee_gbp: number | string;
     total_gbp: number | string;
     status: string;
     address_id: number | null;
     payment_method_id: number | null;
+    shipping_carrier_id: string | null;
+    shipping_provider: string | null;
+    tracking_number: string | null;
+    shipping_label_url: string | null;
+    shipping_quote_gbp: number | string | null;
+    shipped_at: string | null;
+    delivered_at: string | null;
     created_at: string;
     updated_at: string;
   }>(
@@ -18160,12 +23529,20 @@ app.get('/orders/:orderId', async (request, reply) => {
         listing_id,
         subtotal_gbp,
         buyer_protection_fee_gbp,
+        postage_fee_gbp,
         total_gbp,
         status,
         address_id,
         payment_method_id,
-        created_at,
-        updated_at
+        shipping_carrier_id,
+        shipping_provider,
+        tracking_number,
+        shipping_label_url,
+        shipping_quote_gbp,
+        shipped_at::text,
+        delivered_at::text,
+        created_at::text,
+        updated_at::text
       FROM orders
       WHERE id = $1
       LIMIT 1
@@ -18190,10 +23567,18 @@ app.get('/orders/:orderId', async (request, reply) => {
       subtotalGbp: Number(row.subtotal_gbp),
       buyerProtectionFeeGbp: platformChargeGbp,
       platformChargeGbp,
+      postageFeeGbp: Number(row.postage_fee_gbp),
       totalGbp: Number(row.total_gbp),
       status: row.status,
       addressId: row.address_id,
       paymentMethodId: row.payment_method_id,
+      shippingCarrierId: row.shipping_carrier_id,
+      shippingProvider: row.shipping_provider,
+      trackingNumber: row.tracking_number,
+      shippingLabelUrl: row.shipping_label_url,
+      shippingQuoteGbp: row.shipping_quote_gbp === null ? null : Number(row.shipping_quote_gbp),
+      shippedAt: row.shipped_at,
+      deliveredAt: row.delivered_at,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     },
@@ -18223,7 +23608,12 @@ app.get('/users/:userId/orders', async (request) => {
     seller_id: string;
     listing_id: string;
     status: string;
+    postage_fee_gbp: number | string;
     total_gbp: number | string;
+    tracking_number: string | null;
+    shipping_provider: string | null;
+    shipped_at: string | null;
+    delivered_at: string | null;
     created_at: string;
     listing_title: string;
     listing_image_url: string | null;
@@ -18235,7 +23625,12 @@ app.get('/users/:userId/orders', async (request) => {
         o.seller_id,
         o.listing_id,
         o.status,
+        o.postage_fee_gbp,
         o.total_gbp,
+        o.tracking_number,
+        o.shipping_provider,
+        o.shipped_at::text,
+        o.delivered_at::text,
         o.created_at,
         l.title AS listing_title,
         l.image_url AS listing_image_url
@@ -18258,7 +23653,12 @@ app.get('/users/:userId/orders', async (request) => {
       listingTitle: row.listing_title,
       listingImageUrl: row.listing_image_url,
       status: row.status,
+      postageFeeGbp: Number(row.postage_fee_gbp),
       totalGbp: Number(row.total_gbp),
+      trackingNumber: row.tracking_number,
+      shippingProvider: row.shipping_provider,
+      shippedAt: row.shipped_at,
+      deliveredAt: row.delivered_at,
       createdAt: row.created_at,
     })),
   };
@@ -20848,6 +26248,9 @@ const start = async () => {
       handleAuctionSweepJob: async ({ reason }) => {
         await sweepExpiredAuctions(reason);
       },
+      handleReconciliationJob: async ({ reason, runDate }) => {
+        await runPlatformReconciliation(reason, runDate);
+      },
       handleOnezeMintReserveJob: async ({ mintOperationId, initiatedBy, reason }) => {
         await processQueuedOnezeMintReserveAllocation({
           mintOperationId,
@@ -20865,8 +26268,13 @@ const start = async () => {
     });
 
     startAuctionSweepScheduler();
+    startPlatformReconciliationScheduler();
+    startPlatformRevenueSweepScheduler();
+    startOpsAlertingScheduler();
     startOnezeReconciliationScheduler();
     startOnezeDailyAttestationScheduler();
+    startOnezeFxSyncScheduler();
+    startOnezeAutoAdjustScheduler();
 
     await app.listen({ port: config.port, host: '0.0.0.0' });
     app.log.info(`API running on :${config.port}`);
@@ -20885,8 +26293,13 @@ const shutdown = async () => {
   isShuttingDown = true;
 
   stopAuctionSweepScheduler();
+  stopPlatformReconciliationScheduler();
+  stopPlatformRevenueSweepScheduler();
+  stopOpsAlertingScheduler();
   stopOnezeReconciliationScheduler();
   stopOnezeDailyAttestationScheduler();
+  stopOnezeFxSyncScheduler();
+  stopOnezeAutoAdjustScheduler();
 
   try {
     await app.close();

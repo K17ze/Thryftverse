@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useCallback, useRef } from 'react';
+import { AccessibilityInfo } from 'react-native';
 
 export type ToastType = 'success' | 'error' | 'info';
 
@@ -37,6 +38,11 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const show = useCallback((message: string, type: ToastType = 'info') => {
     const id = `${Date.now()}-${Math.random()}`;
     setToasts(prev => [...prev.slice(-2), { id, message, type }]);
+
+    if (typeof AccessibilityInfo?.announceForAccessibility === 'function') {
+      void AccessibilityInfo.announceForAccessibility(message);
+    }
+
     timers.current[id] = setTimeout(() => dismiss(id), 3500);
   }, [dismiss]);
 

@@ -21,9 +21,10 @@ import { EmptyState } from '../components/EmptyState';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useBackendData } from '../context/BackendDataContext';
 import { useStore } from '../store/useStore';
-import { listUserOrders } from '../services/commerceApi';
+import { CommerceUserOrder, listUserOrders } from '../services/commerceApi';
 import { CachedImage } from '../components/CachedImage';
 import { getListingCoverUri } from '../utils/media';
+import { AppSegmentControl } from '../components/ui/AppSegmentControl';
 
 const { width } = Dimensions.get('window');
 
@@ -35,26 +36,29 @@ type OrderItem = {
   buyer?: User;
 };
 
+type OrdersTab = 'buying' | 'selling';
+type OrdersStatusFilter = 'All' | 'In Progress' | 'Cancelled' | 'Completed';
+
+const ORDER_TAB_OPTIONS: Array<{ value: OrdersTab; label: string; accessibilityLabel: string }> = [
+  { value: 'buying', label: 'Buying', accessibilityLabel: 'Show buying orders' },
+  { value: 'selling', label: 'Selling', accessibilityLabel: 'Show selling orders' },
+];
+
+const ORDER_STATUS_FILTER_OPTIONS: Array<{ value: OrdersStatusFilter; label: string; accessibilityLabel: string }> = [
+  { value: 'All', label: 'All', accessibilityLabel: 'Filter orders by all statuses' },
+  { value: 'In Progress', label: 'In Progress', accessibilityLabel: 'Filter orders by in progress status' },
+  { value: 'Cancelled', label: 'Cancelled', accessibilityLabel: 'Filter orders by cancelled status' },
+  { value: 'Completed', label: 'Completed', accessibilityLabel: 'Filter orders by completed status' },
+];
+
 export default function MyOrdersScreen() {
   const navigation = useNavigation<any>();
   const { formatFromFiat } = useFormattedPrice();
   const { listings, refreshListings } = useBackendData();
   const currentUser = useStore((state) => state.currentUser);
   const viewerId = currentUser?.id ?? 'u1';
-  const [activeTab, setActiveTab] = useState<'buying' | 'selling'>('buying');
-  const [backendOrders, setBackendOrders] = useState<
-    Array<{
-      id: string;
-      buyerId: string;
-      sellerId: string;
-      listingId: string;
-      listingTitle: string;
-      listingImageUrl: string | null;
-      status: string;
-      totalGbp: number;
-      createdAt: string;
-    }>
-  >([]);
+  const [activeTab, setActiveTab] = useState<OrdersTab>('buying');
+  const [backendOrders, setBackendOrders] = useState<CommerceUserOrder[]>([]);
 
   const listingPool = React.useMemo(() => (listings.length ? listings : mockArrayOrEmpty(MOCK_LISTINGS)), [listings]);
 
@@ -123,10 +127,15 @@ export default function MyOrdersScreen() {
         description: order.listingTitle || 'Order item',
       };
 
+      const normalizedStatusLabel =
+        order.status === 'shipped' && order.trackingNumber
+          ? 'In Transit'
+          : statusLabelByState[order.status] ?? 'In progress';
+
       return {
         id: order.id,
         item: fallbackListing,
-        status: statusLabelByState[order.status] ?? 'In progress',
+        status: normalizedStatusLabel,
         isDone: order.status === 'delivered' || order.status === 'cancelled',
         buyer: mockFind(MOCK_USERS, (user) => user.id === order.buyerId),
       };
@@ -157,7 +166,7 @@ export default function MyOrdersScreen() {
   }, [activeTab, backendBuyingOrders, backendOrders, backendSellingOrders, buyingOrders, sellingOrders]);
 
   const [refreshing, setRefreshing] = useState(false);
-  const [statusFilter, setStatusFilter] = useState<'All' | 'In Progress' | 'Cancelled' | 'Completed'>('All');
+  const [statusFilter, setStatusFilter] = useState<OrdersStatusFilter>('All');
   const scrollY = useSharedValue(0);
 
   const scrollHandler = useAnimatedScrollHandler({
@@ -195,49 +204,43 @@ export default function MyOrdersScreen() {
       <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
       
       <View style={styles.header}>
-        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <AnimatedPressable
+          style={styles.backBtn}
+          onPress={() => navigation.goBack()}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+          accessibilityHint="Returns to the previous screen"
+        >
           <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
         </AnimatedPressable>
         <Text style={styles.hugeTitle}>My Orders</Text>
       </View>
 
       {/* Restored Custom Tabs */}
-      <View style={styles.tabsContainer}>
-        <AnimatedPressable 
-          style={[styles.tabBtn, activeTab === 'buying' && styles.activeTabBtn]} 
-          onPress={() => setActiveTab('buying')}
-          activeOpacity={0.8}
-        >
-          <Text style={[styles.tabText, activeTab === 'buying' && styles.activeTabText]}>Buying</Text>
-        </AnimatedPressable>
-        <AnimatedPressable 
-          style={[styles.tabBtn, activeTab === 'selling' && styles.activeTabBtn]} 
-          onPress={() => setActiveTab('selling')}
-          activeOpacity={0.8}
-        >
-          <Text style={[styles.tabText, activeTab === 'selling' && styles.activeTabText]}>Selling</Text>
-        </AnimatedPressable>
-      </View>
+      <AppSegmentControl
+        style={styles.tabsContainer}
+        options={ORDER_TAB_OPTIONS}
+        value={activeTab}
+        onChange={setActiveTab}
+        fullWidth
+        optionStyle={styles.tabBtn}
+        optionActiveStyle={styles.activeTabBtn}
+        optionTextStyle={styles.tabText}
+        optionTextActiveStyle={styles.activeTabText}
+      />
 
       {/* Filter Pills Horizontal List */}
-      <View style={{ marginBottom: 16 }}>
-        <ScrollView 
-          horizontal 
-          showsHorizontalScrollIndicator={false} 
-          contentContainerStyle={{ paddingHorizontal: 20, gap: 10 }}
-        >
-          {['All', 'In Progress', 'Cancelled', 'Completed'].map(f => (
-            <AnimatedPressable 
-              key={f} 
-              style={[styles.filterPill, statusFilter === f && styles.activeFilterPill]}
-              activeOpacity={0.8}
-              onPress={() => setStatusFilter(f as 'All' | 'In Progress' | 'Cancelled' | 'Completed')}
-            >
-              <Text style={[styles.filterText, statusFilter === f && styles.activeFilterText]}>{f}</Text>
-            </AnimatedPressable>
-          ))}
-        </ScrollView>
-      </View>
+      <AppSegmentControl
+        style={styles.filterStrip}
+        options={ORDER_STATUS_FILTER_OPTIONS}
+        value={statusFilter}
+        onChange={setStatusFilter}
+        fullWidth
+        optionStyle={styles.filterPill}
+        optionActiveStyle={styles.activeFilterPill}
+        optionTextStyle={styles.filterText}
+        optionTextActiveStyle={styles.activeFilterText}
+      />
 
       <View style={{ flex: 1 }}>
         <RefreshIndicator scrollY={scrollY} isRefreshing={refreshing} topInset={10} />
@@ -270,28 +273,39 @@ export default function MyOrdersScreen() {
               onCtaPress={() => navigation.navigate(activeTab === 'buying' ? 'MainTabs' : 'Sell')}
             />
           ) : (
-            filteredOrders.map((order, index) => (
-              <Reanimated.View key={order.id} entering={FadeInDown.delay(index * 60).duration(400)}>
-                <AnimatedPressable 
-                  style={styles.cardGroup}
-                  onPress={() => navigation.navigate('OrderDetail', { orderId: order.id })}
-                  activeOpacity={0.9}
-                >
-                  <View style={styles.orderRow}>
-                    <CachedImage uri={getListingCoverUri(order.item.images, 'https://picsum.photos/seed/order-thumb-fallback/300/400')} style={styles.orderThumb} contentFit="cover" />
-                    <View style={styles.orderInfo}>
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <Text style={[styles.orderStatus, order.isDone && styles.orderStatusDone]}>{order.status}</Text>
-                        {order.buyer && <Text style={styles.buyerText}>to {order.buyer.username}</Text>}
+            filteredOrders.map((order, index) => {
+              const backendMeta = backendOrderById.get(order.id);
+              const trackingSnippet = backendMeta?.trackingNumber
+                ? `${backendMeta.shippingProvider ? `${backendMeta.shippingProvider.toUpperCase()} · ` : ''}${backendMeta.trackingNumber}`
+                : null;
+
+              return (
+                <Reanimated.View key={order.id} entering={FadeInDown.delay(index * 60).duration(400)}>
+                  <AnimatedPressable
+                    style={styles.cardGroup}
+                    onPress={() => navigation.navigate('OrderDetail', { orderId: order.id })}
+                    activeOpacity={0.9}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open order ${order.item.title}`}
+                    accessibilityHint={`View details for this ${order.status.toLowerCase()} order`}
+                  >
+                    <View style={styles.orderRow}>
+                      <CachedImage uri={getListingCoverUri(order.item.images, 'https://picsum.photos/seed/order-thumb-fallback/300/400')} style={styles.orderThumb} contentFit="cover" />
+                      <View style={styles.orderInfo}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Text style={[styles.orderStatus, order.isDone && styles.orderStatusDone]}>{order.status}</Text>
+                          {order.buyer && <Text style={styles.buyerText}>to {order.buyer.username}</Text>}
+                        </View>
+                        <Text style={styles.orderTitle} numberOfLines={1}>{order.item.title}</Text>
+                        {trackingSnippet ? <Text style={styles.orderTracking} numberOfLines={1}>Tracking: {trackingSnippet}</Text> : null}
+                        <Text style={styles.orderPrice}>{formatFromFiat(order.item.price, 'GBP', { displayMode: 'fiat' })}</Text>
                       </View>
-                      <Text style={styles.orderTitle} numberOfLines={1}>{order.item.title}</Text>
-                      <Text style={styles.orderPrice}>{formatFromFiat(order.item.price, 'GBP', { displayMode: 'fiat' })}</Text>
+                      <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
                     </View>
-                    <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
-                  </View>
-                </AnimatedPressable>
-              </Reanimated.View>
-            ))
+                  </AnimatedPressable>
+                </Reanimated.View>
+              );
+            })
           )}
         </AnimatedScrollView>
       </View>
@@ -306,12 +320,13 @@ const styles = StyleSheet.create({
   backBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.card, alignItems: 'center', justifyContent: 'center' },
   hugeTitle: { fontSize: 34, fontFamily: 'Inter_700Bold', color: Colors.textPrimary, letterSpacing: -0.5 },
   
-  tabsContainer: { flexDirection: 'row', marginHorizontal: 20, backgroundColor: Colors.card, borderRadius: 24, padding: 4, marginBottom: 16 },
-  tabBtn: { flex: 1, paddingVertical: 12, alignItems: 'center', borderRadius: 20 },
+  tabsContainer: { marginHorizontal: 20, backgroundColor: Colors.card, borderRadius: 24, padding: 4, marginBottom: 16 },
+  tabBtn: { flex: 1, paddingVertical: 12, borderRadius: 20, borderWidth: 0, backgroundColor: 'transparent' },
   activeTabBtn: { backgroundColor: Colors.cardAlt },
   tabText: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: Colors.textMuted },
   activeTabText: { color: Colors.textPrimary },
 
+  filterStrip: { marginBottom: 16, marginHorizontal: 20, gap: 10 },
   filterPill: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: Colors.card, borderWidth: 1, borderColor: Colors.border },
   activeFilterPill: { backgroundColor: Colors.textPrimary, borderColor: Colors.textPrimary },
   filterText: { fontSize: 13, fontFamily: 'Inter_500Medium', color: Colors.textSecondary },
@@ -329,6 +344,7 @@ const styles = StyleSheet.create({
   orderStatus: { fontSize: 13, fontFamily: 'Inter_700Bold', color: Colors.accent, marginBottom: 4, letterSpacing: 0.5 },
   orderStatusDone: { fontSize: 13, fontFamily: 'Inter_700Bold', color: Colors.success, marginBottom: 4, letterSpacing: 0.5 },
   orderTitle: { fontSize: 16, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary, marginBottom: 4 },
+  orderTracking: { fontSize: 12, fontFamily: 'Inter_500Medium', color: Colors.textMuted, marginBottom: 4 },
   orderPrice: { fontSize: 14, fontFamily: 'Inter_500Medium', color: Colors.textSecondary },
   buyerText: { fontSize: 12, fontFamily: 'Inter_400Regular', color: Colors.textMuted },
 });

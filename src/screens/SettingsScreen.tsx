@@ -163,7 +163,7 @@ export default function SettingsScreen({ navigation }: Props) {
         disabled={!isInteractive}
         accessibilityLabel={item.subtitle ? `${item.title}: ${item.subtitle}` : item.title}
         accessibilityRole={isInteractive ? 'button' : 'text'}
-        accessibilityHint={isInteractive ? `Navigate to ${item.title}` : undefined}
+        accessibilityHint={isInteractive ? `Activate ${item.title}` : undefined}
       >
         <View style={[styles.iconSquare, { backgroundColor: item.color + '18', borderColor: item.color + '30' }]}>
           <Ionicons name={item.icon as any} size={20} color={item.color} />
@@ -222,13 +222,6 @@ export default function SettingsScreen({ navigation }: Props) {
       subtitle: pushNotificationsSubtitle,
       color: '#64B5F6',
       onPress: () => navigation.navigate('PushNotifications'),
-    },
-    {
-      icon: 'color-palette-outline',
-      title: t('settings.item.profileHub.themeStyle.title'),
-      subtitle: getThemePreferenceLabel(themePreference),
-      color: '#BB86FC',
-      onPress: () => navigation.navigate('Personalisation'),
     },
   ];
 
@@ -318,6 +311,7 @@ export default function SettingsScreen({ navigation }: Props) {
           style={styles.backBtn}
           accessibilityLabel={t('settings.a11y.goBack')}
           accessibilityRole="button"
+          accessibilityHint="Returns to the previous screen"
         >
           <Ionicons name="arrow-back" size={22} color={Colors.textPrimary} />
         </AnimatedPressable>
@@ -380,14 +374,21 @@ export default function SettingsScreen({ navigation }: Props) {
           activeOpacity={0.8}
           accessibilityLabel={t('settings.a11y.logout')}
           accessibilityRole="button"
+          accessibilityHint="Signs out and returns to the authentication screen"
           onPress={async () => {
             await logoutFromSession();
             logout();
             navigation.replace('AuthLanding');
           }}
         >
-          <Ionicons name="log-out-outline" size={20} color={Colors.danger} style={{ marginRight: 8 }} />
-          <Text style={styles.logoutText}>{t('settings.logout')}</Text>
+          <View style={styles.logoutIconWrap}>
+            <Ionicons name="log-out-outline" size={20} color={Colors.danger} />
+          </View>
+          <View style={styles.logoutCopy}>
+            <Text style={styles.logoutText}>{t('settings.logout')}</Text>
+            <Text style={styles.logoutSubtext}>{t('settings.logout.subtitle')}</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={16} color={Colors.danger} />
         </AnimatedPressable>
 
         {/* Version */}
@@ -475,14 +476,21 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: 'Inter_400Regular',
     color: Colors.textMuted,
+    lineHeight: 17,
   },
 
   // Pill cards
   pillCard: {
     backgroundColor: PANEL_BG,
-    borderRadius: 20,
+    borderRadius: 22,
     paddingHorizontal: 16,
     overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: PANEL_BORDER,
+    shadowColor: '#000',
+    shadowOpacity: 0.06,
+    shadowOffset: { width: 0, height: 4 },
+    shadowRadius: 12,
   },
   settingRow: {
     flexDirection: 'row',
@@ -501,7 +509,7 @@ const styles = StyleSheet.create({
   iconSquare: {
     width: 42,
     height: 42,
-    borderRadius: 12,
+    borderRadius: 14,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 14,
@@ -513,16 +521,36 @@ const styles = StyleSheet.create({
 
   logoutPill: {
     marginTop: 32,
-    backgroundColor: 'rgba(255, 60, 60, 0.08)',
-    borderRadius: 20,
-    paddingVertical: 16,
+    backgroundColor: IS_LIGHT ? 'rgba(182,66,66,0.1)' : 'rgba(255,77,77,0.12)',
+    borderRadius: 22,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     alignItems: 'center',
-    justifyContent: 'center',
     flexDirection: 'row',
     borderWidth: 1,
-    borderColor: 'rgba(255, 60, 60, 0.15)',
+    borderColor: IS_LIGHT ? 'rgba(182,66,66,0.22)' : 'rgba(255,77,77,0.28)',
+    gap: 12,
   },
-  logoutText: { color: Colors.danger, fontSize: 15, fontFamily: 'Inter_600SemiBold' },
+  logoutIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: IS_LIGHT ? 'rgba(182,66,66,0.22)' : 'rgba(255,77,77,0.34)',
+    backgroundColor: IS_LIGHT ? 'rgba(182,66,66,0.12)' : 'rgba(255,77,77,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  logoutCopy: {
+    flex: 1,
+  },
+  logoutText: { color: Colors.danger, fontSize: 15, fontFamily: 'Inter_700Bold' },
+  logoutSubtext: {
+    marginTop: 2,
+    color: Colors.textMuted,
+    fontSize: 12,
+    fontFamily: 'Inter_500Medium',
+  },
 
   versionText: {
     textAlign: 'center',

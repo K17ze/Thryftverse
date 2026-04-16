@@ -343,6 +343,9 @@ export default function CoOwnOrderHistoryScreen() {
         style={styles.row}
         activeOpacity={0.92}
         onPress={() => navigation.navigate('AssetDetail', { assetId: item.assetId })}
+        accessibilityRole="button"
+        accessibilityLabel={`${isBuy ? 'Buy' : 'Sell'} order for ${item.assetId.toUpperCase()}`}
+        accessibilityHint="Opens asset detail and market view"
       >
         <View style={[styles.iconCircle, isBuy ? styles.iconBuy : styles.iconSell]}>
           <Ionicons
@@ -380,7 +383,13 @@ export default function CoOwnOrderHistoryScreen() {
       <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
       <View style={styles.header}>
-        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <AnimatedPressable
+          style={styles.backBtn}
+          onPress={() => navigation.goBack()}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+          accessibilityHint="Returns to previous screen"
+        >
           <Ionicons name="arrow-back" size={22} color={Colors.textPrimary} />
         </AnimatedPressable>
         <Text style={styles.headerTitle}>Co-Own Orders</Text>
@@ -397,6 +406,10 @@ export default function CoOwnOrderHistoryScreen() {
               key={item}
               style={[styles.filterChip, active && styles.filterChipActive]}
               onPress={() => setSideFilter(item)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+              accessibilityLabel={`Filter side ${item}`}
+              accessibilityHint="Filters orders by side"
             >
               <Text style={[styles.filterText, active && styles.filterTextActive]}>{item.toUpperCase()}</Text>
             </AnimatedPressable>
@@ -412,6 +425,10 @@ export default function CoOwnOrderHistoryScreen() {
               key={item}
               style={[styles.filterChip, active && styles.filterChipActive]}
               onPress={() => setDateFilter(item)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+              accessibilityLabel={`Filter period ${item}`}
+              accessibilityHint="Filters orders by time window"
             >
               <Text style={[styles.filterText, active && styles.filterTextActive]}>{item.toUpperCase()}</Text>
             </AnimatedPressable>
@@ -431,6 +448,10 @@ export default function CoOwnOrderHistoryScreen() {
               key={assetId}
               style={[styles.assetChip, active && styles.assetChipActive]}
               onPress={() => setAssetFilter(assetId)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+              accessibilityLabel={assetId === 'all' ? 'Filter all assets' : `Filter asset ${assetId.toUpperCase()}`}
+              accessibilityHint="Filters orders by asset"
             >
               <Text style={[styles.assetChipText, active && styles.assetChipTextActive]}>
                 {assetId === 'all' ? 'ALL ASSETS' : assetId.toUpperCase()}

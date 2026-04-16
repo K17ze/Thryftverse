@@ -138,6 +138,9 @@ export default function TradeHubScreen() {
           style={styles.ledgerShortcutBtn}
           activeOpacity={0.9}
           onPress={() => navigation.navigate('MarketLedger')}
+          accessibilityRole="button"
+          accessibilityLabel="Open market ledger"
+          accessibilityHint="Shows recent trading events and settlement activity"
         >
           <Ionicons name="pulse-outline" size={15} color={BRAND} />
           <Text style={styles.ledgerShortcutText}>{t('tradeHub.ledger.label')}</Text>
@@ -177,6 +180,10 @@ export default function TradeHubScreen() {
             onPress={() => setActiveTab(tab)}
             activeOpacity={0.9}
             onLayout={(e: LayoutChangeEvent) => handleTabLayout(tab, e)}
+            accessibilityRole="tab"
+            accessibilityState={{ selected: activeTab === tab }}
+            accessibilityLabel={tab === 'AUCTIONS' ? t('tradeHub.tab.auctions') : t('tradeHub.tab.coOwn')}
+            accessibilityHint="Switches the active trade hub view"
           >
             <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
               {tab === 'AUCTIONS' ? t('tradeHub.tab.auctions') : t('tradeHub.tab.coOwn')}
@@ -189,6 +196,9 @@ export default function TradeHubScreen() {
         style={styles.activityCard}
         activeOpacity={0.92}
         onPress={() => navigation.navigate('MarketLedger')}
+        accessibilityRole="button"
+        accessibilityLabel="Open market activity"
+        accessibilityHint="Shows detailed market ledger events"
       >
         <View style={styles.activityTopRow}>
           <View style={styles.activityLabelRow}>

@@ -27,13 +27,23 @@ export interface OnezeMintReserveJobData {
   reason: 'webhook_confirmed' | 'manual_retry';
 }
 
-type InfraJobData = AuctionSweepJobData | OnezeWithdrawalExecuteJobData | OnezeMintReserveJobData;
+export interface ReconciliationJobData {
+  reason: 'scheduled' | 'manual';
+  runDate?: string;
+}
+
+type InfraJobData =
+  | AuctionSweepJobData
+  | OnezeWithdrawalExecuteJobData
+  | OnezeMintReserveJobData
+  | ReconciliationJobData;
 
 interface QueueHandlers {
   handlePushJob: (job: PushJobData) => Promise<void>;
   handleAuctionSweepJob: (job: AuctionSweepJobData) => Promise<void>;
   handleOnezeWithdrawalExecuteJob: (job: OnezeWithdrawalExecuteJobData) => Promise<void>;
   handleOnezeMintReserveJob: (job: OnezeMintReserveJobData) => Promise<void>;
+  handleReconciliationJob: (job: ReconciliationJobData) => Promise<void>;
 }
 
 const queueConnection = new IORedis(config.redisUrl, {
@@ -99,6 +109,8 @@ export function startBackgroundWorkers(handlers: QueueHandlers): void {
             await handlers.handleOnezeWithdrawalExecuteJob(job.data as OnezeWithdrawalExecuteJobData);
           } else if (job.name === 'oneze_mint_reserve_allocate') {
             await handlers.handleOnezeMintReserveJob(job.data as OnezeMintReserveJobData);
+          } else if (job.name === 'reconciliation_run') {
+            await handlers.handleReconciliationJob(job.data as ReconciliationJobData);
           }
 
           recordBackgroundJob({
@@ -179,6 +191,23 @@ export async function enqueueOnezeMintReserveJob(input: OnezeMintReserveJobData)
       },
       removeOnComplete: true,
       removeOnFail: 200,
+    }
+  );
+}
+
+export async function enqueueReconciliationJob(input: ReconciliationJobData): Promise<void> {
+  const normalizedRunDate = input.runDate ?? new Date().toISOString().slice(0, 10);
+
+  await infraQueue.add(
+    'reconciliation_run',
+    {
+      reason: input.reason,
+      runDate: input.runDate,
+    },
+    {
+      jobId: `reconciliation_run_${input.reason}_${normalizedRunDate}`,
+      removeOnComplete: true,
+      removeOnFail: 100,
     }
   );
 }

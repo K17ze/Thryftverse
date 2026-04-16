@@ -23,6 +23,7 @@ import { useToast } from '../context/ToastContext';
 import { parseApiError } from '../lib/apiClient';
 import { requestMyDataExport, deleteMyAccount } from '../services/accountApi';
 import { disableTwoFactor, logoutFromSession } from '../services/authApi';
+import { AppButton } from '../components/ui/AppButton';
 
 export default function AccountSettingsScreen() {
   const navigation = useNavigation<StackNavigationProp<RootStackParamList>>();
@@ -299,43 +300,64 @@ export default function AccountSettingsScreen() {
           </AnimatedPressable>
         </View>
 
-        <AnimatedPressable style={styles.saveBtn} onPress={handleSaveChanges} activeOpacity={0.9}>
-          <Text style={styles.saveBtnText}>Save Changes</Text>
-        </AnimatedPressable>
+        <AppButton
+          title="Save Changes"
+          onPress={handleSaveChanges}
+          variant="primary"
+          size="md"
+          style={styles.saveBtn}
+          titleStyle={styles.saveBtnText}
+          accessibilityLabel="Save account settings"
+        />
 
         {/* Footer Actions */}
-        <AnimatedPressable
-          style={[styles.supportRow, (isExporting || isDeleting) && styles.actionDisabled]}
+        <AppButton
+          title={isExporting ? 'Preparing export...' : 'Download my data'}
+          subtitle={isExporting ? undefined : 'Get a machine-readable account export.'}
+          icon={
+            isExporting ? (
+              <ActivityIndicator color={Colors.textPrimary} size="small" />
+            ) : (
+              <Ionicons name="download-outline" size={18} color={Colors.textPrimary} />
+            )
+          }
+          trailingIcon={!isExporting ? <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} /> : undefined}
           onPress={() => void handleDownloadData()}
-          activeOpacity={0.8}
           disabled={isExporting || isDeleting}
-        >
-          <Ionicons name="download-outline" size={20} color={Colors.textPrimary} style={{ marginRight: 12 }} />
-          {isExporting ? (
-            <View style={styles.inlineLoadingRow}>
-              <ActivityIndicator color={Colors.textPrimary} size="small" style={{ marginRight: 8 }} />
-              <Text style={styles.rowTitle}>Preparing export...</Text>
-            </View>
-          ) : (
-            <Text style={styles.rowTitle}>Download my data</Text>
-          )}
-        </AnimatedPressable>
+          variant="secondary"
+          size="lg"
+          align="start"
+          style={[styles.supportActionBtn, (isExporting || isDeleting) && styles.actionDisabled]}
+          titleStyle={styles.footerActionTitle}
+          subtitleStyle={styles.footerActionSubtitle}
+          iconContainerStyle={styles.footerActionIconWrap}
+          trailingIconContainerStyle={styles.footerActionChevronWrap}
+          accessibilityLabel="Download my account data"
+        />
 
-        <AnimatedPressable
-          style={[styles.dangerBtn, (isDeleting || isExporting) && styles.actionDisabled]}
+        <AppButton
+          title={isDeleting ? 'Deleting account...' : 'Delete Account'}
+          subtitle={isDeleting ? undefined : 'Permanently removes your profile and listing history.'}
+          icon={
+            isDeleting ? (
+              <ActivityIndicator color={Colors.danger} size="small" />
+            ) : (
+              <Ionicons name="trash-outline" size={18} color={Colors.danger} />
+            )
+          }
+          trailingIcon={!isDeleting ? <Ionicons name="chevron-forward" size={18} color={Colors.danger} /> : undefined}
           onPress={handleDeleteAccount}
-          activeOpacity={0.9}
           disabled={isDeleting || isExporting}
-        >
-          {isDeleting ? (
-            <View style={styles.inlineLoadingRow}>
-              <ActivityIndicator color={Colors.danger} size="small" style={{ marginRight: 8 }} />
-              <Text style={styles.dangerText}>Deleting account...</Text>
-            </View>
-          ) : (
-            <Text style={styles.dangerText}>Delete Account</Text>
-          )}
-        </AnimatedPressable>
+          variant="secondary"
+          size="lg"
+          align="start"
+          style={[styles.dangerActionBtn, (isDeleting || isExporting) && styles.actionDisabled]}
+          titleStyle={styles.dangerText}
+          subtitleStyle={styles.dangerSubtext}
+          iconContainerStyle={styles.footerActionIconWrapDanger}
+          trailingIconContainerStyle={styles.footerActionChevronWrapDanger}
+          accessibilityLabel="Delete account"
+        />
       </ScrollView>
 
       <Modal
@@ -380,25 +402,29 @@ export default function AccountSettingsScreen() {
             </View>
 
             <View style={styles.modalActionRow}>
-              <AnimatedPressable
-                style={[styles.modalBtn, styles.modalBtnMuted]}
+              <AppButton
+                title="Cancel"
                 onPress={closeDisableTwoFactorModal}
                 disabled={isTogglingTwoFactor}
-              >
-                <Text style={styles.modalBtnMutedText}>Cancel</Text>
-              </AnimatedPressable>
+                variant="secondary"
+                size="sm"
+                style={[styles.modalBtn, styles.modalBtnMuted]}
+                titleStyle={styles.modalBtnMutedText}
+                accessibilityLabel="Cancel disabling two-factor authentication"
+              />
 
-              <AnimatedPressable
-                style={[styles.modalBtn, styles.modalBtnDanger, isTogglingTwoFactor && styles.actionDisabled]}
+              <AppButton
+                title={isTogglingTwoFactor ? 'Disabling...' : 'Disable'}
+                icon={isTogglingTwoFactor ? <ActivityIndicator color={Colors.background} size="small" /> : undefined}
                 onPress={() => void confirmDisableTwoFactor()}
                 disabled={isTogglingTwoFactor}
-              >
-                {isTogglingTwoFactor ? (
-                  <ActivityIndicator color={Colors.background} size="small" />
-                ) : (
-                  <Text style={styles.modalBtnDangerText}>Disable</Text>
-                )}
-              </AnimatedPressable>
+                variant="secondary"
+                size="sm"
+                style={[styles.modalBtn, styles.modalBtnDanger, isTogglingTwoFactor && styles.actionDisabled]}
+                titleStyle={styles.modalBtnDangerText}
+                iconContainerStyle={styles.modalDangerIconWrap}
+                accessibilityLabel="Disable two-factor authentication"
+              />
             </View>
           </View>
         </View>
@@ -432,11 +458,69 @@ const styles = StyleSheet.create({
   linkBadgeActive: { backgroundColor: Colors.cardAlt, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 6 },
   linkBadgeTextActive: { color: Colors.textSecondary, fontFamily: 'Inter_600SemiBold', fontSize: 13 },
 
-  saveBtn: { marginTop: 24, backgroundColor: Colors.accent, borderRadius: 30, height: 56, alignItems: 'center', justifyContent: 'center' },
+  saveBtn: {
+    marginTop: 24,
+    backgroundColor: Colors.accent,
+    borderRadius: 30,
+    minHeight: 56,
+    borderWidth: 0,
+  },
   saveBtnText: { color: Colors.textInverse, fontSize: 16, fontFamily: 'Inter_700Bold' },
 
-  supportRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 24, marginTop: 16 },
-  inlineLoadingRow: { flexDirection: 'row', alignItems: 'center' },
+  supportActionBtn: {
+    marginTop: 16,
+    backgroundColor: Colors.card,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  footerActionIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.cardAlt,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  footerActionChevronWrap: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+  },
+  footerActionIconWrapDanger: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 77, 77, 0.14)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 77, 77, 0.28)',
+  },
+  footerActionChevronWrapDanger: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+  },
+  footerActionTitle: {
+    fontSize: 15,
+    fontFamily: 'Inter_700Bold',
+    color: Colors.textPrimary,
+  },
+  footerActionSubtitle: {
+    marginTop: 2,
+    fontSize: 12,
+    fontFamily: 'Inter_500Medium',
+    color: Colors.textMuted,
+  },
   actionDisabled: { opacity: 0.55 },
 
   modalOverlay: {
@@ -507,12 +591,30 @@ const styles = StyleSheet.create({
   modalBtnDanger: {
     backgroundColor: Colors.danger,
   },
+  modalDangerIconWrap: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: 'transparent',
+  },
   modalBtnDangerText: {
     color: Colors.background,
     fontFamily: 'Inter_700Bold',
     fontSize: 14,
   },
 
-  dangerBtn: { borderWidth: 1, borderColor: 'rgba(255, 60, 60, 0.2)', backgroundColor: 'rgba(255, 60, 60, 0.08)', borderRadius: 30, height: 56, alignItems: 'center', justifyContent: 'center', marginTop: 16 },
-  dangerText: { color: Colors.danger, fontSize: 16, fontFamily: 'Inter_700Bold' },
+  dangerActionBtn: {
+    borderWidth: 1,
+    borderColor: 'rgba(255, 77, 77, 0.26)',
+    backgroundColor: 'rgba(255, 77, 77, 0.1)',
+    borderRadius: 18,
+    marginTop: 16,
+  },
+  dangerText: { color: Colors.danger, fontSize: 15, fontFamily: 'Inter_700Bold' },
+  dangerSubtext: {
+    marginTop: 2,
+    color: Colors.textMuted,
+    fontSize: 12,
+    fontFamily: 'Inter_500Medium',
+  },
 });

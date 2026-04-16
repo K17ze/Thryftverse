@@ -42,6 +42,8 @@ export function AnimatedPressable({
   disabled = false,
   activeOpacity,
   hapticFeedback = 'none',
+  accessibilityState,
+  accessibilityRole,
   ...rest
 }: Props) {
   const haptic = useHaptic();
@@ -77,12 +79,20 @@ export function AnimatedPressable({
     opacity: opacity.value,
   }));
 
+  const mergedAccessibilityState = React.useMemo(
+    () => ({
+      ...(accessibilityState ?? {}),
+      disabled: !!disabled,
+    }),
+    [accessibilityState, disabled]
+  );
+
   return (
     <AnimatedNativePressable
       style={[style, animStyle]}
       accessible={true}
-      accessibilityRole={rest.accessibilityRole ?? 'button'}
-      accessibilityState={{ disabled: !!disabled }}
+      accessibilityRole={accessibilityRole ?? 'button'}
+      accessibilityState={mergedAccessibilityState}
       onPressIn={(event) => {
         if (!disabled && !disableAnimation) {
           if (reducedMotionEnabled) {

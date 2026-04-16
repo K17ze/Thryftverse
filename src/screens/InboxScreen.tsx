@@ -7,8 +7,6 @@ import {
   StyleSheet,
   StatusBar,
   RefreshControl,
-  TextInput,
-  ScrollView,
 } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { CachedImage } from '../components/CachedImage';
@@ -30,6 +28,9 @@ import { RefreshIndicator } from '../components/RefreshIndicator';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useBackendData } from '../context/BackendDataContext';
 import { fetchConversationsFromApi } from '../services/chatApi';
+import { AppInput } from '../components/ui/AppInput';
+import { AppButton } from '../components/ui/AppButton';
+import { AppSegmentControl } from '../components/ui/AppSegmentControl';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 const ACCENT = Colors.accent;
@@ -38,11 +39,11 @@ const PANEL_BG = Colors.card;
 type ConvoItem = Conversation;
 type InboxSegment = 'all' | 'unread' | 'groups' | 'direct';
 
-const SEGMENT_OPTIONS: Array<{ key: InboxSegment; label: string }> = [
-  { key: 'direct', label: 'Direct' },
-  { key: 'unread', label: 'Unread' },
-  { key: 'groups', label: 'Groups' },
-  { key: 'all', label: 'All' },
+const SEGMENT_OPTIONS: Array<{ value: InboxSegment; label: string; accessibilityLabel: string }> = [
+  { value: 'direct', label: 'Direct', accessibilityLabel: 'Filter direct messages' },
+  { value: 'unread', label: 'Unread', accessibilityLabel: 'Filter unread conversations' },
+  { value: 'groups', label: 'Groups', accessibilityLabel: 'Filter group conversations' },
+  { value: 'all', label: 'All', accessibilityLabel: 'Show all conversations' },
 ];
 
 export default function InboxScreen() {
@@ -140,6 +141,9 @@ export default function InboxScreen() {
     <AnimatedPressable
       style={styles.swipeDelete}
       onPress={() => handleDelete(id)}
+      accessibilityLabel="Delete conversation"
+      accessibilityRole="button"
+      accessibilityHint="Deletes this conversation thread"
     >
       <Ionicons name="trash-outline" size={22} color="#fff" />
       <Text style={styles.swipeActionText}>Delete</Text>
@@ -150,6 +154,9 @@ export default function InboxScreen() {
     <AnimatedPressable
       style={styles.swipeArchive}
       onPress={() => handleArchive(id)}
+      accessibilityLabel="Archive conversation"
+      accessibilityRole="button"
+      accessibilityHint="Moves this conversation to archived threads"
     >
       <Ionicons name="archive-outline" size={22} color="#fff" />
       <Text style={styles.swipeActionText}>Archive</Text>
@@ -181,6 +188,8 @@ export default function InboxScreen() {
             }}
             activeOpacity={0.85}
             accessibilityLabel={`${displayTitle}${item.unread ? ', unread' : ''}, ${item.lastMessage}`}
+            accessibilityRole="button"
+            accessibilityHint="Opens the conversation thread"
           >
             <View style={styles.avatarWrap}>
               {isGroup ? (
@@ -246,59 +255,66 @@ export default function InboxScreen() {
             <Text style={styles.hugeTitle}>Inbox</Text>
           </View>
           <View style={styles.headerActions}>
-            <AnimatedPressable
-              style={styles.addGroupBtn}
+            <AppButton
+              title="New Group"
+              icon={<Ionicons name="people-outline" size={16} color={Colors.textPrimary} />}
               onPress={() => navigation.navigate('CreateGroupChat')}
-              activeOpacity={0.85}
+              variant="secondary"
+              size="sm"
+              style={styles.addGroupBtn}
+              titleStyle={styles.addGroupBtnText}
+              iconContainerStyle={styles.addGroupIconWrap}
               accessibilityLabel="Create new group chat"
-            >
-              <Ionicons name="people-outline" size={18} color={Colors.textPrimary} />
-              <Text style={styles.addGroupBtnText}>New Group</Text>
-            </AnimatedPressable>
+              accessibilityHint="Opens group chat creation"
+            />
             <AnimatedPressable
               style={styles.policiesBtn}
               onPress={() => navigation.navigate('Settings')}
               activeOpacity={0.85}
               accessibilityLabel="Chat settings and policies"
+              accessibilityRole="button"
+              accessibilityHint="Opens messaging and safety settings"
             >
               <Ionicons name="shield-checkmark-outline" size={18} color={Colors.textPrimary} />
             </AnimatedPressable>
           </View>
         </View>
 
-        <View style={styles.searchWrap}>
-          <Ionicons name="search" size={18} color={Colors.textMuted} />
-          <TextInput
-            style={styles.searchInput}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            placeholder="Search conversations, members, listings"
-            placeholderTextColor={Colors.textMuted}
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          {searchQuery.length > 0 ? (
-            <AnimatedPressable onPress={() => setSearchQuery('')} style={styles.clearSearchBtn}>
+        <AppInput
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          placeholder="Search conversations, members, listings"
+          autoCapitalize="none"
+          autoCorrect={false}
+          accessibilityLabel="Search conversations"
+          accessibilityHint="Filters inbox conversations by keyword"
+          inputContainerStyle={styles.searchWrap}
+          inputStyle={styles.searchInput}
+          prefix={<Ionicons name="search" size={18} color={Colors.textMuted} />}
+          suffix={searchQuery.length > 0 ? (
+            <AnimatedPressable
+              onPress={() => setSearchQuery('')}
+              style={styles.clearSearchBtn}
+              accessibilityLabel="Clear inbox search"
+              accessibilityRole="button"
+              accessibilityHint="Clears search query"
+            >
               <Ionicons name="close" size={16} color={Colors.textSecondary} />
             </AnimatedPressable>
           ) : null}
-        </View>
+        />
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.segmentStrip}>
-          {SEGMENT_OPTIONS.map((option) => {
-            const active = option.key === segment;
-            return (
-              <AnimatedPressable
-                key={option.key}
-                style={[styles.segmentChip, active && styles.segmentChipActive]}
-                onPress={() => setSegment(option.key)}
-                activeOpacity={0.85}
-              >
-                <Text style={[styles.segmentChipText, active && styles.segmentChipTextActive]}>{option.label}</Text>
-              </AnimatedPressable>
-            );
-          })}
-        </ScrollView>
+        <AppSegmentControl
+          style={styles.segmentStrip}
+          options={SEGMENT_OPTIONS}
+          value={segment}
+          onChange={setSegment}
+          fullWidth
+          optionStyle={styles.segmentChip}
+          optionActiveStyle={styles.segmentChipActive}
+          optionTextStyle={styles.segmentChipText}
+          optionTextActiveStyle={styles.segmentChipTextActive}
+        />
 
         <Text style={styles.listMeta}>
           {visibleConversations.length} conversation{visibleConversations.length === 1 ? '' : 's'} | {conversations.filter((item) => item.unread).length} unread
@@ -350,12 +366,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingTop: 10,
     paddingBottom: 18,
+    backgroundColor: Colors.surface,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.border,
   },
   hugeTitle: {
-    fontSize: 32,
+    fontSize: 30,
     fontFamily: 'Inter_700Bold',
     color: Colors.textPrimary,
-    letterSpacing: -0.5,
+    letterSpacing: -1,
   },
   headerRow: {
     flexDirection: 'row',
@@ -370,12 +389,16 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   addGroupBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    borderRadius: 18,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    borderRadius: 16,
+    minHeight: 40,
+    borderWidth: 1,
+    backgroundColor: Colors.card,
+    borderColor: Colors.border,
+  },
+  addGroupIconWrap: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     backgroundColor: Colors.cardAlt,
   },
   addGroupBtnText: {
@@ -389,14 +412,16 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: Colors.cardAlt,
+    backgroundColor: Colors.card,
+    borderWidth: 1,
+    borderColor: Colors.border,
   },
   searchWrap: {
     height: 46,
-    borderRadius: 14,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 16,
+    borderWidth: 1,
     borderColor: Colors.borderLight,
-    backgroundColor: Colors.cardAlt,
+    backgroundColor: Colors.card,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
@@ -419,14 +444,15 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.cardAlt,
   },
   segmentStrip: {
-    gap: 8,
-    paddingRight: 20,
+    marginTop: 2,
     marginBottom: 10,
   },
   segmentChip: {
     height: 34,
     borderRadius: 17,
-    backgroundColor: Colors.cardAlt,
+    backgroundColor: Colors.card,
+    borderWidth: 1,
+    borderColor: Colors.border,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 14,
@@ -457,8 +483,10 @@ const styles = StyleSheet.create({
   },
 
   messageCard: {
-    backgroundColor: PANEL_BG,
-    borderRadius: 20,
+    backgroundColor: Colors.card,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: Colors.border,
     padding: 16,
     flexDirection: 'row',
     gap: 14,
@@ -493,9 +521,9 @@ const styles = StyleSheet.create({
   messageBody: { flex: 1 },
   messageTop: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
   unreadBadge: {
-    borderRadius: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+    borderRadius: 9,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
     backgroundColor: Colors.accent,
     alignSelf: 'flex-start',
     marginBottom: 8,
@@ -528,6 +556,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: Colors.surface,
     borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
     padding: 8,
     gap: 10,
   },
@@ -549,7 +579,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     width: 90,
-    borderRadius: 20,
+    borderRadius: 16,
     marginLeft: 8,
     gap: 4,
   },
@@ -558,7 +588,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     width: 90,
-    borderRadius: 20,
+    borderRadius: 16,
     marginRight: 8,
     gap: 4,
   },

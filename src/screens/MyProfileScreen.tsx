@@ -34,6 +34,7 @@ import { AnimatedPressable } from '../components/AnimatedPressable';
 import { AnimatedCounter } from '../components/AnimatedCounter';
 import { CachedImage } from '../components/CachedImage';
 import { useToast } from '../context/ToastContext';
+import { AppButton } from '../components/ui/AppButton';
 import {
   setStoredUserAvatar,
   setStoredUserAvatarForUser,
@@ -281,7 +282,6 @@ export default function MyProfileScreen() {
         color: IS_LIGHT ? '#5c4830' : '#ccb893',
       },
       { icon: 'bookmark-outline', label: 'Wishlist', route: 'Favourites', color: IS_LIGHT ? '#704b3b' : '#e6c8b4' },
-      { icon: 'color-palette-outline', label: 'Style', route: 'Personalisation', color: IS_LIGHT ? '#6a5a45' : '#d6c6b4' },
       { icon: 'settings-outline', label: 'Settings', route: 'Settings', color: '#a0a0a0' },
     ],
     [formatFromFiat, coOwnHoldings.length]
@@ -307,23 +307,24 @@ export default function MyProfileScreen() {
             onPress={() => navigation.navigate('Personalisation')}
             accessibilityLabel="Open personalisation settings"
             accessibilityRole="button"
+            accessibilityHint="Opens your style and experience preferences"
           >
             <Ionicons name="apps-outline" size={18} color="#fff" />
           </AnimatedPressable>
 
           <View style={styles.topUtilityRight}>
-            <AnimatedPressable
+            <AppButton
+              title="Cover"
+              icon={<Ionicons name="camera" size={16} color="#fff" />}
               onPress={pickCover}
+              variant="secondary"
+              size="sm"
               style={styles.topUtilityPillBtn}
-              activeOpacity={0.9}
-              hitSlop={8}
+              titleStyle={styles.topUtilityPillText}
+              iconContainerStyle={styles.topUtilityPillIconWrap}
               accessibilityLabel="Change cover photo"
-              accessibilityRole="button"
               accessibilityHint="Opens photo picker to update your cover photo"
-            >
-              <Ionicons name="camera" size={16} color="#fff" />
-              <Text style={styles.topUtilityPillText}>Cover</Text>
-            </AnimatedPressable>
+            />
           </View>
         </Reanimated.View>
       </View>
@@ -364,25 +365,27 @@ export default function MyProfileScreen() {
           </Text>
 
           <View style={styles.profileActionRow}>
-            <AnimatedPressable
-              activeOpacity={0.85}
-              style={styles.profileActionPrimary}
+            <AppButton
+              title="Edit profile"
+              variant="primary"
+              size="sm"
               onPress={() => navigation.navigate('EditProfile')}
+              style={styles.profileActionPrimary}
+              titleStyle={styles.profileActionPrimaryText}
               accessibilityLabel="Edit your profile"
-              accessibilityRole="button"
-            >
-              <Text style={styles.profileActionPrimaryText}>Edit profile</Text>
-            </AnimatedPressable>
+              accessibilityHint="Opens profile editor for username, bio, and preferences"
+            />
 
-            <AnimatedPressable
-              activeOpacity={0.85}
-              style={styles.profileActionSecondary}
+            <AppButton
+              title="Share profile"
+              variant="secondary"
+              size="sm"
               onPress={handleShare}
+              style={styles.profileActionSecondary}
+              titleStyle={styles.profileActionSecondaryText}
               accessibilityLabel="Share your profile"
-              accessibilityRole="button"
-            >
-              <Text style={styles.profileActionSecondaryText}>Share profile</Text>
-            </AnimatedPressable>
+              accessibilityHint="Opens share sheet with your profile link"
+            />
 
             <AnimatedPressable
               style={styles.profileActionIcon}
@@ -390,6 +393,7 @@ export default function MyProfileScreen() {
               activeOpacity={0.8}
               accessibilityLabel="Open settings"
               accessibilityRole="button"
+              accessibilityHint="Opens account and app settings"
             >
               <Ionicons name="settings-outline" size={18} color={Colors.textPrimary} />
             </AnimatedPressable>
@@ -402,6 +406,7 @@ export default function MyProfileScreen() {
               activeOpacity={0.8}
               accessibilityLabel={`${MY_USER.listingCount} listings. Tap to view full profile.`}
               accessibilityRole="button"
+              accessibilityHint="Opens your complete public profile"
             >
               <AnimatedCounter value={MY_USER.listingCount} style={styles.statNumber} duration={900} />
               <Text style={styles.statLabel}>LISTED</Text>
@@ -431,6 +436,9 @@ export default function MyProfileScreen() {
                   style={[styles.quickItem, (index + 1) % 3 === 0 && styles.quickItemLastInRow]}
                   activeOpacity={0.8}
                   onPress={() => navigation.navigate(item.route as any)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Open ${item.label}`}
+                  accessibilityHint={item.value ? `Shows ${item.label.toLowerCase()} with ${item.value}` : `Navigates to ${item.label.toLowerCase()}`}
                 >
                   <View style={[styles.quickIconCircle, { borderColor: item.color + '40' }]}>
                     <Ionicons name={item.icon as any} size={18} color={item.color} />
@@ -449,6 +457,9 @@ export default function MyProfileScreen() {
                 style={[styles.mediaTile, (index + 1) % 3 === 0 && styles.mediaTileLast]}
                 activeOpacity={0.9}
                 onPress={() => navigation.navigate('ItemDetail', { itemId: item.id })}
+                accessibilityRole="button"
+                accessibilityLabel={`Open listing ${item.title}`}
+                accessibilityHint="Opens the item detail page"
               >
                 <CachedImage
                   uri={item.images[0]}
@@ -474,6 +485,9 @@ export default function MyProfileScreen() {
               style={styles.portfolioSummaryLinkBtn}
               activeOpacity={0.8}
               onPress={() => navigation.navigate('Portfolio')}
+              accessibilityRole="button"
+              accessibilityLabel="Open co-own portfolio"
+              accessibilityHint="Navigates to your portfolio holdings"
             >
               <Text style={styles.portfolioSummaryLinkText}>Open</Text>
               <Ionicons name="arrow-forward" size={14} color={ACCENT} />
@@ -502,6 +516,9 @@ export default function MyProfileScreen() {
               style={styles.portfolioSummaryCta}
               activeOpacity={0.85}
               onPress={() => navigation.navigate('CoOwnHub')}
+              accessibilityRole="button"
+              accessibilityLabel="Explore co-own hub"
+              accessibilityHint="Navigates to co-own opportunities"
             >
               <Ionicons name="sparkles-outline" size={14} color={Colors.background} />
               <Text style={styles.portfolioSummaryCtaText}>Explore Co-Own Hub</Text>
@@ -519,6 +536,9 @@ export default function MyProfileScreen() {
             <AnimatedPressable
               style={styles.viewAllBtn}
               onPress={() => navigation.navigate('UserProfile', { userId: MY_USER.id, isMe: true })}
+              accessibilityRole="button"
+              accessibilityLabel="View all listings"
+              accessibilityHint="Opens your complete wardrobe listings"
             >
               <Text style={styles.viewAllText}>View All</Text>
               <Ionicons name="arrow-forward" size={14} color={ACCENT} />
@@ -536,6 +556,9 @@ export default function MyProfileScreen() {
                 style={styles.wardrobeItem}
                 activeOpacity={0.9}
                 onPress={() => navigation.navigate('ItemDetail', { itemId: item.id })}
+                accessibilityRole="button"
+                accessibilityLabel={`Open wardrobe listing ${item.title}`}
+                accessibilityHint="Opens listing details"
               >
                 <CachedImage uri={item.images[0]} style={styles.wardrobeImage} containerStyle={styles.wardrobeImageWrap} contentFit="cover" />
                 <View style={styles.wardrobeInfo}>
@@ -627,12 +650,17 @@ const styles = StyleSheet.create({
   },
   topUtilityPillBtn: {
     backgroundColor: 'rgba(0,0,0,0.58)',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    minHeight: 36,
+    paddingHorizontal: 10,
     borderRadius: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.24)',
+  },
+  topUtilityPillIconWrap: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: 'transparent',
   },
   topUtilityPillText: {
     color: '#fff',
@@ -727,11 +755,8 @@ const styles = StyleSheet.create({
   },
   profileActionPrimary: {
     flex: 1,
-    paddingVertical: 11,
+    minHeight: 42,
     borderRadius: 14,
-    backgroundColor: Colors.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   profileActionPrimaryText: {
     color: Colors.background,
@@ -741,13 +766,8 @@ const styles = StyleSheet.create({
   },
   profileActionSecondary: {
     flex: 1,
-    paddingVertical: 11,
+    minHeight: 42,
     borderRadius: 14,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    backgroundColor: PANEL_BG,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   profileActionSecondaryText: {
     color: Colors.textPrimary,

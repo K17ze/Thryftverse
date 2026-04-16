@@ -37,6 +37,10 @@ import {
 import { useToast } from '../context/ToastContext';
 import { BottomSheetPicker } from '../components/BottomSheetPicker';
 import { parseApiError } from '../lib/apiClient';
+import { AppInput } from '../components/ui/AppInput';
+import { AppSegmentControl } from '../components/ui/AppSegmentControl';
+import { AppButton } from '../components/ui/AppButton';
+import { AppStatusPill } from '../components/ui/AppStatusPill';
 
 type Props = StackScreenProps<RootStackParamList, 'Chat'>;
 
@@ -54,10 +58,10 @@ const FOOTER_BG = IS_LIGHT ? 'rgba(236,234,230,0.96)' : 'rgba(10,10,10,0.95)';
 type MsgType = 'text' | 'offer' | 'offer_declined' | 'purchase_status';
 type MessageFilterMode = 'all' | 'offers' | 'updates';
 
-const MESSAGE_FILTERS: Array<{ key: MessageFilterMode; label: string }> = [
-  { key: 'all', label: 'All' },
-  { key: 'offers', label: 'Offers' },
-  { key: 'updates', label: 'Updates' },
+const MESSAGE_FILTERS: Array<{ value: MessageFilterMode; label: string; accessibilityLabel: string }> = [
+  { value: 'all', label: 'All', accessibilityLabel: 'Show all messages' },
+  { value: 'offers', label: 'Offers', accessibilityLabel: 'Show offer messages' },
+  { value: 'updates', label: 'Updates', accessibilityLabel: 'Show status updates' },
 ];
 
 const NOTIFICATION_MODES = ['All activity', 'Mentions only', 'Muted'];
@@ -441,7 +445,12 @@ export default function ChatScreen({ navigation, route }: Props) {
         <Reanimated.View key={msg.id} entering={FadeIn.delay(200)} layout={Layout.springify()} style={styles.statusBlock}>
           <Text style={styles.statusTitle}>{lines[0]}</Text>
           <Text style={styles.statusBody}>{lines.slice(1).join('\n')}</Text>
-          <AnimatedPressable onPress={() => navigation.navigate('OrderDetail', { orderId: CHAT_ORDER_ID })}>
+          <AnimatedPressable
+            onPress={() => navigation.navigate('OrderDetail', { orderId: CHAT_ORDER_ID })}
+            accessibilityRole="button"
+            accessibilityLabel="Open tracking information"
+            accessibilityHint="Opens the related order details and shipment tracking"
+          >
             <Text style={styles.accentLink}>Tracking information</Text>
           </AnimatedPressable>
         </Reanimated.View>
@@ -470,27 +479,59 @@ export default function ChatScreen({ navigation, route }: Props) {
             </View>
             
             {/* Context / Status */}
-            {offerStatus === 'declined' && <Text style={styles.offerDeclined}>Declined</Text>}
-            {offerStatus === 'accepted' && <Text style={styles.offerAccepted}>Accepted</Text>}
-            {!offerStatus && isMe && <Text style={styles.offerPending}>Waiting for response</Text>}
+            {offerStatus === 'declined' && (
+              <AppStatusPill
+                style={styles.offerStatusPill}
+                tone="negative"
+                iconName="close-circle-outline"
+                label="Declined"
+              />
+            )}
+            {offerStatus === 'accepted' && (
+              <AppStatusPill
+                style={styles.offerStatusPill}
+                tone="positive"
+                iconName="checkmark-circle-outline"
+                label="Accepted"
+              />
+            )}
+            {!offerStatus && isMe && (
+              <AppStatusPill
+                style={styles.offerStatusPill}
+                tone="neutral"
+                iconName="time-outline"
+                label="Waiting for response"
+              />
+            )}
 
             {/* Interactive Buttons for Inbound Offers */}
             {!isMe && !offerStatus && (
               <View style={styles.offerActionRow}>
-                <AnimatedPressable 
-                  style={styles.offerDeclineBtn} 
-                  activeOpacity={0.8}
+                <AppButton
+                  style={styles.offerDeclineBtn}
+                  variant="secondary"
+                  size="sm"
+                  align="center"
+                  icon={<Ionicons name="close-outline" size={15} color={TEXT} />}
+                  iconContainerStyle={styles.actionIconWrap}
+                  title="Pass"
+                  titleStyle={styles.offerDeclineText}
                   onPress={() => handleDeclineOffer(msg.id)}
-                >
-                  <Text style={styles.offerDeclineText}>Decline</Text>
-                </AnimatedPressable>
-                <AnimatedPressable 
-                  style={styles.offerAcceptBtn} 
-                  activeOpacity={0.8}
+                  accessibilityLabel="Decline incoming offer"
+                />
+                <AppButton
+                  style={styles.offerAcceptBtn}
+                  variant="primary"
+                  size="sm"
+                  align="center"
+                  icon={<Ionicons name="flash-outline" size={15} color={Colors.textInverse} />}
+                  iconContainerStyle={styles.actionIconWrap}
+                  title="Accept offer"
+                  titleStyle={styles.offerAcceptText}
                   onPress={() => handleAcceptOffer(msg.id)}
-                >
-                  <Text style={styles.offerAcceptText}>Accept</Text>
-                </AnimatedPressable>
+                  accessibilityLabel="Accept incoming offer"
+                  accessibilityHint="Accepts this offer and opens checkout flow."
+                />
               </View>
             )}
           </View>
@@ -522,7 +563,13 @@ export default function ChatScreen({ navigation, route }: Props) {
       
       {/* Editorial Header */}
       <View style={styles.header}>
-        <AnimatedPressable style={styles.headerIconBtn} onPress={() => navigation.goBack()}>
+        <AnimatedPressable
+          style={styles.headerIconBtn}
+          onPress={() => navigation.goBack()}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+          accessibilityHint="Returns to the previous screen"
+        >
           <Ionicons name="arrow-back" size={24} color={TEXT} />
         </AnimatedPressable>
         <Text style={styles.headerTitle} numberOfLines={1}>{chatTitle}</Text>
@@ -530,6 +577,9 @@ export default function ChatScreen({ navigation, route }: Props) {
           <AnimatedPressable
             style={styles.headerIconBtn}
             onPress={() => navigation.navigate('GroupBotDirectory', { conversationId })}
+            accessibilityRole="button"
+            accessibilityLabel="Open group bot directory"
+            accessibilityHint="Manage bots available in this group chat"
           >
             <Ionicons name="hardware-chip-outline" size={22} color={TEXT} />
           </AnimatedPressable>
@@ -541,6 +591,9 @@ export default function ChatScreen({ navigation, route }: Props) {
                 navigation.navigate('UserProfile', { userId: resolvedPartnerId });
               }
             }}
+            accessibilityRole="button"
+            accessibilityLabel="Open user profile"
+            accessibilityHint="View profile details for this chat participant"
           >
             <Ionicons name="information-circle-outline" size={24} color={TEXT} />
           </AnimatedPressable>
@@ -586,6 +639,9 @@ export default function ChatScreen({ navigation, route }: Props) {
                 }}
                 activeOpacity={0.85}
                 disabled={isCreatingInvite}
+                accessibilityRole="button"
+                accessibilityLabel={isCreatingInvite ? 'Creating invite link' : 'Share invite link'}
+                accessibilityHint="Generates and shares a new group invite link"
               >
                 <Ionicons name="share-social-outline" size={14} color={TEXT} />
                 <Text style={styles.groupInviteBtnText}>{isCreatingInvite ? 'Creating...' : 'Share Invite Link'}</Text>
@@ -627,39 +683,37 @@ export default function ChatScreen({ navigation, route }: Props) {
       )}
 
       <View style={styles.opsContainer}>
-        <View style={styles.opsSearchWrap}>
-          <Ionicons name="search" size={16} color={MUTED} />
-          <TextInput
-            style={styles.opsSearchInput}
-            placeholder="Search in conversation"
-            placeholderTextColor={MUTED}
-            value={threadSearch}
-            onChangeText={setThreadSearch}
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          {threadSearch.length > 0 ? (
-            <AnimatedPressable style={styles.clearOpsSearchBtn} onPress={() => setThreadSearch('')}>
+        <AppInput
+          value={threadSearch}
+          onChangeText={setThreadSearch}
+          placeholder="Search in conversation"
+          autoCapitalize="none"
+          autoCorrect={false}
+          inputContainerStyle={styles.opsSearchWrap}
+          inputStyle={styles.opsSearchInput}
+          prefix={<Ionicons name="search" size={16} color={MUTED} />}
+          suffix={threadSearch.length > 0 ? (
+            <AnimatedPressable
+              style={styles.clearOpsSearchBtn}
+              onPress={() => setThreadSearch('')}
+              accessibilityLabel="Clear thread search"
+            >
               <Ionicons name="close" size={14} color={TEXT} />
             </AnimatedPressable>
           ) : null}
-        </View>
+        />
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.opsFilterStrip}>
-          {MESSAGE_FILTERS.map((option) => {
-            const active = option.key === messageFilter;
-            return (
-              <AnimatedPressable
-                key={option.key}
-                style={[styles.opsFilterChip, active && styles.opsFilterChipActive]}
-                onPress={() => setMessageFilter(option.key)}
-                activeOpacity={0.85}
-              >
-                <Text style={[styles.opsFilterChipText, active && styles.opsFilterChipTextActive]}>{option.label}</Text>
-              </AnimatedPressable>
-            );
-          })}
-        </ScrollView>
+        <AppSegmentControl
+          style={styles.opsFilterStrip}
+          options={MESSAGE_FILTERS}
+          value={messageFilter}
+          onChange={setMessageFilter}
+          fullWidth
+          optionStyle={styles.opsFilterChip}
+          optionActiveStyle={styles.opsFilterChipActive}
+          optionTextStyle={styles.opsFilterChipText}
+          optionTextActiveStyle={styles.opsFilterChipTextActive}
+        />
 
         <View style={styles.opsCommandRow}>
           <View style={styles.opsMetricCard}>
@@ -674,6 +728,9 @@ export default function ChatScreen({ navigation, route }: Props) {
             style={styles.opsActionBtn}
             onPress={() => setShowControls((prev) => !prev)}
             activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel={showControls ? 'Close operations panel' : 'Open operations panel'}
+            accessibilityHint="Shows or hides advanced conversation controls"
           >
             <Ionicons name={showControls ? 'close-circle-outline' : 'options-outline'} size={18} color={TEXT} />
             <Text style={styles.opsActionText}>{showControls ? 'Close Ops' : 'Open Ops'}</Text>
@@ -687,7 +744,13 @@ export default function ChatScreen({ navigation, route }: Props) {
                 <Text style={styles.controlTitle}>Notification Scope</Text>
                 <Text style={styles.controlValue}>{notificationMode}</Text>
               </View>
-              <AnimatedPressable style={styles.controlPickerBtn} onPress={() => setShowNotificationPicker(true)}>
+              <AnimatedPressable
+                style={styles.controlPickerBtn}
+                onPress={() => setShowNotificationPicker(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Change notification scope"
+                accessibilityHint="Opens notification options"
+              >
                 <Text style={styles.controlPickerText}>Change</Text>
               </AnimatedPressable>
             </View>
@@ -697,7 +760,13 @@ export default function ChatScreen({ navigation, route }: Props) {
                 <Text style={styles.controlTitle}>Retention Policy</Text>
                 <Text style={styles.controlValue}>{retentionMode}</Text>
               </View>
-              <AnimatedPressable style={styles.controlPickerBtn} onPress={() => setShowRetentionPicker(true)}>
+              <AnimatedPressable
+                style={styles.controlPickerBtn}
+                onPress={() => setShowRetentionPicker(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Adjust retention policy"
+                accessibilityHint="Opens message retention options"
+              >
                 <Text style={styles.controlPickerText}>Adjust</Text>
               </AnimatedPressable>
             </View>
@@ -733,14 +802,30 @@ export default function ChatScreen({ navigation, route }: Props) {
             </View>
 
             <View style={styles.controlActionRow}>
-              <AnimatedPressable style={styles.secondaryControlBtn} onPress={handleExportConversationSummary}>
-                <Ionicons name="document-text-outline" size={16} color={TEXT} />
-                <Text style={styles.secondaryControlText}>Export Summary</Text>
-              </AnimatedPressable>
-              <AnimatedPressable style={styles.secondaryControlBtn} onPress={handleClearVisibleTimeline}>
-                <Ionicons name="trash-outline" size={16} color={TEXT} />
-                <Text style={styles.secondaryControlText}>Clear Visible</Text>
-              </AnimatedPressable>
+              <AppButton
+                style={styles.secondaryControlBtn}
+                variant="secondary"
+                size="sm"
+                align="center"
+                icon={<Ionicons name="document-text-outline" size={16} color={TEXT} />}
+                iconContainerStyle={styles.actionIconWrap}
+                title="Export Summary"
+                titleStyle={styles.secondaryControlText}
+                onPress={handleExportConversationSummary}
+                accessibilityLabel="Export conversation summary"
+              />
+              <AppButton
+                style={styles.secondaryControlBtn}
+                variant="secondary"
+                size="sm"
+                align="center"
+                icon={<Ionicons name="trash-outline" size={16} color={TEXT} />}
+                iconContainerStyle={styles.actionIconWrap}
+                title="Clear Visible"
+                titleStyle={styles.secondaryControlText}
+                onPress={handleClearVisibleTimeline}
+                accessibilityLabel="Clear visible messages"
+              />
             </View>
           </View>
         ) : null}
@@ -786,7 +871,7 @@ export default function ChatScreen({ navigation, route }: Props) {
           ) : null}
 
           <View style={styles.inputFloatingPill}>
-            <AnimatedPressable style={styles.cameraBtn} onPress={handleAttachPhoto}>
+            <AnimatedPressable style={styles.cameraBtn} onPress={handleAttachPhoto} accessibilityLabel="Attach photo">
               <Ionicons name="camera-outline" size={22} color={MUTED} />
             </AnimatedPressable>
             <TextInput
@@ -800,7 +885,13 @@ export default function ChatScreen({ navigation, route }: Props) {
               selectionColor={Colors.accent}
             />
             {input.length > 0 && (
-              <AnimatedPressable onPress={sendMessage} style={styles.sendBtn}>
+              <AnimatedPressable
+                onPress={sendMessage}
+                style={styles.sendBtn}
+                accessibilityRole="button"
+                accessibilityLabel="Send message"
+                accessibilityHint="Sends the current message"
+              >
                 <Ionicons name="arrow-up" size={20} color={Colors.textInverse} />
               </AnimatedPressable>
             )}
@@ -1043,8 +1134,7 @@ const styles = StyleSheet.create({
     borderColor: BORDER,
   },
   opsFilterStrip: {
-    gap: 8,
-    paddingRight: 20,
+    marginTop: 2,
   },
   opsFilterChip: {
     height: 30,
@@ -1178,13 +1268,13 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 38,
     borderRadius: 19,
-    borderWidth: 1,
-    borderColor: BORDER,
-    backgroundColor: CARD_ALT,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 6,
+    backgroundColor: 'transparent',
+  },
+  actionIconWrap: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: 'transparent',
   },
   secondaryControlText: {
     color: TEXT,
@@ -1269,33 +1359,30 @@ const styles = StyleSheet.create({
   offerOriginal: { fontSize: 16, fontFamily: 'Inter_500Medium', color: MUTED },
   strikethrough: { textDecorationLine: 'line-through' },
   
-  offerDeclined: { fontSize: 14, fontFamily: 'Inter_700Bold', color: '#FF6B6B', marginTop: 4 },
-  offerAccepted: { fontSize: 14, fontFamily: 'Inter_700Bold', color: ACCENT, marginTop: 4 },
-  offerPending: { fontSize: 13, fontFamily: 'Inter_500Medium', color: MUTED, marginTop: 4 },
+  offerStatusPill: {
+    marginTop: 8,
+    alignSelf: 'flex-start',
+  },
 
   offerActionRow: {
     flexDirection: 'row',
-    gap: 12,
-    marginTop: 16,
+    gap: 10,
+    marginTop: 14,
   },
   offerDeclineBtn: {
     flex: 1,
-    paddingVertical: 12,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: BORDER,
-    backgroundColor: CARD_ALT,
-    alignItems: 'center',
+    height: 44,
+    borderRadius: 16,
+    backgroundColor: 'transparent',
   },
-  offerDeclineText: { color: TEXT, fontSize: 14, fontFamily: 'Inter_600SemiBold' },
+  offerDeclineText: { color: TEXT, fontSize: 13, fontFamily: 'Inter_700Bold', letterSpacing: 0.2 },
   offerAcceptBtn: {
     flex: 1,
-    paddingVertical: 12,
-    borderRadius: 20,
-    backgroundColor: Colors.accent,
-    alignItems: 'center',
+    height: 44,
+    borderRadius: 16,
+    backgroundColor: 'transparent',
   },
-  offerAcceptText: { color: Colors.textInverse, fontSize: 14, fontFamily: 'Inter_700Bold' },
+  offerAcceptText: { color: Colors.textInverse, fontSize: 13, fontFamily: 'Inter_700Bold', letterSpacing: 0.2 },
 
   inputContainer: {
     paddingHorizontal: 16,

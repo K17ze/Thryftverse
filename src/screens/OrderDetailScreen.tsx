@@ -1,12 +1,14 @@
 import React from 'react';
 import {
-  AnimatedPressable } from '../components/AnimatedPressable';
+  AnimatedPressable,
+} from '../components/AnimatedPressable';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   StatusBar,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,10 +20,16 @@ import { MOCK_LISTINGS, MOCK_USERS } from '../data/mockData';
 import { mockFind, mockArrayOrEmpty } from '../utils/mockGate';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useBackendData } from '../context/BackendDataContext';
-import { getOrder } from '../services/commerceApi';
+import {
+  CommerceOrder,
+  OrderParcelEvent,
+  getOrder,
+  getOrderParcelEvents,
+} from '../services/commerceApi';
 import { calculatePlatformChargeGbp } from '../utils/currencyAuthoringFlows';
 import { CachedImage } from '../components/CachedImage';
 import { getListingCoverUri } from '../utils/media';
+import { AppButton } from '../components/ui/AppButton';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 type RouteT = RouteProp<RootStackParamList, 'OrderDetail'>;
@@ -46,10 +54,78 @@ function normalizeOrderStatus(status?: string): OrderStatus {
     return status;
   }
 
-  return 'shipped';
+  return 'created';
 }
 
-function buildTrackingSteps(status: OrderStatus, sellerUsername: string): TrackingStep[] {
+function formatTimelineDate(value?: string | null): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return undefined;
+  }
+
+  return parsed.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function getParcelEventDisplay(
+  eventType: OrderParcelEvent['eventType'],
+  sellerUsername: string
+): { label: string; subtitle: string } {
+  if (eventType === 'picked_up') {
+    return {
+      label: 'Picked up',
+      subtitle: 'Carrier has collected your parcel from the seller.',
+    };
+  }
+
+  if (eventType === 'in_transit') {
+    return {
+      label: 'In transit',
+      subtitle: 'Your parcel is moving through the carrier network.',
+    };
+  }
+
+  if (eventType === 'out_for_delivery') {
+    return {
+      label: 'Out for delivery',
+      subtitle: 'Your parcel is out for delivery today.',
+    };
+  }
+
+  if (eventType === 'delivered' || eventType === 'collection_confirmed') {
+    return {
+      label: 'Delivered',
+      subtitle: 'Delivery confirmed. You can now leave a review.',
+    };
+  }
+
+  if (eventType === 'delivery_failed') {
+    return {
+      label: 'Delivery failed',
+      subtitle: 'Carrier attempted delivery but could not complete it.',
+    };
+  }
+
+  return {
+    label: 'Returned to sender',
+    subtitle: `${sellerUsername}'s parcel is being returned by the carrier.`,
+  };
+}
+
+function buildTrackingSteps(
+  status: OrderStatus,
+  sellerUsername: string,
+  order: CommerceOrder | null,
+  parcelEvents: OrderParcelEvent[]
+): TrackingStep[] {
   if (status === 'cancelled') {
     return [
       {
@@ -62,52 +138,68 @@ function buildTrackingSteps(status: OrderStatus, sellerUsername: string): Tracki
     ];
   }
 
-  const activeIndexByStatus: Record<Exclude<OrderStatus, 'cancelled'>, number> = {
-    created: 0,
-    paid: 1,
-    shipped: 2,
-    delivered: 4,
-  };
-
-  const activeIndex = activeIndexByStatus[status as Exclude<OrderStatus, 'cancelled'>];
-  const allDone = status === 'delivered';
-
-  const steps: Array<Omit<TrackingStep, 'done' | 'active'>> = [
+  const steps: TrackingStep[] = [
     {
-      id: 's1',
+      id: 'order_confirmed',
       label: 'Order confirmed',
       subtitle: 'Payment received. Seller has been notified.',
-      date: '19 Mar 2026',
+      date: formatTimelineDate(order?.createdAt),
+      done: status !== 'created',
+      active: status === 'created',
     },
     {
-      id: 's2',
+      id: 'seller_preparing',
       label: 'Seller preparing',
       subtitle: `${sellerUsername} is packing your order.`,
-      date: '20 Mar 2026',
-    },
-    {
-      id: 's3',
-      label: 'In transit',
-      subtitle: 'Your parcel is on the way.',
-      date: '21 Mar 2026',
-    },
-    {
-      id: 's4',
-      label: 'Out for delivery',
-      subtitle: 'Your parcel will arrive today.',
-    },
-    {
-      id: 's5',
-      label: 'Delivered',
-      subtitle: 'You have 2 days to raise any issues.',
+      date: formatTimelineDate(status !== 'created' ? order?.updatedAt : null),
+      done: status === 'shipped' || status === 'delivered',
+      active: status === 'paid',
     },
   ];
 
-  return steps.map((step, index) => ({
-    ...step,
-    done: allDone || index < activeIndex,
-    active: !allDone && index === activeIndex,
-  }));
+  if (parcelEvents.length > 0) {
+    for (const event of parcelEvents) {
+      const display = getParcelEventDisplay(event.eventType, sellerUsername);
+      steps.push({
+        id: `carrier_${event.id}`,
+        label: display.label,
+        subtitle: display.subtitle,
+        date: formatTimelineDate(event.occurredAt ?? event.receivedAt),
+        done: true,
+      });
+    }
+
+    if (status === 'shipped' && steps.length > 0) {
+      const lastStep = steps[steps.length - 1];
+      steps[steps.length - 1] = {
+        ...lastStep,
+        done: false,
+        active: true,
+      };
+    }
+  } else if (status === 'shipped' || status === 'delivered') {
+    steps.push({
+      id: 'in_transit_fallback',
+      label: 'In transit',
+      subtitle: 'Your parcel is on the way.',
+      date: formatTimelineDate(order?.shippedAt ?? order?.updatedAt),
+      done: status === 'delivered',
+      active: status === 'shipped',
+    });
+  }
+
+  const hasDeliveredStep = steps.some((step) => step.label === 'Delivered');
+  if (status === 'delivered' && !hasDeliveredStep) {
+    steps.push({
+      id: 'delivered_fallback',
+      label: 'Delivered',
+      subtitle: 'Delivery marked complete. You can now leave a review.',
+      date: formatTimelineDate(order?.deliveredAt ?? order?.updatedAt),
+      done: true,
+    });
+  }
+
+  return steps;
 }
 
 function getStatusBanner(status: OrderStatus, sellerUsername: string) {
@@ -141,7 +233,7 @@ function getStatusBanner(status: OrderStatus, sellerUsername: string) {
 
   return {
     label: 'In transit',
-    subtitle: `${sellerUsername} has to send it by 26 Mar. We will keep you updated.`,
+    subtitle: 'Your parcel is moving through the carrier network.',
   };
 }
 
@@ -151,24 +243,8 @@ export default function OrderDetailScreen() {
   const { formatFromFiat } = useFormattedPrice();
   const { listings } = useBackendData();
   const { orderId } = route.params;
-  const [backendOrder, setBackendOrder] = React.useState<
-    | {
-        id: string;
-        buyerId: string;
-        sellerId: string;
-        listingId: string;
-        subtotalGbp: number;
-        buyerProtectionFeeGbp: number;
-        platformChargeGbp?: number;
-        totalGbp: number;
-        status: string;
-        addressId: number | null;
-        paymentMethodId: number | null;
-        createdAt: string;
-        updatedAt: string;
-      }
-    | null
-  >(null);
+  const [backendOrder, setBackendOrder] = React.useState<CommerceOrder | null>(null);
+  const [parcelEvents, setParcelEvents] = React.useState<OrderParcelEvent[]>([]);
   const [isSyncingOrder, setIsSyncingOrder] = React.useState(false);
 
   React.useEffect(() => {
@@ -177,13 +253,19 @@ export default function OrderDetailScreen() {
     const syncOrder = async () => {
       setIsSyncingOrder(true);
       try {
-        const order = await getOrder(orderId);
+        const [order, events] = await Promise.all([
+          getOrder(orderId),
+          getOrderParcelEvents(orderId).catch(() => [] as OrderParcelEvent[]),
+        ]);
+
         if (!cancelled) {
           setBackendOrder(order);
+          setParcelEvents(events);
         }
       } catch {
         if (!cancelled) {
           setBackendOrder(null);
+          setParcelEvents([]);
         }
       } finally {
         if (!cancelled) {
@@ -193,9 +275,13 @@ export default function OrderDetailScreen() {
     };
 
     void syncOrder();
+    const refreshInterval = setInterval(() => {
+      void syncOrder();
+    }, 30_000);
 
     return () => {
       cancelled = true;
+      clearInterval(refreshInterval);
     };
   }, [orderId]);
 
@@ -217,20 +303,25 @@ export default function OrderDetailScreen() {
     backendOrder?.platformChargeGbp ??
     backendOrder?.buyerProtectionFeeGbp ??
     calculatePlatformChargeGbp(listing.price);
-  const postageFee = backendOrder
-    ? Math.max(0, Number((backendOrder.totalGbp - subtotal - platformCharge).toFixed(2)))
-    : 2.89;
+  const postageFee = backendOrder?.postageFeeGbp ?? 2.89;
   const totalPaid = backendOrder?.totalGbp ?? subtotal + platformCharge + postageFee;
 
   const orderStatus = normalizeOrderStatus(backendOrder?.status);
-  const trackingSteps = buildTrackingSteps(orderStatus, seller.username);
+  const trackingSteps = buildTrackingSteps(orderStatus, seller.username, backendOrder, parcelEvents);
   const statusBanner = getStatusBanner(orderStatus, seller.username);
+  const latestParcelEvent = parcelEvents.length > 0 ? parcelEvents[parcelEvents.length - 1] : null;
+  const shipmentLastUpdated = formatTimelineDate(
+    latestParcelEvent?.occurredAt ?? latestParcelEvent?.receivedAt ?? backendOrder?.updatedAt
+  );
+  const showShipmentMeta = Boolean(
+    backendOrder?.shippingProvider || backendOrder?.trackingNumber || backendOrder?.shippingLabelUrl || shipmentLastUpdated
+  );
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
-      {/* ── Header ── */}
+      {/* -- Header -- */}
       <View style={styles.header}>
         <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
           <Ionicons name="arrow-back" size={22} color={Colors.textPrimary} />
@@ -243,7 +334,7 @@ export default function OrderDetailScreen() {
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
 
-        {/* ── Item Card ── */}
+        {/* -- Item Card -- */}
         <AnimatedPressable
           style={styles.itemCard}
           onPress={() => navigation.navigate('ItemDetail', { itemId: listing.id })}
@@ -252,13 +343,13 @@ export default function OrderDetailScreen() {
           <CachedImage uri={getListingCoverUri(listing.images, 'https://picsum.photos/seed/order-detail-fallback/300/400')} style={styles.itemThumb} contentFit="cover" />
           <View style={styles.itemInfo}>
             <Text style={styles.itemTitle} numberOfLines={2}>{listing.title}</Text>
-            <Text style={styles.itemMeta}>{listing.size} · {listing.condition}</Text>
-            <Text style={styles.itemPrice}>{formatFromFiat(listing.price, 'GBP', { displayMode: 'fiat' })}</Text>
+            <Text style={styles.itemMeta}>{listing.size} - {listing.condition}</Text>
+            <Text style={styles.itemPrice}>{formatFromFiat(subtotal, 'GBP', { displayMode: 'fiat' })}</Text>
           </View>
           <Ionicons name="chevron-forward" size={16} color={Colors.textMuted} />
         </AnimatedPressable>
 
-        {/* ── Status Banner ── */}
+        {/* -- Status Banner -- */}
         <View style={styles.statusBanner}>
           <Ionicons name="cube-outline" size={20} color={Colors.accent} />
           <View style={{ flex: 1 }}>
@@ -268,7 +359,46 @@ export default function OrderDetailScreen() {
         </View>
         {isSyncingOrder ? <Text style={styles.syncHint}>Syncing live order status...</Text> : null}
 
-        {/* ── Tracking Timeline ── */}
+        {showShipmentMeta ? (
+          <>
+            <Text style={styles.sectionTitle}>Shipment details</Text>
+            <View style={styles.shipmentMetaCard}>
+              {backendOrder?.shippingProvider ? (
+                <ShipmentMetaRow label="Carrier" value={backendOrder.shippingProvider} />
+              ) : null}
+              {backendOrder?.trackingNumber ? (
+                <ShipmentMetaRow label="Tracking #" value={backendOrder.trackingNumber} />
+              ) : null}
+              {shipmentLastUpdated ? (
+                <ShipmentMetaRow label="Last update" value={shipmentLastUpdated} />
+              ) : null}
+
+              {backendOrder?.shippingLabelUrl ? (
+                <AppButton
+                  title="Open shipping label"
+                  icon={<Ionicons name="open-outline" size={16} color={Colors.accent} />}
+                  style={styles.shipmentLinkBtn}
+                  titleStyle={styles.shipmentLinkBtnText}
+                  iconContainerStyle={styles.shipmentLinkIconWrap}
+                  variant="secondary"
+                  size="sm"
+                  onPress={() => {
+                    if (!backendOrder.shippingLabelUrl) {
+                      return;
+                    }
+
+                    void Linking.openURL(backendOrder.shippingLabelUrl).catch(() => {
+                      // Invalid/unsupported URLs should not break the order detail screen.
+                    });
+                  }}
+                  accessibilityLabel="Open shipping label"
+                />
+              ) : null}
+            </View>
+          </>
+        ) : null}
+
+        {/* -- Tracking Timeline -- */}
         <Text style={styles.sectionTitle}>Tracking</Text>
         <View style={styles.timelineCard}>
           {trackingSteps.map((step, index) => (
@@ -300,7 +430,7 @@ export default function OrderDetailScreen() {
           ))}
         </View>
 
-        {/* ── Seller Info ── */}
+        {/* -- Seller Info -- */}
         <Text style={styles.sectionTitle}>Seller</Text>
         <AnimatedPressable
           style={styles.sellerCard}
@@ -315,15 +445,18 @@ export default function OrderDetailScreen() {
               <Text style={styles.sellerRating}>{seller.rating} ({seller.reviewCount} reviews)</Text>
             </View>
           </View>
-          <AnimatedPressable
+          <AppButton
+            title="Message"
             style={styles.msgBtn}
+            titleStyle={styles.msgBtnText}
+            variant="secondary"
+            size="sm"
             onPress={() => navigation.navigate('Chat', { conversationId: 'c1' })}
-          >
-            <Text style={styles.msgBtnText}>Message</Text>
-          </AnimatedPressable>
+            accessibilityLabel="Message seller"
+          />
         </AnimatedPressable>
 
-        {/* ── Transaction Info ── */}
+        {/* -- Transaction Info -- */}
         <Text style={styles.sectionTitle}>Transaction</Text>
         <View style={styles.txCard}>
           <TxRow label="Item price" value={formatFromFiat(subtotal, 'GBP', { displayMode: 'fiat' })} />
@@ -333,23 +466,28 @@ export default function OrderDetailScreen() {
           <TxRow label="Total paid" value={formatFromFiat(totalPaid, 'GBP', { displayMode: 'fiat' })} bold />
         </View>
 
-        {/* ── Actions ── */}
+        {/* -- Actions -- */}
         <View style={styles.actionsRow}>
-          <AnimatedPressable 
-            style={styles.actionBtnSecondary} 
-            activeOpacity={0.85}
+          <AppButton
+            title="Report issue"
+            icon={<Ionicons name="alert-circle-outline" size={18} color={Colors.textPrimary} />}
+            style={styles.actionBtnSecondary}
+            titleStyle={styles.actionBtnSecondaryText}
+            iconContainerStyle={styles.actionSecondaryIconWrap}
+            variant="secondary"
+            size="md"
             onPress={() => navigation.navigate('Report', { type: 'item' })}
-          >
-            <Ionicons name="alert-circle-outline" size={18} color={Colors.textPrimary} />
-            <Text style={styles.actionBtnSecondaryText}>Report issue</Text>
-          </AnimatedPressable>
-          <AnimatedPressable 
-            style={styles.actionBtnPrimary} 
-            activeOpacity={0.85}
+            accessibilityLabel="Report issue"
+          />
+          <AppButton
+            title="Mark as received"
+            style={styles.actionBtnPrimary}
+            titleStyle={styles.actionBtnPrimaryText}
+            variant="primary"
+            size="md"
             onPress={() => navigation.navigate('WriteReview', { orderId })}
-          >
-            <Text style={styles.actionBtnPrimaryText}>Mark as received</Text>
-          </AnimatedPressable>
+            accessibilityLabel="Mark order as received"
+          />
         </View>
 
         <View style={{ height: 40 }} />
@@ -363,6 +501,15 @@ function TxRow({ label, value, bold }: { label: string; value: string; bold?: bo
     <View style={txStyles.row}>
       <Text style={[txStyles.label, bold && txStyles.bold]}>{label}</Text>
       <Text style={[txStyles.value, bold && txStyles.bold]}>{value}</Text>
+    </View>
+  );
+}
+
+function ShipmentMetaRow({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.shipmentMetaRow}>
+      <Text style={styles.shipmentMetaLabel}>{label}</Text>
+      <Text style={styles.shipmentMetaValue}>{value}</Text>
     </View>
   );
 }
@@ -421,15 +568,15 @@ const styles = StyleSheet.create({
     padding: 16,
     gap: 12,
     alignItems: 'flex-start',
-    marginBottom: 28,
+    marginBottom: 22,
     borderWidth: 1,
     borderColor: STATUS_PANEL_BORDER,
   },
   statusLabel: { fontSize: 15, fontFamily: 'Inter_700Bold', color: Colors.accent, marginBottom: 4 },
   statusSub: { fontSize: 13, fontFamily: 'Inter_400Regular', color: Colors.textSecondary, lineHeight: 20 },
   syncHint: {
-    marginTop: -18,
-    marginBottom: 22,
+    marginTop: -12,
+    marginBottom: 18,
     fontSize: 12,
     fontFamily: 'Inter_500Medium',
     color: Colors.textMuted,
@@ -442,6 +589,55 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 1.2,
     marginBottom: 14,
+  },
+
+  shipmentMetaCard: {
+    backgroundColor: Colors.card,
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    gap: 10,
+  },
+  shipmentMetaRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12,
+  },
+  shipmentMetaLabel: {
+    fontSize: 13,
+    fontFamily: 'Inter_500Medium',
+    color: Colors.textMuted,
+    flex: 1,
+  },
+  shipmentMetaValue: {
+    fontSize: 13,
+    fontFamily: 'Inter_600SemiBold',
+    color: Colors.textPrimary,
+    flex: 2,
+    textAlign: 'right',
+  },
+  shipmentLinkBtn: {
+    marginTop: 6,
+    alignSelf: 'flex-start',
+    minHeight: 36,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: Colors.accent,
+  },
+  shipmentLinkIconWrap: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: 'transparent',
+  },
+  shipmentLinkBtnText: {
+    fontSize: 12,
+    fontFamily: 'Inter_600SemiBold',
+    color: Colors.accent,
   },
 
   // Timeline
@@ -488,8 +684,11 @@ const styles = StyleSheet.create({
   sellerMeta: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   sellerRating: { fontSize: 13, fontFamily: 'Inter_400Regular', color: Colors.textSecondary },
   msgBtn: {
-    paddingHorizontal: 16, paddingVertical: 10,
-    borderRadius: 20, borderWidth: 1, borderColor: Colors.accent,
+    minHeight: 40,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: Colors.accent,
   },
   msgBtnText: { fontSize: 13, fontFamily: 'Inter_600SemiBold', color: Colors.accent },
 
@@ -500,14 +699,23 @@ const styles = StyleSheet.create({
   // Actions
   actionsRow: { flexDirection: 'row', gap: 12 },
   actionBtnSecondary: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    gap: 8, paddingVertical: 16, borderRadius: 20,
+    flex: 1,
+    minHeight: 56,
+    borderRadius: 20,
     backgroundColor: Colors.card,
+  },
+  actionSecondaryIconWrap: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: 'transparent',
   },
   actionBtnSecondaryText: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary },
   actionBtnPrimary: {
-    flex: 2, alignItems: 'center', justifyContent: 'center',
-    paddingVertical: 16, borderRadius: 20,
+    flex: 2,
+    minHeight: 56,
+    borderRadius: 20,
+    borderWidth: 0,
     backgroundColor: Colors.accent,
   },
   actionBtnPrimaryText: { fontSize: 15, fontFamily: 'Inter_700Bold', color: Colors.background },

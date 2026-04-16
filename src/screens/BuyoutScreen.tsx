@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
+import { AppButton } from '../components/ui/AppButton';
 import {
   View,
   Text,
@@ -54,7 +55,13 @@ export default function BuyoutScreen() {
       <SafeAreaView style={styles.container} edges={['top']}>
         <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
         <View style={styles.header}>
-          <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
+          <AnimatedPressable
+            style={styles.backBtn}
+            onPress={() => navigation.goBack()}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+            accessibilityHint="Returns to the previous screen"
+          >
             <Ionicons name="arrow-back" size={22} color={Colors.textPrimary} />
           </AnimatedPressable>
           <Text style={styles.headerTitle}>Buyout</Text>
@@ -122,7 +129,13 @@ export default function BuyoutScreen() {
       <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
       <View style={styles.header}>
-        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <AnimatedPressable
+          style={styles.backBtn}
+          onPress={() => navigation.goBack()}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+          accessibilityHint="Returns to the previous screen"
+        >
           <Ionicons name="arrow-back" size={22} color={Colors.textPrimary} />
         </AnimatedPressable>
         <Text style={styles.headerTitle}>Buyout</Text>
@@ -156,17 +169,18 @@ export default function BuyoutScreen() {
           </View>
         </View>
 
-        <AnimatedPressable
+        <AppButton
           style={[styles.submitBtn, isSubmitting && styles.submitBtnDisabled]}
+          title={isSubmitting ? 'Submitting...' : sharesNeeded > 0 ? 'Initiate Buyout' : 'Claim Full Ownership'}
+          icon={<Ionicons name="diamond-outline" size={16} color={Colors.textInverse} />}
           onPress={handleBuyout}
-          activeOpacity={0.9}
           disabled={isSubmitting}
-        >
-          <Ionicons name="diamond-outline" size={16} color={Colors.background} />
-          <Text style={styles.submitText}>
-            {isSubmitting ? 'Submitting...' : sharesNeeded > 0 ? 'Initiate Buyout' : 'Claim Full Ownership'}
-          </Text>
-        </AnimatedPressable>
+          variant="gold"
+          size="md"
+          titleStyle={styles.submitText}
+          accessibilityLabel={sharesNeeded > 0 ? 'Initiate buyout' : 'Claim full ownership'}
+          accessibilityHint="Submits your buyout offer for remaining shares"
+        />
 
         <Text style={styles.footNote}>
           Buyout requests are routed to the order ledger so you can monitor acceptance and settlement status.
@@ -263,12 +277,6 @@ const styles = StyleSheet.create({
   submitBtn: {
     marginTop: 14,
     borderRadius: 12,
-    backgroundColor: Colors.accentGold,
-    paddingVertical: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 6,
   },
   submitBtnDisabled: {
     opacity: 0.6,

@@ -12,6 +12,15 @@ import {
 } from '../lib/countryCapabilityPolicy.js';
 import { resolveCountryCapabilities } from '../lib/countryCapabilities.js';
 
+process.env.NODE_ENV ??= 'test';
+process.env.STRIPE_SECRET_KEY ??= 'test-stripe-secret';
+process.env.RAZORPAY_KEY_ID ??= 'test-razorpay-key-id';
+process.env.RAZORPAY_KEY_SECRET ??= 'test-razorpay-key-secret';
+process.env.MOLLIE_API_KEY ??= 'test-mollie-api-key';
+process.env.FLUTTERWAVE_SECRET_KEY ??= 'test-flutterwave-secret-key';
+process.env.TAP_SECRET_KEY ??= 'test-tap-secret-key';
+process.env.WISE_API_KEY ??= 'test-wise-api-key';
+
 test('payment method and gateway policy checks are enforced by capability cluster', () => {
   const india = resolveCountryCapabilities({ countryCode: 'IN' });
   const chinaNearby = resolveCountryCapabilities({ countryCode: 'CN' });

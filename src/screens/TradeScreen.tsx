@@ -6,7 +6,6 @@ import {
   Text,
   StyleSheet,
   StatusBar,
-  TextInput,
   ScrollView
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -33,6 +32,10 @@ import {
 } from '../utils/tradeFlow';
 import { parseApiError } from '../lib/apiClient';
 import { placeCoOwnOrder } from '../services/marketApi';
+import { AppButton } from '../components/ui/AppButton';
+import { AppCard } from '../components/ui/AppCard';
+import { AppInput } from '../components/ui/AppInput';
+import { AppSegmentControl } from '../components/ui/AppSegmentControl';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 type RouteT = RouteProp<RootStackParamList, 'Trade'>;
@@ -45,6 +48,10 @@ const PANEL_TINT_BG = IS_LIGHT ? '#ece4d8' : '#2f291f';
 const PANEL_TINT_BORDER = IS_LIGHT ? '#d0c3af' : '#4f4638';
 const ALERT_BG = IS_LIGHT ? '#f4e0e0' : '#221515';
 const ALERT_BORDER = IS_LIGHT ? '#d9b5b5' : '#4a2d2d';
+const TRADE_SIDE_OPTIONS: Array<{ value: TradeSide; label: string; accessibilityLabel: string }> = [
+  { value: 'buy', label: 'BUY', accessibilityLabel: 'Buy side' },
+  { value: 'sell', label: 'SELL', accessibilityLabel: 'Sell side' },
+];
 
 const COMPLIANCE_BLOCK_CODES = new Set([
   'RISK_DISCLOSURE_REQUIRED',
@@ -232,27 +239,24 @@ export default function TradeScreen() {
           Market {formatIzeAmount(marketPrice)} | {formatFromIze(marketPrice, { displayMode: 'fiat' })} | {asset.availableUnits} available
         </Text>
 
-        <View style={styles.pegCard}>
+        <AppCard style={styles.pegCard} variant="tint">
           <Ionicons name="sparkles-outline" size={14} color={BRAND} />
           <Text style={styles.pegCardText}>
             Co-Own trades settle in 1ze only. 1ze is closed-loop and locally priced from the live market reference at {formatFromIze(1, { displayMode: 'fiat' })}.
           </Text>
-        </View>
+        </AppCard>
 
-        <View style={styles.segmentRow}>
-          {(['buy', 'sell'] as TradeSide[]).map((value) => {
-            const active = side === value;
-            return (
-              <AnimatedPressable
-                key={value}
-                style={[styles.segmentBtn, active && styles.segmentBtnActive]}
-                onPress={() => setSide(value)}
-              >
-                <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{value.toUpperCase()}</Text>
-              </AnimatedPressable>
-            );
-          })}
-        </View>
+        <AppSegmentControl
+          style={styles.segmentRow}
+          options={TRADE_SIDE_OPTIONS}
+          value={side}
+          onChange={setSide}
+          fullWidth
+          optionStyle={styles.segmentBtn}
+          optionActiveStyle={styles.segmentBtnActive}
+          optionTextStyle={styles.segmentText}
+          optionTextActiveStyle={styles.segmentTextActive}
+        />
 
         {!eligibility.ok && (
           <View style={styles.alertCard}>
@@ -261,30 +265,27 @@ export default function TradeScreen() {
           </View>
         )}
 
-        <Text style={styles.label}>Quantity</Text>
-        <TextInput
-          style={styles.input}
+        <AppInput
+          label="Quantity"
           value={quantityInput}
           onChangeText={(value) => setQuantityInput(sanitizeTradeQuantityInput(value))}
           keyboardType="number-pad"
           placeholder="1"
-          placeholderTextColor={Colors.textMuted}
+          inputContainerStyle={styles.input}
         />
 
-        <Text style={styles.label}>Offer price to owners (1ze, optional)</Text>
-        <TextInput
-          style={styles.input}
+        <AppInput
+          label="Offer price to owners (1ze, optional)"
           value={offerPriceInput}
           onChangeText={(value) => setOfferPriceInput(sanitizeTradePriceInput(value))}
           keyboardType="decimal-pad"
           placeholder={marketPrice.toFixed(6)}
-          placeholderTextColor={Colors.textMuted}
+          prefix="1ze"
+          helperText="Leave blank for instant market execution. Set a lower buy or higher sell offer to send it to owners."
+          inputContainerStyle={styles.input}
         />
-        <Text style={styles.offerHint}>
-          Leave blank for instant market execution. Set a lower buy or higher sell offer to send it to owners.
-        </Text>
 
-        <View style={styles.summaryCard}>
+        <AppCard style={styles.summaryCard}>
           <View style={styles.summaryRow}>
             <Text style={styles.summaryLabel}>Execution price</Text>
             <Text style={styles.summaryValue}>{formatIzeAmount(quote.executionPrice)}</Text>
@@ -301,18 +302,19 @@ export default function TradeScreen() {
             <Text style={styles.summaryTotalLabel}>{side === 'buy' ? 'Total Cost' : 'Net Receive'}</Text>
             <Text style={styles.summaryTotalValue}>{formatIzeAmount(quote.netValue)} | {formatFromIze(quote.netValue, { displayMode: 'fiat' })}</Text>
           </View>
-        </View>
+        </AppCard>
 
-        <AnimatedPressable
+        <AppButton
           style={[styles.submitBtn, (!canSubmit || isSubmittingOrder) && styles.submitBtnDisabled]}
+          variant="gold"
+          size="md"
+          align="center"
+          title={isSubmittingOrder ? 'Submitting...' : orderMode === 'limit' ? 'Send Offer To Owners' : `Execute ${side.toUpperCase()}`}
           disabled={!canSubmit || isSubmittingOrder}
           onPress={() => void handleSubmit()}
-          activeOpacity={0.9}
-        >
-          <Text style={styles.submitText}>
-            {isSubmittingOrder ? 'Submitting...' : orderMode === 'limit' ? 'Send Offer To Owners' : `Execute ${side.toUpperCase()}`}
-          </Text>
-        </AnimatedPressable>
+          accessibilityLabel={isSubmittingOrder ? 'Submitting trade order' : orderMode === 'limit' ? `Send ${side} offer to owners` : `Execute ${side} order`}
+          accessibilityHint="Submits this co-own trade using the current quantity and price settings."
+        />
       </ScrollView>
     </SafeAreaView>
   );
@@ -425,41 +427,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: 'Inter_600SemiBold',
   },
-  label: {
-    marginTop: 13,
-    marginBottom: 6,
-    color: Colors.textSecondary,
-    fontSize: 11,
-    fontFamily: 'Inter_700Bold',
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-  },
   input: {
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: PANEL_BORDER,
-    backgroundColor: PANEL_BG,
-    color: Colors.textPrimary,
-    fontSize: 16,
-    fontFamily: 'Inter_600SemiBold',
-    paddingHorizontal: 12,
-    paddingVertical: 11,
-  },
-  offerHint: {
-    marginTop: 7,
-    color: Colors.textMuted,
-    fontSize: 11,
-    lineHeight: 16,
-    fontFamily: 'Inter_500Medium',
+    marginTop: 13,
   },
   summaryCard: {
     marginTop: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: PANEL_BORDER,
-    backgroundColor: PANEL_BG,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
   },
   summaryRow: {
     flexDirection: 'row',
@@ -498,19 +470,10 @@ const styles = StyleSheet.create({
   },
   submitBtn: {
     marginTop: 14,
-    borderRadius: 12,
-    backgroundColor: Colors.accentGold,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
+    width: '100%',
   },
   submitBtnDisabled: {
     opacity: 0.45,
-  },
-  submitText: {
-    color: Colors.textInverse,
-    fontSize: 13,
-    fontFamily: 'Inter_700Bold',
   },
   emptyWrap: {
     flex: 1,

@@ -113,11 +113,72 @@ export const config = {
   tapWebhookSecret: process.env.TAP_WEBHOOK_SECRET,
   wiseApiKey: process.env.WISE_API_KEY,
   wiseWebhookSecret: process.env.WISE_WEBHOOK_SECRET,
-  goldOracleApiUrl: process.env.GOLD_ORACLE_API_URL ?? 'https://api.metals.dev/v1/latest',
-  goldOracleApiKey: process.env.GOLD_ORACLE_API_KEY,
-  goldOracleTtlSeconds: asNumber(process.env.GOLD_ORACLE_TTL_SECONDS, 300),
-  goldReserveDriftThresholdGrams: asNumber(process.env.GOLD_RESERVE_DRIFT_THRESHOLD_GRAMS, 10),
-  goldOperatorToken: process.env.GOLD_OPERATOR_TOKEN,
+  wiseApiBaseUrl: process.env.WISE_API_BASE_URL?.trim() || 'https://api.wise.com',
+  wisePlatformProfileId: process.env.WISE_PLATFORM_PROFILE_ID?.trim() || null,
+  wisePlatformRecipientAccountId: process.env.WISE_PLATFORM_RECIPIENT_ACCOUNT_ID?.trim() || null,
+  wisePlatformTransferReferencePrefix:
+    process.env.WISE_PLATFORM_TRANSFER_REFERENCE_PREFIX?.trim() || 'THRYFTVERSE SWEEP',
+  evriApiKey: process.env.EVRI_API_KEY?.trim() || process.env.SHIPPING_EVRI_API_KEY?.trim() || null,
+  evriApiBaseUrl:
+    process.env.EVRI_API_BASE_URL?.trim() || process.env.SHIPPING_EVRI_API_URL?.trim() || null,
+  evriWebhookSecret:
+    process.env.EVRI_WEBHOOK_SECRET?.trim() || process.env.SHIPPING_EVRI_WEBHOOK_SECRET?.trim() || null,
+  delhiveryApiKey:
+    process.env.DELHIVERY_API_KEY?.trim() || process.env.SHIPPING_DELHIVERY_API_KEY?.trim() || null,
+  delhiveryApiBaseUrl:
+    process.env.DELHIVERY_API_BASE_URL?.trim()
+    || process.env.SHIPPING_DELHIVERY_API_URL?.trim()
+    || null,
+  delhiveryWebhookSecret:
+    process.env.DELHIVERY_WEBHOOK_SECRET?.trim()
+    || process.env.SHIPPING_DELHIVERY_WEBHOOK_SECRET?.trim()
+    || null,
+  dhlApiKey: process.env.DHL_API_KEY?.trim() || process.env.SHIPPING_DHL_API_KEY?.trim() || null,
+  dhlApiBaseUrl:
+    process.env.DHL_API_BASE_URL?.trim() || process.env.SHIPPING_DHL_API_URL?.trim() || null,
+  dhlWebhookSecret:
+    process.env.DHL_WEBHOOK_SECRET?.trim() || process.env.SHIPPING_DHL_WEBHOOK_SECRET?.trim() || null,
+  aramexApiKey:
+    process.env.ARAMEX_API_KEY?.trim() || process.env.SHIPPING_ARAMEX_API_KEY?.trim() || null,
+  aramexApiBaseUrl:
+    process.env.ARAMEX_API_BASE_URL?.trim() || process.env.SHIPPING_ARAMEX_API_URL?.trim() || null,
+  aramexWebhookSecret:
+    process.env.ARAMEX_WEBHOOK_SECRET?.trim() || process.env.SHIPPING_ARAMEX_WEBHOOK_SECRET?.trim() || null,
+  easyshipApiKey:
+    process.env.EASYSHIP_API_KEY?.trim() || process.env.SHIPPING_EASYSHIP_API_KEY?.trim() || null,
+  easyshipApiBaseUrl:
+    process.env.EASYSHIP_API_BASE_URL?.trim()
+    || process.env.SHIPPING_EASYSHIP_API_URL?.trim()
+    || 'https://public-api.easyship.com/2024-09',
+  easyshipWebhookSecret:
+    process.env.EASYSHIP_WEBHOOK_SECRET?.trim()
+    || process.env.SHIPPING_EASYSHIP_WEBHOOK_SECRET?.trim()
+    || null,
+  shippingFallbackLabelBaseUrl:
+    process.env.SHIPPING_FALLBACK_LABEL_BASE_URL?.trim() || 'https://thryftverse.app/mock-shipping',
+  dailyPayoutVelocityLimitGbp: asNumber(process.env.DAILY_PAYOUT_VELOCITY_LIMIT_GBP, 2000),
+  payoutManualReviewThresholdGbp: asNumber(process.env.PAYOUT_MANUAL_REVIEW_THRESHOLD_GBP, 500),
+  reconciliationScheduleUtcHour: asNumber(process.env.RECONCILIATION_SCHEDULE_UTC_HOUR, 2),
+  reconciliationMismatchThresholdGbp: asNumber(process.env.RECONCILIATION_MISMATCH_THRESHOLD_GBP, 1),
+  reconciliationCriticalMismatchThresholdGbp: asNumber(
+    process.env.RECONCILIATION_CRITICAL_MISMATCH_THRESHOLD_GBP,
+    10
+  ),
+  platformRevenueSweepGateway: process.env.PLATFORM_REVENUE_SWEEP_GATEWAY?.trim().toLowerCase() || null,
+  platformRevenueSweepRequireExternalTransfer: asBoolean(
+    process.env.PLATFORM_REVENUE_SWEEP_REQUIRE_EXTERNAL_TRANSFER,
+    false
+  ),
+  platformRevenueSweepIntervalMs: asNumber(process.env.PLATFORM_REVENUE_SWEEP_INTERVAL_MS, 6 * 60 * 60 * 1000),
+  opsAlertIntervalMs: asNumber(process.env.OPS_ALERT_INTERVAL_MS, 60_000),
+  alertingWebhookUrls: asCsvList(process.env.ALERTING_WEBHOOK_URLS ?? process.env.ALERTING_WEBHOOK_URL),
+  alertingAdminUserIds: asCsvList(process.env.ALERTING_ADMIN_USER_IDS),
+  onezeSupplyDriftThresholdIze: asNumber(process.env.ONEZE_SUPPLY_DRIFT_THRESHOLD_IZE, 10),
+  onezeOperatorToken: process.env.ONEZE_OPERATOR_TOKEN,
+  onezeReservePolicyEnabled: asBoolean(process.env.ONEZE_RESERVE_POLICY_ENABLED, false),
+  onezeReserveRatioMin: asNumber(process.env.ONEZE_RESERVE_RATIO_MIN, 0.3),
+  onezeReserveRatioMax: asNumber(process.env.ONEZE_RESERVE_RATIO_MAX, 0.6),
+  onezeOperationalReserveMg: asNumber(process.env.ONEZE_OPERATIONAL_RESERVE_MG, 0),
   expoPushApiUrl: process.env.EXPO_PUSH_API_URL ?? 'https://exp.host/--/api/v2/push/send',
   pushDefaultChannel: process.env.PUSH_DEFAULT_CHANNEL ?? 'default',
   sentryDsn: process.env.SENTRY_DSN,
@@ -127,6 +188,21 @@ export const config = {
     process.env.OTEL_EXPORTER_OTLP_HTTP_URL ?? 'http://localhost:4318/v1/traces',
   auctionSweepIntervalMs: asNumber(process.env.AUCTION_SWEEP_INTERVAL_MS, 30_000),
   onezeReconcileIntervalMs: asNumber(process.env.ONEZE_RECONCILE_INTERVAL_MS, 60 * 60 * 1000),
+  onezeFxSyncEnabled: asBoolean(process.env.ONEZE_FX_SYNC_ENABLED, false),
+  onezeFxSyncIntervalMs: asNumber(process.env.ONEZE_FX_SYNC_INTERVAL_MS, 24 * 60 * 60 * 1000),
+  onezeFxProviderUrl:
+    process.env.ONEZE_FX_PROVIDER_URL?.trim() || 'https://api.exchangerate.host/latest',
+  onezeFxProviderApiKey: process.env.ONEZE_FX_PROVIDER_API_KEY?.trim() || null,
+  onezeFxProviderBaseCurrency: process.env.ONEZE_FX_PROVIDER_BASE_CURRENCY?.trim().toUpperCase() || 'INR',
+  onezeAutoAdjustEnabled: asBoolean(process.env.ONEZE_AUTO_ADJUST_ENABLED, false),
+  onezeAutoAdjustIntervalMs: asNumber(process.env.ONEZE_AUTO_ADJUST_INTERVAL_MS, 60 * 60 * 1000),
+  onezeAutoAdjustStepBps: asNumber(process.env.ONEZE_AUTO_ADJUST_STEP_BPS, 50),
+  onezeAutoAdjustLookbackHours: asNumber(process.env.ONEZE_AUTO_ADJUST_LOOKBACK_HOURS, 24),
+  onezeAutoAdjustHighStressThreshold: asNumber(process.env.ONEZE_AUTO_ADJUST_HIGH_STRESS_THRESHOLD, 0.85),
+  onezeAutoAdjustLowStressThreshold: asNumber(process.env.ONEZE_AUTO_ADJUST_LOW_STRESS_THRESHOLD, 0.35),
+  onezeAutoAdjustHighRedemptionRate: asNumber(process.env.ONEZE_AUTO_ADJUST_HIGH_REDEMPTION_RATE, 0.8),
+  onezeAutoAdjustLowRedemptionRate: asNumber(process.env.ONEZE_AUTO_ADJUST_LOW_REDEMPTION_RATE, 0.25),
+  onezeEnableDirectRedemption: asBoolean(process.env.ONEZE_ENABLE_DIRECT_REDEMPTION, false),
   onezeMintQuoteTtlSeconds: asNumber(process.env.ONEZE_MINT_QUOTE_TTL_SECONDS, 60),
   onezeMintPaymentGraceSeconds: asNumber(process.env.ONEZE_MINT_PAYMENT_GRACE_SECONDS, 5 * 60),
   onezeWithdrawalQuoteTtlSeconds: asNumber(process.env.ONEZE_WITHDRAWAL_QUOTE_TTL_SECONDS, 60),

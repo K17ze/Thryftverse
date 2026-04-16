@@ -31,6 +31,8 @@ import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useBackendData } from '../context/BackendDataContext';
 import { useToast } from '../context/ToastContext';
 import { Typography } from '../constants/typography';
+import { AppButton } from '../components/ui/AppButton';
+import { AppSegmentControl } from '../components/ui/AppSegmentControl';
 
 type Props = StackScreenProps<RootStackParamList, 'UserProfile'>;
 
@@ -60,6 +62,18 @@ const MOCK_REVIEWS = [
 
 type ReviewFilter = 'All' | 'From members' | 'Automatic';
 
+const TAB_OPTIONS: Array<{ value: Tab; label: string; accessibilityLabel: string }> = [
+  { value: 'Listings', label: 'Listings', accessibilityLabel: 'Show listings tab' },
+  { value: 'Reviews', label: 'Reviews', accessibilityLabel: 'Show reviews tab' },
+  { value: 'About', label: 'About', accessibilityLabel: 'Show about tab' },
+];
+
+const REVIEW_FILTER_OPTIONS: Array<{ value: ReviewFilter; label: string; accessibilityLabel: string }> = [
+  { value: 'All', label: 'All', accessibilityLabel: 'Show all reviews' },
+  { value: 'From members', label: 'From members', accessibilityLabel: 'Show member reviews' },
+  { value: 'Automatic', label: 'Automatic', accessibilityLabel: 'Show automatic reviews' },
+];
+
 function StarRating({ rating, size = 14 }: { rating: number; size?: number }) {
   return (
     <View style={{ flexDirection: 'row', gap: 2 }}>
@@ -88,8 +102,6 @@ export default function UserProfileScreen({ navigation, route }: Props) {
   const { listings } = useBackendData();
 
   const profileListings = React.useMemo(() => listings.slice(0, 6), [listings]);
-  const tabs: Tab[] = ['Listings', 'Reviews', 'About'];
-
   const filteredReviews = MOCK_REVIEWS.filter(r => {
     if (reviewFilter === 'All') return true;
     if (reviewFilter === 'Automatic') return r.auto;
@@ -164,6 +176,9 @@ export default function UserProfileScreen({ navigation, route }: Props) {
           navigation.navigate('ItemDetail', { itemId: item.id });
         }
       }}
+      accessibilityRole="button"
+      accessibilityLabel={`Open listing ${item.title}`}
+      accessibilityHint={isSelfProfile ? 'Opens listing management' : 'Opens listing details'}
     >
       <View style={styles.gridImageWrap}>
         <CachedImage
@@ -200,12 +215,24 @@ export default function UserProfileScreen({ navigation, route }: Props) {
       </Reanimated.View>
       
       <View style={[styles.floatingHeaderActions, { top: insets.top }]}>
-        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <AnimatedPressable
+          style={styles.backBtn}
+          onPress={() => navigation.goBack()}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+          accessibilityHint="Returns to previous screen"
+        >
           <View style={styles.iconBackdrop}>
              <Ionicons name="arrow-back" size={24} color="#fff" />
           </View>
         </AnimatedPressable>
-        <AnimatedPressable style={styles.backBtn} onPress={() => setActionSheetVisible(true)}>
+        <AnimatedPressable
+          style={styles.backBtn}
+          onPress={() => setActionSheetVisible(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Open profile actions"
+          accessibilityHint="Shows report and block actions"
+        >
           <View style={styles.iconBackdrop}>
             <Ionicons name="ellipsis-horizontal" size={22} color="#fff" />
           </View>
@@ -260,8 +287,13 @@ export default function UserProfileScreen({ navigation, route }: Props) {
           </View>
 
           <View style={styles.heroActionRow}>
-            <AnimatedPressable
+            <AppButton
+              title={isSelfProfile ? 'Edit profile' : isBlocked ? 'Blocked' : following ? 'Following' : 'Follow user'}
+              variant={following && !isSelfProfile ? 'secondary' : 'primary'}
+              size="sm"
+              align="center"
               style={[styles.heroActionPrimary, following && !isSelfProfile && styles.heroActionPrimaryActive]}
+              titleStyle={[styles.heroActionPrimaryText, following && !isSelfProfile && styles.heroActionPrimaryTextActive]}
               onPress={() => {
                 if (isSelfProfile) {
                   navigation.navigate('EditProfile');
@@ -275,18 +307,46 @@ export default function UserProfileScreen({ navigation, route }: Props) {
 
                 setFollowing((prev) => !prev);
               }}
+              accessibilityLabel={
+                isSelfProfile
+                  ? 'Edit profile'
+                  : isBlocked
+                    ? 'Profile blocked'
+                    : following
+                      ? 'Following user'
+                      : 'Follow user'
+              }
+              accessibilityHint={
+                isSelfProfile
+                  ? 'Opens profile editor'
+                  : isBlocked
+                    ? 'User is blocked. Unblock to follow again'
+                    : following
+                      ? 'Double tap to unfollow this user'
+                      : 'Double tap to follow this user'
+              }
+            />
+
+            <AppButton
+              title="Share profile"
+              variant="secondary"
+              size="sm"
+              align="center"
+              style={styles.heroActionSecondary}
+              titleStyle={styles.heroActionSecondaryText}
+              onPress={handleShare}
+              accessibilityLabel="Share profile"
+              accessibilityHint="Opens share sheet for this user profile"
+            />
+
+            <AnimatedPressable
+              style={styles.heroActionIcon}
+              onPress={() => setActionSheetVisible(true)}
               activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel="More profile actions"
+              accessibilityHint="Shows report and block options"
             >
-              <Text style={[styles.heroActionPrimaryText, following && !isSelfProfile && styles.heroActionPrimaryTextActive]}>
-                {isSelfProfile ? 'Edit profile' : isBlocked ? 'Blocked' : following ? 'Following' : 'Follow user'}
-              </Text>
-            </AnimatedPressable>
-
-            <AnimatedPressable style={styles.heroActionSecondary} onPress={handleShare} activeOpacity={0.85}>
-              <Text style={styles.heroActionSecondaryText}>Share profile</Text>
-            </AnimatedPressable>
-
-            <AnimatedPressable style={styles.heroActionIcon} onPress={() => setActionSheetVisible(true)} activeOpacity={0.85}>
               <Ionicons name="ellipsis-horizontal" size={18} color={TEXT} />
             </AnimatedPressable>
           </View>
@@ -294,20 +354,17 @@ export default function UserProfileScreen({ navigation, route }: Props) {
 
         {/* Index 1: Sticky Tabs */}
         <View style={styles.stickyTabWrapper}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabBarContainer}>
-            {tabs.map(tab => (
-              <AnimatedPressable
-                key={tab}
-                style={[styles.tabPill, activeTab === tab && styles.tabPillActive]}
-                onPress={() => setActiveTab(tab)}
-                activeOpacity={0.8}
-              >
-                <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
-                  {tab}
-                </Text>
-              </AnimatedPressable>
-            ))}
-          </ScrollView>
+          <AppSegmentControl
+            style={styles.tabBarContainer}
+            options={TAB_OPTIONS}
+            value={activeTab}
+            onChange={setActiveTab}
+            fullWidth
+            optionStyle={styles.tabPill}
+            optionActiveStyle={styles.tabPillActive}
+            optionTextStyle={styles.tabText}
+            optionTextActiveStyle={styles.tabTextActive}
+          />
         </View>
 
         {/* Index 2: Tab Content */}
@@ -332,17 +389,17 @@ export default function UserProfileScreen({ navigation, route }: Props) {
               </View>
 
               <View style={styles.reviewsFilterRow}>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 10 }}>
-                  {(['All', 'From members', 'Automatic'] as ReviewFilter[]).map(f => (
-                    <AnimatedPressable
-                      key={f}
-                      style={[styles.filterChip, reviewFilter === f && styles.filterChipActive]}
-                      onPress={() => setReviewFilter(f)}
-                    >
-                      <Text style={[styles.filterChipText, reviewFilter === f && styles.filterChipTextActive]}>{f}</Text>
-                    </AnimatedPressable>
-                  ))}
-                </ScrollView>
+                <AppSegmentControl
+                  style={styles.reviewsFilterStrip}
+                  options={REVIEW_FILTER_OPTIONS}
+                  value={reviewFilter}
+                  onChange={setReviewFilter}
+                  fullWidth
+                  optionStyle={styles.filterChip}
+                  optionActiveStyle={styles.filterChipActive}
+                  optionTextStyle={styles.filterChipText}
+                  optionTextActiveStyle={styles.filterChipTextActive}
+                />
               </View>
 
               <View style={styles.reviewsList}>
@@ -420,6 +477,9 @@ export default function UserProfileScreen({ navigation, route }: Props) {
               setActionSheetVisible(false);
               setTimeout(() => navigation.navigate('Report', { type: 'user' }), 200);
             }}
+            accessibilityRole="button"
+            accessibilityLabel="Report user"
+            accessibilityHint="Opens report flow for this user"
           >
             <Ionicons name="flag-outline" size={20} color={TEXT} />
             <Text style={{ fontSize: 16, fontFamily: 'Inter_500Medium', color: TEXT }}>Report user</Text>
@@ -438,6 +498,9 @@ export default function UserProfileScreen({ navigation, route }: Props) {
               setFollowing(false);
               show('User blocked. You will not receive new messages from them.', 'success');
             }}
+            accessibilityRole="button"
+            accessibilityLabel="Block user"
+            accessibilityHint="Blocks this user and disables future messages"
           >
             <Ionicons name="ban-outline" size={20} color={Colors.danger} />
             <Text style={{ fontSize: 16, fontFamily: 'Inter_500Medium', color: Colors.danger }}>Block user</Text>
@@ -541,16 +604,11 @@ const styles = StyleSheet.create({
   },
   heroActionPrimary: {
     flex: 1,
-    backgroundColor: Colors.accent,
+    minHeight: 44,
     borderRadius: 14,
-    paddingVertical: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   heroActionPrimaryActive: {
-    backgroundColor: CARD,
-    borderWidth: 1,
-    borderColor: BORDER,
+    backgroundColor: 'transparent',
   },
   heroActionPrimaryText: {
     fontSize: 13,
@@ -563,13 +621,8 @@ const styles = StyleSheet.create({
   },
   heroActionSecondary: {
     flex: 1,
-    borderWidth: 1,
-    borderColor: BORDER,
-    backgroundColor: CARD,
+    minHeight: 44,
     borderRadius: 14,
-    paddingVertical: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   heroActionSecondaryText: {
     fontSize: 13,
@@ -646,6 +699,7 @@ const styles = StyleSheet.create({
   ratingTotalText: { fontSize: Typography.size.body, fontFamily: Typography.family.medium, color: MUTED, marginTop: 12 },
   
   reviewsFilterRow: { paddingHorizontal: 20, marginBottom: 24 },
+  reviewsFilterStrip: { gap: 10 },
   filterChip: { paddingHorizontal: 20, paddingVertical: 12, borderRadius: 24, backgroundColor: CARD_ALT },
   filterChipActive: { backgroundColor: Colors.accent },
   filterChipText: { fontSize: Typography.size.body, fontFamily: Typography.family.medium, color: MUTED },

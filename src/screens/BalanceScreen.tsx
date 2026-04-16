@@ -22,6 +22,8 @@ import { convertDisplayToGbpAmount } from '../utils/currencyAuthoringFlows';
 import { OnezeCoinIcon } from '../components/icons/OnezeCoinIcon';
 import { useStore } from '../store/useStore';
 import { parseApiError } from '../lib/apiClient';
+import { AppButton } from '../components/ui/AppButton';
+import { AppSegmentControl } from '../components/ui/AppSegmentControl';
 import {
   confirmPaymentIntent,
   createPaymentIntent,
@@ -75,6 +77,15 @@ export default function BalanceScreen({ navigation }: Props) {
   const filteredTransactions = useMemo(
     () => (activeTxFilter === 'all' ? transactions : transactions.filter((tx) => tx.type === activeTxFilter)),
     [activeTxFilter]
+  );
+  const txFilterOptions = useMemo(
+    () =>
+      TX_FILTERS.map((filter) => ({
+        value: filter,
+        label: filter.toUpperCase(),
+        accessibilityLabel: filter === 'all' ? 'Show all transactions' : `Show ${filter} transactions`,
+      })),
+    []
   );
 
   const handleConvertPress = () => {
@@ -183,7 +194,12 @@ export default function BalanceScreen({ navigation }: Props) {
       <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
       <View style={styles.header}>
-        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <AnimatedPressable
+          style={styles.backBtn}
+          onPress={() => navigation.goBack()}
+          accessibilityLabel="Go back"
+          accessibilityHint="Returns to the previous screen."
+        >
           <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
         </AnimatedPressable>
         <Text style={styles.hugeTitle}>1ze wallet</Text>
@@ -204,21 +220,39 @@ export default function BalanceScreen({ navigation }: Props) {
             <Text style={styles.balanceLabel}>available balance</Text>
 
             <View style={styles.balanceActions}>
-              <AnimatedPressable style={styles.actionBtn} activeOpacity={0.85} onPress={() => navigation.navigate('Withdraw')}>
+              <AnimatedPressable
+                style={styles.actionBtn}
+                activeOpacity={0.85}
+                onPress={() => navigation.navigate('Withdraw')}
+                accessibilityLabel="Withdraw funds"
+                accessibilityHint="Opens withdrawal options for your wallet balance."
+              >
                 <View style={styles.actionCircle}>
                   <Ionicons name="library-outline" size={22} color={Colors.textPrimary} />
                 </View>
                 <Text style={styles.actionText}>withdraw</Text>
               </AnimatedPressable>
 
-              <AnimatedPressable style={styles.actionBtn} activeOpacity={0.85} onPress={handleConvertPress}>
+              <AnimatedPressable
+                style={styles.actionBtn}
+                activeOpacity={0.85}
+                onPress={handleConvertPress}
+                accessibilityLabel="Convert local currency to 1ze"
+                accessibilityHint="Focuses the load input to start conversion."
+              >
                 <View style={styles.actionCircle}>
                   <Ionicons name="swap-horizontal-outline" size={22} color={Colors.textPrimary} />
                 </View>
                 <Text style={styles.actionText}>convert</Text>
               </AnimatedPressable>
 
-              <AnimatedPressable style={styles.actionBtn} activeOpacity={0.85} onPress={() => navigation.navigate('MainTabs')}>
+              <AnimatedPressable
+                style={styles.actionBtn}
+                activeOpacity={0.85}
+                onPress={() => navigation.navigate('MainTabs')}
+                accessibilityLabel="Go to marketplace"
+                accessibilityHint="Navigates to main shopping tabs."
+              >
                 <View style={styles.actionCircle}>
                   <Ionicons name="cart-outline" size={22} color={Colors.textPrimary} />
                 </View>
@@ -251,6 +285,8 @@ export default function BalanceScreen({ navigation }: Props) {
             placeholder="0.00"
             placeholderTextColor={Colors.textMuted}
             keyboardType="decimal-pad"
+            accessibilityLabel={`Amount in ${currencyCode}`}
+            accessibilityHint="Enter the amount you want to convert into 1ze credits."
           />
 
           <View style={styles.loadSummaryRow}>
@@ -266,14 +302,17 @@ export default function BalanceScreen({ navigation }: Props) {
             <Text style={styles.loadSummaryTotalValue}>{formatIzeAmount(loadNetIze)} | {formatFromIze(loadNetIze, { displayMode: 'fiat' })}</Text>
           </View>
 
-          <AnimatedPressable
+          <AppButton
+            title={isLoadingIze ? 'Loading...' : 'Load 1ze'}
             style={[styles.loadBtn, !canLoadIze && styles.loadBtnDisabled]}
-            activeOpacity={0.9}
+            titleStyle={styles.loadBtnText}
+            variant="gold"
+            size="sm"
             onPress={handleLoadIze}
             disabled={!canLoadIze}
-          >
-            <Text style={styles.loadBtnText}>{isLoadingIze ? 'Loading...' : 'Load 1ze'}</Text>
-          </AnimatedPressable>
+            accessibilityLabel="Load 1ze"
+            accessibilityHint="Converts the entered amount into 1ze and credits your wallet."
+          />
         </View>
 
         <View style={styles.historyCard}>
@@ -284,29 +323,33 @@ export default function BalanceScreen({ navigation }: Props) {
             </View>
             <Text style={styles.historyTitle}>{formatFromFiat(0, 'GBP', { displayMode: 'fiat' })}</Text>
           </View>
-          <AnimatedPressable style={styles.historyLinkRow} onPress={() => navigation.navigate('BalanceHistory')}>
-            <Text style={styles.historyTitle}>History</Text>
-            <Ionicons name="chevron-forward" size={20} color={Colors.textMuted} />
-          </AnimatedPressable>
+          <AppButton
+            title="History"
+            trailingIcon={<Ionicons name="chevron-forward" size={20} color={Colors.textMuted} />}
+            style={styles.historyLinkRow}
+            titleStyle={styles.historyTitle}
+            trailingIconContainerStyle={styles.historyChevronWrap}
+            variant="secondary"
+            size="sm"
+            align="start"
+            onPress={() => navigation.navigate('BalanceHistory')}
+            accessibilityLabel="Open balance history"
+            accessibilityHint="Shows all wallet transactions and balance activity."
+          />
         </View>
 
         <Text style={styles.sectionTitle}>Recent Transactions</Text>
 
-        <View style={styles.filterRow}>
-          {TX_FILTERS.map((filter) => {
-            const active = activeTxFilter === filter;
-            return (
-              <AnimatedPressable
-                key={filter}
-                style={[styles.filterChip, active && styles.filterChipActive]}
-                activeOpacity={0.9}
-                onPress={() => setActiveTxFilter(filter)}
-              >
-                <Text style={[styles.filterChipText, active && styles.filterChipTextActive]}>{filter.toUpperCase()}</Text>
-              </AnimatedPressable>
-            );
-          })}
-        </View>
+        <AppSegmentControl
+          style={styles.filterRow}
+          options={txFilterOptions}
+          value={activeTxFilter}
+          onChange={setActiveTxFilter}
+          optionStyle={styles.filterChip}
+          optionActiveStyle={styles.filterChipActive}
+          optionTextStyle={styles.filterChipText}
+          optionTextActiveStyle={styles.filterChipTextActive}
+        />
 
         <View style={styles.cardGroup}>
           {filteredTransactions.map((tx) => (
@@ -426,9 +469,8 @@ const styles = StyleSheet.create({
     marginTop: 12,
     borderRadius: 999,
     backgroundColor: Colors.accentGold,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
+    minHeight: 44,
+    borderWidth: 0,
   },
   loadBtnDisabled: { opacity: 0.55 },
   loadBtnText: { color: Colors.textInverse, fontSize: 13, fontFamily: 'Inter_700Bold' },
@@ -437,7 +479,19 @@ const styles = StyleSheet.create({
   historyRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 12, marginBottom: 12 },
   historyTitle: { fontSize: 16, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary, marginBottom: 4 },
   historyDate: { fontSize: 13, fontFamily: 'Inter_400Regular', color: Colors.textSecondary },
-  historyLinkRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  historyLinkRow: {
+    borderRadius: 14,
+    borderWidth: 0,
+    backgroundColor: 'transparent',
+    paddingHorizontal: 0,
+    minHeight: 36,
+  },
+  historyChevronWrap: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: 'transparent',
+  },
 
   sectionTitle: { fontSize: 13, fontFamily: 'Inter_600SemiBold', color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 1.2, marginLeft: 6, marginBottom: 12 },
   filterRow: { flexDirection: 'row', gap: 8, marginBottom: 10, paddingHorizontal: 6 },

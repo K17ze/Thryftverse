@@ -31,6 +31,8 @@ import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { SkeletonLoader } from '../components/SkeletonLoader';
 import { SyncStatusPill } from '../components/SyncStatusPill';
 import { SyncRetryBanner } from '../components/SyncRetryBanner';
+import { AppButton } from '../components/ui/AppButton';
+import { AppSegmentControl } from '../components/ui/AppSegmentControl';
 import { formatIzeAmount, toIze } from '../utils/currency';
 import { parseApiError } from '../lib/apiClient';
 import { listCoOwnAssets, placeCoOwnOrder } from '../services/marketApi';
@@ -399,23 +401,29 @@ export default function CoOwnScreen() {
       </View>
 
       <View style={styles.heroQuickRow}>
-        <AnimatedPressable
+        <AppButton
+          title={t('syndicate.quick.leaderboard')}
+          icon={<Ionicons name="trophy-outline" size={13} color={Colors.textSecondary} />}
           style={styles.heroQuickChip}
-          activeOpacity={0.9}
+          variant="secondary"
+          size="sm"
+          titleStyle={styles.heroQuickText}
+          iconContainerStyle={styles.heroQuickIconWrap}
           onPress={() => navigation.navigate('AssetLeaderboard')}
-        >
-          <Ionicons name="trophy-outline" size={13} color={Colors.textSecondary} />
-          <Text style={styles.heroQuickText}>{t('syndicate.quick.leaderboard')}</Text>
-        </AnimatedPressable>
+          accessibilityLabel={t('syndicate.quick.leaderboard')}
+        />
 
-        <AnimatedPressable
+        <AppButton
+          title={t('syndicate.quick.recentOrders')}
+          icon={<Ionicons name="time-outline" size={13} color={Colors.textSecondary} />}
           style={styles.heroQuickChip}
-          activeOpacity={0.9}
+          variant="secondary"
+          size="sm"
+          titleStyle={styles.heroQuickText}
+          iconContainerStyle={styles.heroQuickIconWrap}
           onPress={() => navigation.navigate('CoOwnOrderHistory')}
-        >
-          <Ionicons name="time-outline" size={13} color={Colors.textSecondary} />
-          <Text style={styles.heroQuickText}>{t('syndicate.quick.recentOrders')}</Text>
-        </AnimatedPressable>
+          accessibilityLabel={t('syndicate.quick.recentOrders')}
+        />
       </View>
 
       <View style={styles.metricsRow}>
@@ -448,7 +456,14 @@ export default function CoOwnScreen() {
         </View>
       </View>
 
-      <AnimatedPressable style={styles.complianceCard} activeOpacity={0.9} onPress={() => setComplianceModalVisible(true)}>
+      <AnimatedPressable
+        style={styles.complianceCard}
+        activeOpacity={0.9}
+        onPress={() => setComplianceModalVisible(true)}
+        accessibilityRole="button"
+        accessibilityLabel={t('syndicate.compliance.title')}
+        accessibilityHint="Opens compliance checks and jurisdiction controls"
+      >
         <View style={styles.complianceTopRow}>
           <Ionicons name="shield-checkmark-outline" size={16} color={BRAND} />
           <Text style={styles.complianceTitle}>{t('syndicate.compliance.title')}</Text>
@@ -477,14 +492,17 @@ export default function CoOwnScreen() {
           <Text style={styles.issueTitle}>{t('syndicate.issue.console')}</Text>
         </View>
 
-        <AnimatedPressable
+        <AppButton
+          title={t('syndicate.issue.cta')}
+          icon={<Ionicons name="add" size={15} color={Colors.background} />}
           style={styles.issueBtn}
-          activeOpacity={0.9}
+          variant="gold"
+          size="sm"
+          titleStyle={styles.issueBtnText}
+          iconContainerStyle={styles.issueBtnIconWrap}
           onPress={() => navigation.navigate('CreateCoOwn')}
-        >
-          <Ionicons name="add" size={15} color={Colors.background} />
-          <Text style={styles.issueBtnText}>{t('syndicate.issue.cta')}</Text>
-        </AnimatedPressable>
+          accessibilityLabel={t('syndicate.issue.cta')}
+        />
       </View>
 
       {syncError ? (
@@ -499,39 +517,53 @@ export default function CoOwnScreen() {
       ) : null}
 
       <View style={styles.quickActionsRow}>
-        <AnimatedPressable
+        <AppButton
+          title={t('syndicate.quick.portfolio')}
+          icon={<Ionicons name="pie-chart-outline" size={13} color={Colors.textSecondary} />}
           style={styles.quickActionChip}
-          activeOpacity={0.9}
+          variant="secondary"
+          size="sm"
+          titleStyle={styles.quickActionText}
+          iconContainerStyle={styles.quickActionIconWrap}
           onPress={() => navigation.navigate('Portfolio')}
-        >
-          <Ionicons name="pie-chart-outline" size={13} color={Colors.textSecondary} />
-          <Text style={styles.quickActionText}>{t('syndicate.quick.portfolio')}</Text>
-        </AnimatedPressable>
+          accessibilityLabel={t('syndicate.quick.portfolio')}
+        />
 
-        <AnimatedPressable
+        <AppButton
+          title={t('syndicate.quick.orders')}
+          icon={<Ionicons name="time-outline" size={13} color={Colors.textSecondary} />}
           style={styles.quickActionChip}
-          activeOpacity={0.9}
+          variant="secondary"
+          size="sm"
+          titleStyle={styles.quickActionText}
+          iconContainerStyle={styles.quickActionIconWrap}
           onPress={() => navigation.navigate('CoOwnOrderHistory')}
-        >
-          <Ionicons name="time-outline" size={13} color={Colors.textSecondary} />
-          <Text style={styles.quickActionText}>{t('syndicate.quick.orders')}</Text>
-        </AnimatedPressable>
+          accessibilityLabel={t('syndicate.quick.orders')}
+        />
       </View>
 
-      <View style={styles.switcherWrap}>
-        {(['ISSUED', 'HOLDINGS'] as const).map((view) => (
-          <AnimatedPressable
-            key={view}
-            style={[styles.switcherBtn, activeView === view && styles.switcherBtnActive]}
-            onPress={() => setActiveView(view)}
-            activeOpacity={0.9}
-          >
-            <Text style={[styles.switcherText, activeView === view && styles.switcherTextActive]}>
-              {view === 'ISSUED' ? t('syndicate.switcher.issued') : t('syndicate.switcher.holdings')}
-            </Text>
-          </AnimatedPressable>
-        ))}
-      </View>
+      <AppSegmentControl
+        style={styles.switcherWrap}
+        options={[
+          {
+            value: 'ISSUED',
+            label: t('syndicate.switcher.issued'),
+            accessibilityLabel: t('syndicate.switcher.issued'),
+          },
+          {
+            value: 'HOLDINGS',
+            label: t('syndicate.switcher.holdings'),
+            accessibilityLabel: t('syndicate.switcher.holdings'),
+          },
+        ]}
+        value={activeView}
+        onChange={setActiveView}
+        fullWidth
+        optionStyle={styles.switcherBtn}
+        optionActiveStyle={styles.switcherBtnActive}
+        optionTextStyle={styles.switcherText}
+        optionTextActiveStyle={styles.switcherTextActive}
+      />
 
       <View style={styles.sectionRow}>
         <Text style={styles.sectionTitle}>
@@ -569,6 +601,9 @@ export default function CoOwnScreen() {
         style={styles.assetCard}
         activeOpacity={0.94}
         onPress={() => navigation.navigate('AssetDetail', { assetId: item.id })}
+        accessibilityRole="button"
+        accessibilityLabel={`Open ${item.title}`}
+        accessibilityHint="Opens asset details and market activity"
       >
         <CachedImage uri={item.image} style={styles.assetImage} containerStyle={{ width: 54, height: 54, borderRadius: 14 }} contentFit="cover" />
 
@@ -648,6 +683,13 @@ export default function CoOwnScreen() {
               }}
               activeOpacity={0.9}
               disabled={primaryDisabled || isSubmittingOrder}
+              accessibilityRole="button"
+              accessibilityLabel={isHoldingsMode ? t('syndicate.asset.cta.bookProfit') : t('syndicate.asset.cta.buyUnits')}
+              accessibilityHint={
+                isHoldingsMode
+                  ? 'Opens order composer to sell your holdings'
+                  : 'Opens order composer to buy units'
+              }
             >
               <Ionicons
                 name={isHoldingsMode ? 'cash-outline' : 'wallet-outline'}
@@ -663,6 +705,9 @@ export default function CoOwnScreen() {
               style={styles.detailsBtn}
               onPress={() => navigation.navigate('AssetDetail', { assetId: item.id })}
               activeOpacity={0.9}
+              accessibilityRole="button"
+              accessibilityLabel={t('syndicate.asset.cta.details')}
+              accessibilityHint="Opens full asset details"
             >
               <Text style={styles.detailsBtnText}>{t('syndicate.asset.cta.details')}</Text>
             </AnimatedPressable>
@@ -695,7 +740,14 @@ export default function CoOwnScreen() {
         onRequestClose={closeUnitsComposer}
       >
         <View style={styles.unitsModalOverlay}>
-          <AnimatedPressable style={styles.unitsModalDismissLayer} activeOpacity={1} onPress={closeUnitsComposer} />
+          <AnimatedPressable
+            style={styles.unitsModalDismissLayer}
+            activeOpacity={1}
+            onPress={closeUnitsComposer}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss order composer"
+            accessibilityHint="Closes the units order modal"
+          />
 
           <View style={styles.unitsModalCard}>
             <Text style={styles.unitsModalLabel}>{t('syndicate.units.modal.label')}</Text>
@@ -729,19 +781,23 @@ export default function CoOwnScreen() {
                 keyboardType="number-pad"
                 placeholder="1"
                 placeholderTextColor={Colors.textMuted}
+                accessibilityLabel="Units to trade"
+                accessibilityHint="Enter number of units to buy or sell"
               />
             </View>
 
             <View style={styles.unitsQuickRow}>
               {[1, 5, 10, 20].map((units) => (
-                <AnimatedPressable
+                <AppButton
                   key={units}
+                  title={String(units)}
                   style={styles.unitsQuickChip}
+                  variant="secondary"
+                  size="sm"
+                  titleStyle={styles.unitsQuickText}
                   onPress={() => setUnitsInput(String(units))}
-                  activeOpacity={0.9}
-                >
-                  <Text style={styles.unitsQuickText}>{units}</Text>
-                </AnimatedPressable>
+                  accessibilityLabel={`Set units to ${units}`}
+                />
               ))}
             </View>
 
@@ -767,6 +823,9 @@ export default function CoOwnScreen() {
                 onPress={closeUnitsComposer}
                 activeOpacity={0.9}
                 disabled={isSubmittingOrder}
+                accessibilityRole="button"
+                accessibilityLabel={t('syndicate.units.modal.cancel')}
+                accessibilityHint="Closes the order composer without submitting"
               >
                 <Text style={styles.unitsCancelText}>{t('syndicate.units.modal.cancel')}</Text>
               </AnimatedPressable>
@@ -776,6 +835,17 @@ export default function CoOwnScreen() {
                 onPress={() => void submitUnitsOrder()}
                 activeOpacity={0.9}
                 disabled={isSubmittingOrder}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  composerMode === 'buy'
+                    ? t('syndicate.units.modal.buy')
+                    : t('syndicate.units.modal.sell')
+                }
+                accessibilityHint={
+                  composerMode === 'buy'
+                    ? 'Submits a buy order for selected units'
+                    : 'Submits a sell order for selected units'
+                }
               >
                 <Text style={styles.unitsSubmitText}>
                   {isSubmittingOrder
@@ -804,6 +874,9 @@ export default function CoOwnScreen() {
           style={styles.complianceModalDismissLayer}
           activeOpacity={1}
           onPress={() => setComplianceModalVisible(false)}
+          accessibilityRole="button"
+          accessibilityLabel="Dismiss compliance modal"
+          accessibilityHint="Closes compliance settings"
         />
 
         <View style={styles.complianceModalCard}>
@@ -819,6 +892,10 @@ export default function CoOwnScreen() {
                   style={[styles.countryChip, active && styles.countryChipActive]}
                   onPress={() => updateCoOwnCompliance({ countryCode: country.code })}
                   activeOpacity={0.9}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  accessibilityLabel={`Set country to ${country.label}`}
+                  accessibilityHint="Updates jurisdiction for compliance checks"
                 >
                   <Text style={[styles.countryChipText, active && styles.countryChipTextActive]}>{country.code}</Text>
                 </AnimatedPressable>
@@ -832,6 +909,10 @@ export default function CoOwnScreen() {
               style={[styles.complianceToggleBtn, coOwnCompliance.kycVerified && styles.complianceToggleBtnActive]}
               onPress={() => updateCoOwnCompliance({ kycVerified: !coOwnCompliance.kycVerified })}
               activeOpacity={0.9}
+              accessibilityRole="switch"
+              accessibilityState={{ checked: coOwnCompliance.kycVerified }}
+              accessibilityLabel={t('syndicate.compliance.modal.kycVerified')}
+              accessibilityHint="Toggles KYC verification status"
             >
               <Text style={[styles.complianceToggleBtnText, coOwnCompliance.kycVerified && styles.complianceToggleBtnTextActive]}>
                 {coOwnCompliance.kycVerified ? t('syndicate.compliance.modal.toggleOn') : t('syndicate.compliance.modal.toggleOff')}
@@ -847,6 +928,10 @@ export default function CoOwnScreen() {
                 updateCoOwnCompliance({ riskDisclosureAccepted: !coOwnCompliance.riskDisclosureAccepted })
               }
               activeOpacity={0.9}
+              accessibilityRole="switch"
+              accessibilityState={{ checked: coOwnCompliance.riskDisclosureAccepted }}
+              accessibilityLabel={t('syndicate.compliance.modal.riskDisclosure')}
+              accessibilityHint="Toggles risk disclosure acceptance"
             >
               <Text
                 style={[
@@ -869,6 +954,10 @@ export default function CoOwnScreen() {
                 updateCoOwnCompliance({ stableCoinWalletConnected: !coOwnCompliance.stableCoinWalletConnected })
               }
               activeOpacity={0.9}
+              accessibilityRole="switch"
+              accessibilityState={{ checked: coOwnCompliance.stableCoinWalletConnected }}
+              accessibilityLabel={t('syndicate.compliance.modal.walletConnected', { coin: STABLE_COIN })}
+              accessibilityHint="Toggles wallet connection status"
             >
               <Text
                 style={[
@@ -893,6 +982,9 @@ export default function CoOwnScreen() {
             style={styles.complianceDoneBtn}
             onPress={() => setComplianceModalVisible(false)}
             activeOpacity={0.9}
+            accessibilityRole="button"
+            accessibilityLabel={t('syndicate.compliance.modal.done')}
+            accessibilityHint="Saves compliance choices and closes modal"
           >
             <Text style={styles.complianceDoneBtnText}>{t('syndicate.compliance.modal.done')}</Text>
           </AnimatedPressable>
@@ -985,12 +1077,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: PANEL_BORDER,
     backgroundColor: PANEL_BG,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
+    minHeight: 40,
+  },
+  heroQuickIconWrap: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: 'transparent',
   },
   heroQuickText: {
     color: Colors.textSecondary,
@@ -1145,13 +1238,17 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_500Medium',
   },
   issueBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
     borderRadius: 14,
     backgroundColor: Colors.accentGold,
+    minHeight: 34,
     paddingHorizontal: 12,
-    paddingVertical: 7,
+    borderWidth: 0,
+  },
+  issueBtnIconWrap: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: 'transparent',
   },
   issueBtnText: {
     color: Colors.background,
@@ -1180,11 +1277,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: PANEL_BORDER,
     backgroundColor: PANEL_BG,
-    paddingVertical: 9,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 5,
+    minHeight: 38,
+  },
+  quickActionIconWrap: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: 'transparent',
   },
   quickActionText: {
     color: Colors.textSecondary,
@@ -1205,7 +1304,9 @@ const styles = StyleSheet.create({
   switcherBtn: {
     flex: 1,
     borderRadius: 20,
-    paddingVertical: 10,
+    minHeight: 38,
+    borderWidth: 0,
+    backgroundColor: 'transparent',
     alignItems: 'center',
   },
   switcherBtnActive: {
@@ -1542,8 +1643,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: PANEL_TINT_BORDER,
     backgroundColor: PANEL_TINT_BG,
+    minHeight: 32,
     paddingHorizontal: 10,
-    paddingVertical: 6,
   },
   unitsQuickText: {
     color: BRAND,

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
+import { AppButton } from '../components/ui/AppButton';
 import { View,
   Text,
   StyleSheet,
@@ -339,7 +340,13 @@ export default function WithdrawScreen() {
       <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
       <View style={styles.header}>
-        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <AnimatedPressable
+          style={styles.backBtn}
+          onPress={() => navigation.goBack()}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+          accessibilityHint="Returns to the previous screen"
+        >
           <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
         </AnimatedPressable>
         <Text style={styles.headerTitle}>Withdraw Balance</Text>
@@ -358,6 +365,8 @@ export default function WithdrawScreen() {
               keyboardType="decimal-pad"
               autoFocus
               selectionColor={Colors.accent}
+              accessibilityLabel="Withdrawal amount"
+              accessibilityHint="Enter the amount to withdraw from your available balance"
             />
           </View>
           <Text style={styles.availableText}>Available: {formatFromFiat(availableBalance, 'GBP', { displayMode: 'fiat' })}</Text>
@@ -378,6 +387,9 @@ export default function WithdrawScreen() {
 
               navigation.navigate('AddBankAccount');
             }}
+            accessibilityRole="button"
+            accessibilityLabel="Transfer destination"
+            accessibilityHint="Opens bank account options for withdrawals"
           >
             <View style={styles.bankLeft}>
               <View style={styles.bankIcon}>
@@ -392,7 +404,13 @@ export default function WithdrawScreen() {
           </AnimatedPressable>
 
           {allowBankAccounts ? (
-            <AnimatedPressable style={styles.addBankBtn} onPress={() => navigation.navigate('AddBankAccount')}>
+            <AnimatedPressable
+              style={styles.addBankBtn}
+              onPress={() => navigation.navigate('AddBankAccount')}
+              accessibilityRole="button"
+              accessibilityLabel="Add a new bank account"
+              accessibilityHint="Opens the bank account setup form"
+            >
               <Ionicons name="add" size={18} color={Colors.accent} />
               <Text style={styles.addBankText}>Add a new bank account</Text>
             </AnimatedPressable>
@@ -404,18 +422,24 @@ export default function WithdrawScreen() {
 
         <View style={styles.footer}>
           <Text style={styles.feeText}>Withdrawals are processed from completed sale proceeds in 3-5 working days.</Text>
-          <AnimatedPressable 
-            style={[styles.primaryBtn, !canWithdraw && styles.primaryBtnDisabled]} 
-            activeOpacity={0.9} 
-            disabled={!canWithdraw}
-            onPress={handleWithdraw}
-          >
-            <Text style={styles.primaryText}>
-              {isWithdrawing
+          <AppButton
+            title={
+              isWithdrawing
                 ? 'Processing...'
-                : `Withdraw ${formatFromFiat(numericAmount, 'GBP', { displayMode: 'fiat' })}`}
-            </Text>
-          </AnimatedPressable>
+                : `Withdraw ${formatFromFiat(numericAmount, 'GBP', { displayMode: 'fiat' })}`
+            }
+            onPress={handleWithdraw}
+            disabled={!canWithdraw}
+            variant="contrast"
+            style={[styles.primaryBtn, !canWithdraw && styles.primaryBtnDisabled]}
+            titleStyle={styles.primaryText}
+            accessibilityLabel={
+              isWithdrawing
+                ? 'Processing withdrawal'
+                : `Withdraw ${formatFromFiat(numericAmount, 'GBP', { displayMode: 'fiat' })}`
+            }
+            accessibilityHint="Submits your withdrawal request"
+          />
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>

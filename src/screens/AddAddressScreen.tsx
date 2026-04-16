@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
+import { AppButton } from '../components/ui/AppButton';
 import {
   View,
   Text,
@@ -82,7 +83,14 @@ export default function AddAddressScreen({ navigation }: Props) {
       <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
       <View style={styles.header}>
-        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()} activeOpacity={0.8}>
+        <AnimatedPressable
+          style={styles.backBtn}
+          onPress={() => navigation.goBack()}
+          activeOpacity={0.8}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+          accessibilityHint="Returns to the previous screen"
+        >
           <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
         </AnimatedPressable>
         <Text style={styles.headerTitle}>Delivery Address</Text>
@@ -107,6 +115,8 @@ export default function AddAddressScreen({ navigation }: Props) {
                 value={name}
                 onChangeText={setName}
                 selectionColor={Colors.accent}
+                accessibilityLabel="Full name"
+                accessibilityHint="Enter your full delivery name"
               />
             </View>
           </View>
@@ -121,6 +131,8 @@ export default function AddAddressScreen({ navigation }: Props) {
                 value={street}
                 onChangeText={setStreet}
                 selectionColor={Colors.accent}
+                accessibilityLabel="Street address"
+                accessibilityHint="Enter your street and house number"
               />
             </View>
           </View>
@@ -136,6 +148,8 @@ export default function AddAddressScreen({ navigation }: Props) {
                   value={city}
                   onChangeText={setCity}
                   selectionColor={Colors.accent}
+                  accessibilityLabel="City"
+                  accessibilityHint="Enter your city or town"
                 />
               </View>
             </View>
@@ -151,6 +165,8 @@ export default function AddAddressScreen({ navigation }: Props) {
                   onChangeText={setPostcode}
                   autoCapitalize="characters"
                   selectionColor={Colors.accent}
+                  accessibilityLabel="Postcode"
+                  accessibilityHint="Enter your postcode"
                 />
               </View>
             </View>
@@ -160,6 +176,10 @@ export default function AddAddressScreen({ navigation }: Props) {
             style={[styles.defaultToggleRow, isDefaultAddress && styles.defaultToggleRowActive]}
             activeOpacity={0.9}
             onPress={() => setIsDefaultAddress((current) => !current)}
+            accessibilityRole="switch"
+            accessibilityLabel="Set as default delivery address"
+            accessibilityHint="Toggles whether this address is your default"
+            accessibilityState={{ checked: isDefaultAddress }}
           >
             <Ionicons
               name={isDefaultAddress ? 'checkmark-circle' : 'ellipse-outline'}
@@ -174,16 +194,15 @@ export default function AddAddressScreen({ navigation }: Props) {
         </ScrollView>
 
         <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 20) }]}>
-          <AnimatedPressable 
-            style={[styles.saveBtn, (!isFormValid || isSaving) && styles.saveBtnDisabled]} 
+          <AppButton
+            title={isSaving ? 'Saving...' : 'Save Address'}
             onPress={handleSave}
             disabled={!isFormValid || isSaving}
-            activeOpacity={0.9}
-          >
-            <Text style={[styles.saveBtnText, (!isFormValid || isSaving) && styles.saveBtnTextDisabled]}>
-              {isSaving ? 'Saving...' : 'Save Address'}
-            </Text>
-          </AnimatedPressable>
+            style={[styles.saveBtn, (!isFormValid || isSaving) && styles.saveBtnDisabled]}
+            titleStyle={[styles.saveBtnText, (!isFormValid || isSaving) && styles.saveBtnTextDisabled]}
+            accessibilityLabel={isSaving ? 'Saving address' : 'Save address'}
+            accessibilityHint="Saves this delivery address"
+          />
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>

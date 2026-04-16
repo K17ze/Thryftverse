@@ -88,7 +88,13 @@ export default function ManageListingScreen() {
       <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
       <View style={styles.header}>
-        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <AnimatedPressable
+          style={styles.backBtn}
+          onPress={() => navigation.goBack()}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+          accessibilityHint="Returns to previous screen"
+        >
           <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
         </AnimatedPressable>
         <Text style={styles.headerTitle}>Manage Listing</Text>
@@ -114,6 +120,9 @@ export default function ManageListingScreen() {
           style={styles.actionBlock} 
           activeOpacity={0.8}
           onPress={handleBumpListing}
+          accessibilityRole="button"
+          accessibilityLabel="Bump listing"
+          accessibilityHint="Promotes this listing for additional visibility"
         >
           <View style={styles.blockLeft}>
             <View style={[styles.iconBox, { backgroundColor: 'rgba(245,166,35,0.1)' }]}>
@@ -133,6 +142,9 @@ export default function ManageListingScreen() {
           style={styles.actionBlock} 
           activeOpacity={0.8}
           onPress={() => navigation.navigate('MainTabs', { screen: 'Sell' })}
+          accessibilityRole="button"
+          accessibilityLabel="Edit listing details"
+          accessibilityHint="Opens listing editor"
         >
           <View style={styles.blockLeft}>
             <View style={[styles.iconBox, { backgroundColor: EDIT_ICON_BG }]}>
@@ -147,6 +159,9 @@ export default function ManageListingScreen() {
             style={styles.actionBlock} 
             activeOpacity={0.8}
             onPress={handleMarkAsSold}
+            accessibilityRole="button"
+            accessibilityLabel="Mark listing as sold"
+            accessibilityHint="Marks item unavailable for purchase"
           >
             <View style={styles.blockLeft}>
               <View style={[styles.iconBox, { backgroundColor: 'rgba(52,199,89,0.1)' }]}>
@@ -161,6 +176,9 @@ export default function ManageListingScreen() {
           style={[styles.actionBlock, { borderBottomWidth: 0 }]} 
           activeOpacity={0.8}
           onPress={handleDeleteListing}
+          accessibilityRole="button"
+          accessibilityLabel="Delete listing"
+          accessibilityHint="Permanently deletes this listing"
         >
           <View style={styles.blockLeft}>
             <View style={[styles.iconBox, { backgroundColor: 'rgba(255,59,48,0.1)' }]}>

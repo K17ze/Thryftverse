@@ -65,6 +65,8 @@ Optional diagnostics:
 ```bash
 npm run doctor
 npm run docker:check
+npm run staging:shipping-ops
+npm run launch:phase8
 ```
 
 Expected outcome:
@@ -72,6 +74,8 @@ Expected outcome:
 - All Vitest suites pass.
 - `expo doctor` reports no blocking issues.
 - Local Docker backend passes end-to-end dependency checks (API, Postgres, Redis, MinIO, ML).
+- Shipping and launch-ops rehearsal passes (shipping quotes/webhooks, payout review queue, reconciliation, alerting).
+- Phase 8 launch checks pass (production rail config, DNS/SSL readiness, optional cleanup dry-run).
 
 ## 2) Core User-Flow Smoke
 

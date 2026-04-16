@@ -28,12 +28,28 @@ import { useCurrencyPref } from '../hooks/useCurrencyPref';
 import { sanitizeDecimalInput, sanitizeIntegerInput } from '../utils/currencyAuthoringFlows';
 import { buildCreateCoOwnPrefillFromSell } from '../utils/syndicatePrefill';
 import { filterImageUris } from '../utils/media';
+import { AppButton } from '../components/ui/AppButton';
+import { AppSegmentControl, AppSegmentOption } from '../components/ui/AppSegmentControl';
 
 const CONDITIONS = ['New with tags', 'Very good', 'Good', 'Satisfactory'];
 const SIZES = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', 'One size'];
 const BRANDS = ['Nike', 'Adidas', 'Zara', 'H&M', 'Ralph Lauren', 'Off-White', 'Stone Island', 'Stussy', 'Other'];
 const CATEGORY_OPTIONS = ['Women', 'Men', 'Designer', 'Kids', 'Home', 'Electronics', 'Entertainment', 'Hobbies & collectables', 'Sports'];
-const OFFERING_WINDOWS_HOURS = [24, 48, 72];
+const OFFERING_WINDOWS_HOURS = [24, 48, 72] as const;
+type CoOwnMode = 'off' | 'on';
+type OfferingWindowOption = `${typeof OFFERING_WINDOWS_HOURS[number]}h`;
+
+const CO_OWN_MODE_OPTIONS: AppSegmentOption<CoOwnMode>[] = [
+  { value: 'off', label: 'Off', accessibilityLabel: 'Disable co-own listing' },
+  { value: 'on', label: 'On', accessibilityLabel: 'Enable co-own listing' },
+];
+
+const OFFERING_WINDOW_OPTIONS: AppSegmentOption<OfferingWindowOption>[] = OFFERING_WINDOWS_HOURS.map((hours) => ({
+  value: `${hours}h` as OfferingWindowOption,
+  label: `${hours}h`,
+  accessibilityLabel: `${hours} hour offering window`,
+}));
+
 const IS_LIGHT = ActiveTheme === 'light';
 const BRAND = IS_LIGHT ? '#2f251b' : '#d7b98f';
 const HEADER_BG = IS_LIGHT ? '#f3eee7' : '#0a0a0a';
@@ -80,6 +96,25 @@ export default function SellScreen() {
   const shakeStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: shakeOffset.value }]
   }));
+
+  const coOwnModeValue: CoOwnMode = coOwnEnabled ? 'on' : 'off';
+  const offeringWindowValue = `${offeringWindowHours}h` as OfferingWindowOption;
+
+  const handleCoOwnModeChange = (nextMode: CoOwnMode) => {
+    const nextEnabled = nextMode === 'on';
+    setCoOwnEnabled(nextEnabled);
+
+    if (nextEnabled && authPhotos.length === 0 && photos.length > 0) {
+      setAuthPhotos(filterImageUris(photos, 2));
+    }
+  };
+
+  const handleOfferingWindowChange = (nextValue: OfferingWindowOption) => {
+    const parsedHours = Number(nextValue.replace('h', ''));
+    if (Number.isFinite(parsedHours) && parsedHours > 0) {
+      setOfferingWindowHours(parsedHours);
+    }
+  };
 
   const handleShareCountChange = (value: string) => {
     const sanitized = sanitizeIntegerInput(value);
@@ -304,11 +339,25 @@ export default function SellScreen() {
       {/* ── Scan Header / Upload Area ── */}
       <View style={styles.scanHeader}>
         <View style={styles.headerTop}>
-          <AnimatedPressable style={styles.iconBtn} onPress={() => navigation.goBack()} activeOpacity={0.8}>
+          <AnimatedPressable
+            style={styles.iconBtn}
+            onPress={() => navigation.goBack()}
+            activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel="Close sell flow"
+            accessibilityHint="Returns to the previous screen"
+          >
             <Ionicons name="close" size={28} color={Colors.textPrimary} />
           </AnimatedPressable>
           <Text style={styles.headerTitle}>Scan Item</Text>
-          <AnimatedPressable style={styles.iconBtn} activeOpacity={0.8} onPress={handlePickFromCamera}>
+          <AnimatedPressable
+            style={styles.iconBtn}
+            activeOpacity={0.8}
+            onPress={handlePickFromCamera}
+            accessibilityRole="button"
+            accessibilityLabel="Capture listing media"
+            accessibilityHint="Opens camera to add item media"
+          >
             <Ionicons name="flash-outline" size={24} color={Colors.textPrimary} />
           </AnimatedPressable>
         </View>
@@ -323,14 +372,32 @@ export default function SellScreen() {
             <Text style={styles.cameraSubtext}>Take a photo or video, or upload from your gallery</Text>
 
             <View style={styles.uploadActionRow}>
-              <AnimatedPressable style={styles.uploadActionBtn} activeOpacity={0.88} onPress={handlePickFromCamera}>
-                <Ionicons name="camera-outline" size={16} color={Colors.background} />
-                <Text style={styles.uploadActionBtnText}>Camera</Text>
-              </AnimatedPressable>
-              <AnimatedPressable style={styles.uploadActionBtn} activeOpacity={0.88} onPress={handlePickFromLibrary}>
-                <Ionicons name="images-outline" size={16} color={Colors.background} />
-                <Text style={styles.uploadActionBtnText}>Gallery</Text>
-              </AnimatedPressable>
+              <AppButton
+                title="Camera"
+                variant="primary"
+                size="sm"
+                onPress={handlePickFromCamera}
+                icon={<Ionicons name="camera-outline" size={16} color={Colors.textInverse} />}
+                style={styles.uploadActionBtn}
+                contentStyle={styles.uploadActionContent}
+                iconContainerStyle={styles.uploadActionIconWrap}
+                titleStyle={styles.uploadActionBtnText}
+                accessibilityLabel="Capture listing media"
+                accessibilityHint="Opens camera to capture photo or video"
+              />
+              <AppButton
+                title="Gallery"
+                variant="primary"
+                size="sm"
+                onPress={handlePickFromLibrary}
+                icon={<Ionicons name="images-outline" size={16} color={Colors.textInverse} />}
+                style={styles.uploadActionBtn}
+                contentStyle={styles.uploadActionContent}
+                iconContainerStyle={styles.uploadActionIconWrap}
+                titleStyle={styles.uploadActionBtnText}
+                accessibilityLabel="Upload media from gallery"
+                accessibilityHint="Opens media library to select photo or video"
+              />
             </View>
           </View>
         ) : (
@@ -358,7 +425,9 @@ export default function SellScreen() {
               placeholder="e.g. Vintage Nike Sweatshirt" 
               placeholderTextColor={Colors.textMuted}
               value={title} 
-              onChangeText={setTitle} 
+              onChangeText={setTitle}
+              accessibilityLabel="Listing title"
+              accessibilityHint="Enter a short title for your listing"
             />
           </View>
 
@@ -372,6 +441,8 @@ export default function SellScreen() {
               onChangeText={setDesc} 
               multiline 
               textAlignVertical="top"
+              accessibilityLabel="Listing description"
+              accessibilityHint="Describe condition, measurements, and details"
             />
           </View>
 
@@ -381,6 +452,9 @@ export default function SellScreen() {
               style={styles.pickerRow} 
               activeOpacity={0.7} 
               onPress={() => setPickerMode('Category')}
+              accessibilityRole="button"
+              accessibilityLabel="Select category"
+              accessibilityHint="Opens category picker"
             >
               <Text style={styles.pickerLabel}>Category</Text>
               <View style={styles.pickerValueArea}>
@@ -397,6 +471,9 @@ export default function SellScreen() {
               style={styles.pickerRow} 
               activeOpacity={0.7}
               onPress={() => setPickerMode('Brand')}
+              accessibilityRole="button"
+              accessibilityLabel="Select brand"
+              accessibilityHint="Opens brand picker"
             >
               <Text style={styles.pickerLabel}>Brand</Text>
               <View style={styles.pickerValueArea}>
@@ -413,6 +490,9 @@ export default function SellScreen() {
               style={styles.pickerRow} 
               activeOpacity={0.7}
               onPress={() => setPickerMode('Size')}
+              accessibilityRole="button"
+              accessibilityLabel="Select size"
+              accessibilityHint="Opens size picker"
             >
               <Text style={styles.pickerLabel}>Size</Text>
               <View style={styles.pickerValueArea}>
@@ -429,6 +509,9 @@ export default function SellScreen() {
               style={styles.pickerRow} 
               activeOpacity={0.7}
               onPress={() => setPickerMode('Condition')}
+              accessibilityRole="button"
+              accessibilityLabel="Select condition"
+              accessibilityHint="Opens condition picker"
             >
               <Text style={styles.pickerLabel}>Condition</Text>
               <View style={styles.pickerValueArea}>
@@ -452,6 +535,8 @@ export default function SellScreen() {
               value={price} 
               onChangeText={handlePriceChange} 
               keyboardType="decimal-pad"
+              accessibilityLabel="Listing price"
+              accessibilityHint="Enter selling price in the selected currency"
             />
           </View>
 
@@ -464,27 +549,16 @@ export default function SellScreen() {
                 <Text style={styles.coOwnTitle}>Tokenize this item</Text>
                 <Text style={styles.coOwnHint}>Create fractional shares for the Co-Own marketplace.</Text>
               </View>
-              <View style={styles.coOwnToggleWrap}>
-                <AnimatedPressable
-                  style={[styles.coOwnToggleBtn, !coOwnEnabled && styles.coOwnToggleBtnActive]}
-                  activeOpacity={0.85}
-                  onPress={() => setCoOwnEnabled(false)}
-                >
-                  <Text style={[styles.coOwnToggleText, !coOwnEnabled && styles.coOwnToggleTextActive]}>Off</Text>
-                </AnimatedPressable>
-                <AnimatedPressable
-                  style={[styles.coOwnToggleBtn, coOwnEnabled && styles.coOwnToggleBtnActive]}
-                  activeOpacity={0.85}
-                  onPress={() => {
-                    setCoOwnEnabled(true);
-                    if (authPhotos.length === 0 && photos.length > 0) {
-                      setAuthPhotos(filterImageUris(photos, 2));
-                    }
-                  }}
-                >
-                  <Text style={[styles.coOwnToggleText, coOwnEnabled && styles.coOwnToggleTextActive]}>On</Text>
-                </AnimatedPressable>
-              </View>
+              <AppSegmentControl
+                options={CO_OWN_MODE_OPTIONS}
+                value={coOwnModeValue}
+                onChange={handleCoOwnModeChange}
+                style={styles.coOwnToggleWrap}
+                optionStyle={styles.coOwnToggleBtn}
+                optionActiveStyle={styles.coOwnToggleBtnActive}
+                optionTextStyle={styles.coOwnToggleText}
+                optionTextActiveStyle={styles.coOwnToggleTextActive}
+              />
             </View>
 
             {coOwnEnabled ? (
@@ -497,6 +571,8 @@ export default function SellScreen() {
                   keyboardType="number-pad"
                   placeholder="20"
                   placeholderTextColor={Colors.textMuted}
+                  accessibilityLabel="Co-own share count"
+                  accessibilityHint="Enter number of shares to create"
                 />
                 <Text style={styles.coOwnInputHint}>Maximum 20 units per co-own</Text>
 
@@ -508,24 +584,21 @@ export default function SellScreen() {
                   keyboardType="decimal-pad"
                   placeholder="0.00"
                   placeholderTextColor={Colors.textMuted}
+                  accessibilityLabel="Initial share price"
+                  accessibilityHint="Enter starting price per share"
                 />
 
                 <Text style={styles.inputLabel}>Offering window</Text>
-                <View style={styles.windowChipsRow}>
-                  {OFFERING_WINDOWS_HOURS.map((hours) => {
-                    const active = offeringWindowHours === hours;
-                    return (
-                      <AnimatedPressable
-                        key={hours}
-                        style={[styles.windowChip, active && styles.windowChipActive]}
-                        onPress={() => setOfferingWindowHours(hours)}
-                        activeOpacity={0.85}
-                      >
-                        <Text style={[styles.windowChipText, active && styles.windowChipTextActive]}>{hours}h</Text>
-                      </AnimatedPressable>
-                    );
-                  })}
-                </View>
+                <AppSegmentControl
+                  options={OFFERING_WINDOW_OPTIONS}
+                  value={offeringWindowValue}
+                  onChange={handleOfferingWindowChange}
+                  style={styles.windowChipsRow}
+                  optionStyle={styles.windowChip}
+                  optionActiveStyle={styles.windowChipActive}
+                  optionTextStyle={styles.windowChipText}
+                  optionTextActiveStyle={styles.windowChipTextActive}
+                />
 
                 <View style={styles.authRow}>
                   <View>
@@ -552,6 +625,9 @@ export default function SellScreen() {
 
                         setAuthPhotos(nextAuthPhotos);
                       }}
+                      accessibilityRole="button"
+                      accessibilityLabel="Use listing photos for authentication"
+                      accessibilityHint="Copies listing media into authentication photos"
                     >
                       <Text style={styles.authBtnText}>Use listing</Text>
                     </AnimatedPressable>
@@ -559,6 +635,9 @@ export default function SellScreen() {
                       style={[styles.authBtn, styles.authBtnMuted]}
                       activeOpacity={0.85}
                       onPress={() => setAuthPhotos([])}
+                      accessibilityRole="button"
+                      accessibilityLabel="Clear authentication photos"
+                      accessibilityHint="Removes selected authentication photos"
                     >
                       <Text style={[styles.authBtnText, styles.authBtnTextMuted]}>Clear</Text>
                     </AnimatedPressable>
@@ -619,16 +698,17 @@ export default function SellScreen() {
           </Reanimated.Text>
         )}
         <Reanimated.View style={[shakeStyle, { width: '100%' }]} layout={Layout.springify()}>
-          <AnimatedPressable
-            style={[styles.uploadCta, !publishReady && styles.uploadCtaDisabled]}
-            activeOpacity={0.9}
+          <AppButton
+            title={publishReady ? (coOwnEnabled ? 'Continue to Issue' : 'Publish Item') : 'Complete Required Fields'}
+            variant="primary"
+            size="lg"
             onPress={handlePublish}
             disabled={!publishReady}
-          >
-            <Text style={[styles.uploadCtaText, !publishReady && styles.uploadCtaTextDisabled]}>
-              {publishReady ? (coOwnEnabled ? 'Continue to Issue' : 'Publish Item') : 'Complete Required Fields'}
-            </Text>
-          </AnimatedPressable>
+            style={[styles.uploadCta, !publishReady && styles.uploadCtaDisabled]}
+            titleStyle={[styles.uploadCtaText, !publishReady && styles.uploadCtaTextDisabled]}
+            accessibilityLabel={publishReady ? 'Publish listing' : 'Complete required fields'}
+            accessibilityHint={publishReady ? 'Publishes this listing' : 'Fill missing details to enable publishing'}
+          />
         </Reanimated.View>
       </View>
 
@@ -721,12 +801,17 @@ const styles = StyleSheet.create({
   },
   uploadActionBtn: {
     borderRadius: 999,
-    backgroundColor: Colors.accent,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
+    minHeight: 38,
+    minWidth: 116,
+  },
+  uploadActionContent: {
     gap: 6,
+  },
+  uploadActionIconWrap: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: 'transparent',
   },
   uploadActionBtnText: {
     color: Colors.textInverse,
@@ -827,6 +912,10 @@ const styles = StyleSheet.create({
   },
   coOwnToggleBtn: {
     borderRadius: 10,
+    borderWidth: 0,
+    borderColor: 'transparent',
+    backgroundColor: 'transparent',
+    minHeight: 28,
     minWidth: 40,
     alignItems: 'center',
     justifyContent: 'center',

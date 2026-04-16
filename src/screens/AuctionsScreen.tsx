@@ -34,6 +34,9 @@ import { SkeletonLoader } from '../components/SkeletonLoader';
 import { SyncStatusPill } from '../components/SyncStatusPill';
 import { SyncRetryBanner } from '../components/SyncRetryBanner';
 import { parseApiError } from '../lib/apiClient';
+import { AppButton } from '../components/ui/AppButton';
+import { AppInput } from '../components/ui/AppInput';
+import { AppStatusPill } from '../components/ui/AppStatusPill';
 import {
   convertDisplayToGbpAmount,
   getSuggestedBidDisplayAmount,
@@ -382,6 +385,9 @@ export default function AuctionsScreen() {
               style={styles.posterCard}
               activeOpacity={0.9}
               onPress={() => navigation.navigate('PosterViewer', { posterId: item.id })}
+              accessibilityRole="button"
+              accessibilityLabel={`Open poster from @${item.uploader?.username ?? t('auctions.poster.unknownSeller')}`}
+              accessibilityHint="Opens upcoming auction poster details"
             >
               <CachedImage uri={item.image} style={styles.posterImage} containerStyle={{ width: 56, height: 56, borderRadius: 10 }} contentFit="cover" />
               <View style={styles.posterOverlay}>
@@ -419,6 +425,9 @@ export default function AuctionsScreen() {
               style={styles.upcomingCard}
               activeOpacity={0.9}
               onPress={() => navigation.navigate('ItemDetail', { itemId: item.listingId })}
+              accessibilityRole="button"
+              accessibilityLabel={`Open upcoming auction ${item.title}`}
+              accessibilityHint="Opens listing details before auction starts"
             >
               <CachedImage uri={item.image} style={styles.upcomingImage} containerStyle={{ width: '100%', height: 120, borderRadius: 14 }} contentFit="cover" />
               <View style={styles.upcomingMeta}>
@@ -472,6 +481,9 @@ export default function AuctionsScreen() {
           style={styles.launchBtn}
           activeOpacity={0.9}
           onPress={() => navigation.navigate('CreateAuction')}
+          accessibilityRole="button"
+          accessibilityLabel={t('auctions.cta.launch')}
+          accessibilityHint="Opens auction creation flow"
         >
           <Ionicons name="add" size={15} color={Colors.background} />
           <Text style={styles.launchBtnText}>{t('auctions.cta.launch')}</Text>
@@ -523,15 +535,15 @@ export default function AuctionsScreen() {
       style={styles.liveCard}
       activeOpacity={0.95}
       onPress={() => navigation.navigate('ItemDetail', { itemId: item.listingId })}
+      accessibilityRole="button"
+      accessibilityLabel={`Open live auction ${item.title}`}
+      accessibilityHint="Opens listing details and auction context"
     >
       <CachedImage uri={item.image} style={styles.liveImage} containerStyle={{ width: '100%', height: 160, borderTopLeftRadius: 18, borderTopRightRadius: 18 }} contentFit="cover" />
 
       <View style={styles.liveBody}>
         <View style={styles.liveTopRow}>
-          <View style={styles.lifecyclePill}>
-            <View style={styles.liveDot} />
-            <Text style={styles.lifecycleText}>{t('auctions.lifecycle.open')}</Text>
-          </View>
+          <AppStatusPill tone="accent" iconName="flash-outline" label={t('auctions.lifecycle.open')} />
           <Text style={styles.timerText}>{formatCountdown(item.msToEnd)}</Text>
         </View>
 
@@ -559,37 +571,43 @@ export default function AuctionsScreen() {
         </View>
 
         <View style={styles.actionRow}>
-          <AnimatedPressable
+          <AppButton
             style={[styles.bidBtn, (isSubmittingBid || !!buyNowAuctionId) && styles.actionBtnDisabled]}
             onPress={() => openBidComposer(item)}
-            activeOpacity={0.9}
             disabled={isSubmittingBid || !!buyNowAuctionId}
-          >
-            <Ionicons name="hammer-outline" size={14} color={Colors.background} />
-            <Text style={styles.bidBtnText}>{t('auctions.cta.placeBid')}</Text>
-          </AnimatedPressable>
+            variant="contrast"
+            size="sm"
+            align="center"
+            icon={<Ionicons name="hammer-outline" size={14} color={Colors.textInverse} />}
+            title={t('auctions.cta.placeBid')}
+            accessibilityLabel={t('auctions.cta.placeBid')}
+            accessibilityHint="Opens bid composer for this auction"
+          />
 
           {item.buyNowPrice ? (
-            <AnimatedPressable
+            <AppButton
               style={[styles.buyBtn, buyNowAuctionId === item.id && styles.actionBtnDisabled]}
               onPress={() => void handleBuyNow(item)}
-              activeOpacity={0.9}
               disabled={buyNowAuctionId === item.id || isSubmittingBid}
-            >
-              <Text style={styles.buyBtnText}>
-                {buyNowAuctionId === item.id ? t('auctions.cta.buying') : t('auctions.cta.buyNow')}
-              </Text>
-            </AnimatedPressable>
+              variant="primary"
+              size="sm"
+              align="center"
+              title={buyNowAuctionId === item.id ? t('auctions.cta.buying') : t('auctions.cta.buyNow')}
+              accessibilityLabel={buyNowAuctionId === item.id ? t('auctions.cta.buying') : t('auctions.cta.buyNow')}
+              accessibilityHint="Purchases the item instantly at buy now price"
+            />
           ) : (
-            <AnimatedPressable
+            <AppButton
               style={[styles.watchBtn, isWatching && styles.watchBtnActive]}
               onPress={() => handleToggleWatch(item)}
-              activeOpacity={0.9}
-            >
-              <Text style={[styles.watchBtnText, isWatching && styles.watchBtnTextActive]}>
-                {isWatching ? t('auctions.cta.watching') : t('auctions.cta.watch')}
-              </Text>
-            </AnimatedPressable>
+              variant="secondary"
+              size="sm"
+              align="center"
+              title={isWatching ? t('auctions.cta.watching') : t('auctions.cta.watch')}
+              titleStyle={[styles.watchBtnText, isWatching && styles.watchBtnTextActive]}
+              accessibilityLabel={isWatching ? t('auctions.cta.watching') : t('auctions.cta.watch')}
+              accessibilityHint={isWatching ? 'Removes this auction from watchlist' : 'Adds this auction to watchlist'}
+            />
           )}
         </View>
       </View>
@@ -610,22 +628,29 @@ export default function AuctionsScreen() {
         onRequestClose={closeBidComposer}
       >
         <View style={styles.bidModalOverlay}>
-          <AnimatedPressable style={styles.bidModalDismissLayer} activeOpacity={1} onPress={closeBidComposer} />
+          <AnimatedPressable
+            style={styles.bidModalDismissLayer}
+            activeOpacity={1}
+            onPress={closeBidComposer}
+            accessibilityRole="button"
+            accessibilityLabel="Dismiss bid composer"
+            accessibilityHint="Closes bid modal without submitting"
+          />
 
           <View style={styles.bidModalCard}>
             <Text style={styles.bidModalTitle} numberOfLines={1}>{selectedBidAuction.title}</Text>
 
-            <View style={styles.bidInputWrap}>
-              <Text style={styles.bidCurrency}>{currencyCode}</Text>
-              <TextInput
-                style={styles.bidInput}
-                value={bidInput}
-                onChangeText={(value) => setBidInput(sanitizeDecimalInput(value))}
-                keyboardType="decimal-pad"
-                placeholder="0.00"
-                placeholderTextColor={Colors.textMuted}
-              />
-            </View>
+            <AppInput
+              value={bidInput}
+              onChangeText={(value) => setBidInput(sanitizeDecimalInput(value))}
+              keyboardType="decimal-pad"
+              placeholder="0.00"
+              prefix={currencyCode}
+              accessibilityLabel="Bid amount"
+              accessibilityHint="Enter your bid amount"
+              inputContainerStyle={styles.bidInputWrap}
+              inputStyle={styles.bidInput}
+            />
 
             <View style={styles.bumpRow}>
               {[0.01, 0.03, 0.05].map((pct) => (
@@ -634,6 +659,9 @@ export default function AuctionsScreen() {
                   style={styles.bumpChip}
                   onPress={() => bumpBid(pct)}
                   activeOpacity={0.9}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Increase bid by ${Math.round(pct * 100)} percent`}
+                  accessibilityHint="Applies quick bid increment"
                 >
                   <Text style={styles.bumpChipText}>+{Math.round(pct * 100)}%</Text>
                 </AnimatedPressable>
@@ -641,20 +669,30 @@ export default function AuctionsScreen() {
             </View>
 
             <View style={styles.bidModalActions}>
-              <AnimatedPressable style={styles.bidCancelBtn} onPress={closeBidComposer} activeOpacity={0.9}>
-                <Text style={styles.bidCancelText}>{t('auctions.modal.cancel')}</Text>
-              </AnimatedPressable>
+              <AppButton
+                style={styles.bidCancelBtn}
+                onPress={closeBidComposer}
+                variant="secondary"
+                size="sm"
+                align="center"
+                title={t('auctions.modal.cancel')}
+                titleStyle={styles.bidCancelText}
+                accessibilityLabel={t('auctions.modal.cancel')}
+                accessibilityHint="Closes bid composer"
+              />
 
-              <AnimatedPressable
+              <AppButton
                 style={[styles.bidSubmitBtn, isSubmittingBid && styles.actionBtnDisabled]}
                 onPress={() => void submitBid()}
-                activeOpacity={0.9}
                 disabled={isSubmittingBid}
-              >
-                <Text style={styles.bidSubmitText}>
-                  {isSubmittingBid ? t('auctions.modal.submitting') : t('auctions.modal.submitBid')}
-                </Text>
-              </AnimatedPressable>
+                variant="primary"
+                size="sm"
+                align="center"
+                title={isSubmittingBid ? t('auctions.modal.submitting') : t('auctions.modal.submitBid')}
+                titleStyle={styles.bidSubmitText}
+                accessibilityLabel={isSubmittingBid ? t('auctions.modal.submitting') : t('auctions.modal.submitBid')}
+                accessibilityHint="Submits your bid"
+              />
             </View>
           </View>
         </View>
@@ -956,27 +994,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 8,
   },
-  lifecyclePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: PANEL_TINT_BG,
-    borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    gap: 5,
-  },
-  liveDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: BRAND,
-  },
-  lifecycleText: {
-    color: BRAND,
-    fontSize: 10,
-    fontFamily: 'Inter_700Bold',
-    letterSpacing: 0.4,
-  },
   timerText: {
     color: Colors.textPrimary,
     fontSize: 13,
@@ -1042,41 +1059,12 @@ const styles = StyleSheet.create({
   },
   bidBtn: {
     flex: 1,
-    backgroundColor: Colors.textPrimary,
-    borderRadius: 14,
-    paddingVertical: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 6,
-  },
-  bidBtnText: {
-    color: Colors.textInverse,
-    fontSize: 13,
-    fontFamily: 'Inter_700Bold',
   },
   buyBtn: {
     flex: 1,
-    backgroundColor: Colors.accent,
-    borderRadius: 14,
-    paddingVertical: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  buyBtnText: {
-    color: Colors.textInverse,
-    fontSize: 13,
-    fontFamily: 'Inter_700Bold',
   },
   watchBtn: {
     flex: 1,
-    backgroundColor: PANEL_SOFT_BG,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: PANEL_BORDER,
-    paddingVertical: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   watchBtnActive: {
     backgroundColor: PANEL_TINT_BG,
@@ -1128,27 +1116,13 @@ const styles = StyleSheet.create({
   },
   bidInputWrap: {
     marginTop: 12,
-    borderWidth: 1,
-    borderColor: PANEL_BORDER,
-    borderRadius: 12,
-    backgroundColor: PANEL_SOFT_BG,
-    paddingHorizontal: 10,
     height: 44,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  bidCurrency: {
-    color: Colors.textMuted,
-    fontSize: 11,
-    fontFamily: 'Inter_700Bold',
+    backgroundColor: PANEL_SOFT_BG,
   },
   bidInput: {
-    flex: 1,
-    color: Colors.textPrimary,
     fontSize: 15,
     fontFamily: 'Inter_700Bold',
-    paddingVertical: 0,
+    paddingVertical: 8,
   },
   bumpRow: {
     marginTop: 10,
@@ -1175,13 +1149,6 @@ const styles = StyleSheet.create({
   },
   bidCancelBtn: {
     flex: 1,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: PANEL_BORDER,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 10,
-    backgroundColor: PANEL_MUTED_BG,
   },
   bidCancelText: {
     color: Colors.textSecondary,
@@ -1190,11 +1157,6 @@ const styles = StyleSheet.create({
   },
   bidSubmitBtn: {
     flex: 1,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 10,
-    backgroundColor: Colors.accent,
   },
   bidSubmitText: {
     color: Colors.background,

@@ -174,6 +174,10 @@ export default function CreateAuctionScreen() {
         style={[styles.listingCard, selected && styles.listingCardSelected]}
         onPress={() => setSelectedListingId(item.id)}
         activeOpacity={0.9}
+        accessibilityRole="button"
+        accessibilityState={{ selected }}
+        accessibilityLabel={`Select listing ${item.title}`}
+        accessibilityHint="Attaches this listing to the auction"
       >
         <CachedImage uri={getListingCoverUri(item.images, 'https://picsum.photos/seed/listing-auction-fallback/300/400')} style={styles.listingImage} contentFit="cover" />
         <View style={styles.listingMeta}>
@@ -201,6 +205,7 @@ export default function CreateAuctionScreen() {
         <AnimatedPressable style={styles.closeBtn} onPress={() => navigation.goBack()} activeOpacity={0.85}
           accessibilityLabel="Close auction creation"
           accessibilityRole="button"
+          accessibilityHint="Returns without launching an auction"
         >
           <Ionicons name="close" size={20} color={Colors.textPrimary} />
         </AnimatedPressable>
@@ -212,6 +217,7 @@ export default function CreateAuctionScreen() {
         <AnimatedPressable style={styles.launchBtn} onPress={launchAuction} activeOpacity={0.9}
           accessibilityLabel="Launch auction"
           accessibilityRole="button"
+          accessibilityHint="Creates auction with current settings"
         >
           <Text style={styles.launchBtnText}>Launch</Text>
         </AnimatedPressable>
@@ -237,6 +243,10 @@ export default function CreateAuctionScreen() {
                   style={[styles.windowChip, active && styles.windowChipActive]}
                   activeOpacity={0.9}
                   onPress={() => setStartInMinutes(window.minutes)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  accessibilityLabel={`Start auction in ${window.label}`}
+                  accessibilityHint="Sets auction start delay"
                 >
                   <Text style={[styles.windowChipText, active && styles.windowChipTextActive]}>{window.label}</Text>
                 </AnimatedPressable>
@@ -255,6 +265,8 @@ export default function CreateAuctionScreen() {
             keyboardType="decimal-pad"
             placeholder="0.00"
             placeholderTextColor={Colors.textMuted}
+            accessibilityLabel="Starting bid"
+            accessibilityHint="Enter opening bid amount"
           />
 
           <View style={styles.buyNowRow}>
@@ -264,6 +276,10 @@ export default function CreateAuctionScreen() {
                 style={[styles.toggleBtn, buyNowEnabled && styles.toggleBtnActive]}
                 onPress={() => setBuyNowEnabled(true)}
                 activeOpacity={0.9}
+                accessibilityRole="button"
+                accessibilityState={{ selected: buyNowEnabled }}
+                accessibilityLabel="Enable buy now"
+                accessibilityHint="Turns buy-now option on"
               >
                 <Text style={[styles.toggleText, buyNowEnabled && styles.toggleTextActive]}>On</Text>
               </AnimatedPressable>
@@ -271,6 +287,10 @@ export default function CreateAuctionScreen() {
                 style={[styles.toggleBtn, !buyNowEnabled && styles.toggleBtnActive]}
                 onPress={() => setBuyNowEnabled(false)}
                 activeOpacity={0.9}
+                accessibilityRole="button"
+                accessibilityState={{ selected: !buyNowEnabled }}
+                accessibilityLabel="Disable buy now"
+                accessibilityHint="Turns buy-now option off"
               >
                 <Text style={[styles.toggleText, !buyNowEnabled && styles.toggleTextActive]}>Off</Text>
               </AnimatedPressable>
@@ -287,6 +307,8 @@ export default function CreateAuctionScreen() {
                 keyboardType="decimal-pad"
                 placeholder="0.00"
                 placeholderTextColor={Colors.textMuted}
+                accessibilityLabel="Buy now price"
+                accessibilityHint="Enter instant purchase price"
               />
             </>
           ) : null}

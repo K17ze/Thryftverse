@@ -30,6 +30,7 @@ import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useBackendData } from '../context/BackendDataContext';
 import { getBackendSyncStatus } from '../utils/syncStatus';
 import { useHaptic } from '../hooks/useHaptic';
+import { AppButton } from '../components/ui/AppButton';
 
 const { width } = Dimensions.get('window');
 const GRID_SPACING = 16;
@@ -337,44 +338,50 @@ export default function BrowseScreen() {
 
       <View style={styles.filterBar}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterRow}>
-          <AnimatedPressable
+          <AppButton
             style={styles.filterPill}
-            activeOpacity={0.8}
+            variant="contrast"
+            size="sm"
+            align="center"
+            title={hasActiveFilters ? 'Filter on' : 'Filter'}
+            titleStyle={styles.filterPillTextActive}
+            icon={<Ionicons name="options-outline" size={16} color={Colors.textInverse} />}
             onPress={() => navigation.navigate('Filter', { categoryId, subcategoryId, title })}
-          >
-            <Ionicons name="options-outline" size={16} color={Colors.background} />
-            <Text style={styles.filterPillTextActive}>{hasActiveFilters ? 'Filter on' : 'Filter'}</Text>
-          </AnimatedPressable>
-          <AnimatedPressable
+            accessibilityLabel="Open filters"
+          />
+          <AppButton
             style={styles.filterPillOutline}
-            activeOpacity={0.8}
+            variant="secondary"
+            size="sm"
+            align="center"
+            title={browseFilters.brands.length > 0 ? `Brand (${browseFilters.brands.length})` : 'Brand'}
+            titleStyle={styles.filterPillText}
+            icon={<Ionicons name="chevron-down" size={14} color={Colors.textPrimary} />}
             onPress={() => navigation.navigate('Filter', { categoryId, subcategoryId, title })}
-          >
-            <Text style={styles.filterPillText}>
-              {browseFilters.brands.length > 0 ? `Brand (${browseFilters.brands.length})` : 'Brand'}
-            </Text>
-            <Ionicons name="chevron-down" size={14} color={Colors.textPrimary} />
-          </AnimatedPressable>
-          <AnimatedPressable
+            accessibilityLabel="Filter by brand"
+          />
+          <AppButton
             style={styles.filterPillOutline}
-            activeOpacity={0.8}
+            variant="secondary"
+            size="sm"
+            align="center"
+            title={browseFilters.sizes.length > 0 ? `Size (${browseFilters.sizes.length})` : 'Size'}
+            titleStyle={styles.filterPillText}
+            icon={<Ionicons name="chevron-down" size={14} color={Colors.textPrimary} />}
             onPress={() => navigation.navigate('Filter', { categoryId, subcategoryId, title })}
-          >
-            <Text style={styles.filterPillText}>
-              {browseFilters.sizes.length > 0 ? `Size (${browseFilters.sizes.length})` : 'Size'}
-            </Text>
-            <Ionicons name="chevron-down" size={14} color={Colors.textPrimary} />
-          </AnimatedPressable>
-          <AnimatedPressable
+            accessibilityLabel="Filter by size"
+          />
+          <AppButton
             style={styles.filterPillOutline}
-            activeOpacity={0.8}
+            variant="secondary"
+            size="sm"
+            align="center"
+            title={browseFilters.condition !== 'Any' ? browseFilters.condition : 'Condition'}
+            titleStyle={styles.filterPillText}
+            icon={<Ionicons name="chevron-down" size={14} color={Colors.textPrimary} />}
             onPress={() => navigation.navigate('Filter', { categoryId, subcategoryId, title })}
-          >
-            <Text style={styles.filterPillText}>
-              {browseFilters.condition !== 'Any' ? browseFilters.condition : 'Condition'}
-            </Text>
-            <Ionicons name="chevron-down" size={14} color={Colors.textPrimary} />
-          </AnimatedPressable>
+            accessibilityLabel="Filter by condition"
+          />
         </ScrollView>
       </View>
 
@@ -492,24 +499,15 @@ const styles = StyleSheet.create({
   filterBar: { paddingBottom: 20 },
   filterRow: { paddingHorizontal: 20, gap: 10 },
   filterPill: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    gap: 6, 
-    paddingHorizontal: 18, 
-    paddingVertical: 10, 
+    minHeight: 40,
+    paddingHorizontal: 16,
     borderRadius: 24, 
-    backgroundColor: Colors.textPrimary 
   },
-  filterPillTextActive: { color: Colors.background, fontSize: 13, fontFamily: 'Inter_700Bold' },
+  filterPillTextActive: { color: Colors.textInverse, fontSize: 13, fontFamily: 'Inter_700Bold' },
   filterPillOutline: {
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    gap: 6, 
-    paddingHorizontal: 18, 
-    paddingVertical: 10, 
+    minHeight: 40,
+    paddingHorizontal: 16,
     borderRadius: 24, 
-    borderWidth: 1,
-    borderColor: Colors.border,
   },
   filterPillText: { color: Colors.textPrimary, fontSize: 13, fontFamily: 'Inter_600SemiBold' },
   syncRetryBanner: {

@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths-ignore:
-      - '**.md'
+      - '**/*.md'
       - '.github/workflows/ci.yml'
   workflow_dispatch:
     inputs:
@@ -26,6 +26,9 @@ on:
           - preview
           - production
 
+permissions:
+  contents: read
+
 concurrency:
   group: eas-build-${{ github.ref }}
   cancel-in-progress: false  # Never cancel an in-progress build
@@ -42,14 +45,18 @@ jobs:
         with:
           node-version: 20
           cache: npm
+          cache-dependency-path: package-lock.json
 
       - run: npm ci
 
       - name: Typecheck
-        run: npx tsc --noEmit
+        run: npm run typecheck
 
       - name: Unit Tests
-        run: npx vitest run
+        run: npm run test
+
+      - name: Design token guard
+        run: npm run lint:design-tokens
 
   eas-build:
     name: EAS Build (${{ matrix.platform }})
@@ -70,6 +77,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
+          cache-dependency-path: package-lock.json
 
       - run: npm ci
 
@@ -104,6 +112,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
+          cache-dependency-path: package-lock.json
 
       - run: npm ci
 

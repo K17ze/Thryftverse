@@ -18,18 +18,23 @@ interface RegisterNotificationDeviceResponse {
   };
 }
 
+export interface NotificationEvent {
+  id: string;
+  userId: string;
+  channel: string;
+  title: string;
+  body: string;
+  payload: Record<string, unknown>;
+  status: 'queued' | 'sent' | 'failed';
+  providerMessageId: string | null;
+  providerError: string | null;
+  createdAt: string;
+  sentAt: string | null;
+}
+
 interface ListNotificationEventsResponse {
   ok: true;
-  items: Array<{
-    id: string;
-    userId: string;
-    channel: string;
-    title: string;
-    body: string;
-    status: 'queued' | 'sent' | 'failed';
-    createdAt: string;
-    sentAt: string | null;
-  }>;
+  items: NotificationEvent[];
 }
 
 export interface RegisterNotificationDeviceInput {
@@ -60,7 +65,7 @@ export async function deactivateNotificationDevice(token: string): Promise<void>
   });
 }
 
-export async function listNotificationEvents(userId: string, limit = 30) {
+export async function listNotificationEvents(userId: string, limit = 30): Promise<NotificationEvent[]> {
   const payload = await fetchJson<ListNotificationEventsResponse>(
     `/notifications/events?userId=${encodeURIComponent(userId)}&limit=${limit}`
   );

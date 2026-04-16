@@ -40,6 +40,7 @@ import { SyncStatusPill } from '../components/SyncStatusPill';
 import { SyncRetryBanner } from '../components/SyncRetryBanner';
 import { useBackendData } from '../context/BackendDataContext';
 import { getBackendSyncStatus } from '../utils/syncStatus';
+import { AppButton } from '../components/ui/AppButton';
 
 const { width, height } = Dimensions.get('window');
 const IS_LIGHT = ActiveTheme === 'light';
@@ -263,28 +264,26 @@ export default function ItemDetailScreen() {
       {!item.isSold && (
         <Reanimated.View style={[styles.floatingBuyBar, { paddingBottom: Math.max(insets.bottom, 20) }]}>
           <BlurView intensity={85} tint={ActiveTheme === 'light' ? 'light' : 'dark'} style={StyleSheet.absoluteFillObject} />
-          <AnimatedPressable
-            style={[styles.actionBtn, styles.buyBtn]}
-            activeOpacity={0.9}
+          <AppButton
+            style={styles.actionBtn}
+            variant="primary"
+            size="xl"
+            title="Buy now"
+            subtitle="Instant checkout"
+            icon={<Ionicons name="flash-outline" size={15} color={Colors.textInverse} />}
             onPress={() => navigation.navigate('Checkout', { itemId: item.id })}
             accessibilityLabel={`Buy ${item.title} for ${formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}`}
-          >
-            <View style={styles.actionBtnMainRow}>
-              <Ionicons name="flash-outline" size={16} color={Colors.textInverse} />
-              <Text style={styles.buyBtnText}>Buy now</Text>
-            </View>
-          </AnimatedPressable>
-          <AnimatedPressable
-            style={[styles.actionBtn, styles.offerBtn]}
-            activeOpacity={0.9}
+          />
+          <AppButton
+            style={styles.actionBtn}
+            variant="secondary"
+            size="xl"
+            title="Make offer"
+            subtitle="Negotiate in chat"
+            icon={<Ionicons name="chatbubbles-outline" size={14} color={Colors.textPrimary} />}
             onPress={() => navigation.navigate('MakeOffer', { itemId: item.id, price: item.price, title: item.title })}
             accessibilityLabel={`Make an offer on ${item.title}`}
-          >
-            <View style={styles.actionBtnMainRow}>
-              <Ionicons name="chatbubbles-outline" size={15} color={Colors.textPrimary} />
-              <Text style={styles.offerBtnText}>Make offer</Text>
-            </View>
-          </AnimatedPressable>
+          />
         </Reanimated.View>
       )}
     </View>
@@ -411,43 +410,5 @@ const styles = StyleSheet.create({
   },
   actionBtn: {
     flex: 1,
-    height: 62,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 10,
   },
-  actionBtnMainRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  actionBtnMetaPrimary: {
-    marginTop: 2,
-    color: 'rgba(255,255,255,0.76)',
-    fontSize: 10,
-    fontFamily: 'Inter_500Medium',
-    letterSpacing: 0.2,
-    textTransform: 'uppercase',
-  },
-  actionBtnMeta: {
-    marginTop: 2,
-    color: Colors.textMuted,
-    fontSize: 10,
-    fontFamily: 'Inter_500Medium',
-    letterSpacing: 0.2,
-    textTransform: 'uppercase',
-  },
-  buyBtn: {
-    backgroundColor: Colors.accent,
-    borderWidth: 1,
-    borderColor: IS_LIGHT ? 'rgba(47,37,27,0.2)' : 'rgba(255,255,255,0.14)',
-  },
-  buyBtnText: { color: Colors.textInverse, fontSize: 16, fontFamily: 'Inter_700Bold', letterSpacing: -0.2 },
-  offerBtn: {
-    backgroundColor: PANEL_ALT_BG,
-    borderWidth: 1,
-    borderColor: PANEL_BORDER,
-  },
-  offerBtnText: { color: Colors.textPrimary, fontSize: 15, fontFamily: 'Inter_700Bold', letterSpacing: -0.1 },
 });

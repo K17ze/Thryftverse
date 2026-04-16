@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { Typography } from '../constants/typography';
 import { useStore } from '../store/useStore';
+import { AppButton } from '../components/ui/AppButton';
 import {
   loginWithPassword,
   requestEmailOtp,
@@ -385,23 +386,27 @@ export default function LoginScreen() {
                 <View style={styles.dividerLine} />
               </View>
 
-              <AnimatedPressable
+              <AppButton
+                title={isOtpSending ? 'Sending OTP...' : 'Send OTP to Email'}
                 style={[styles.otpRequestBtn, !canRequestOtp && styles.primaryBtnDisabled]}
+                titleStyle={styles.otpRequestText}
+                variant="secondary"
+                size="sm"
                 onPress={handleRequestOtp}
-                activeOpacity={0.9}
                 disabled={!canRequestOtp}
-              >
-                <Text style={styles.otpRequestText}>{isOtpSending ? 'Sending OTP...' : 'Send OTP to Email'}</Text>
-              </AnimatedPressable>
+                accessibilityLabel="Send one-time passcode to email"
+              />
 
-              <AnimatedPressable
+              <AppButton
+                title={isMagicSending ? 'Sending magic link...' : 'Send Magic Link Instead'}
                 style={[styles.magicLinkBtn, !canRequestMagicLink && styles.primaryBtnDisabled]}
+                titleStyle={styles.magicLinkText}
+                variant="secondary"
+                size="sm"
                 onPress={handleRequestMagicLink}
-                activeOpacity={0.9}
                 disabled={!canRequestMagicLink}
-              >
-                <Text style={styles.magicLinkText}>{isMagicSending ? 'Sending magic link...' : 'Send Magic Link Instead'}</Text>
-              </AnimatedPressable>
+                accessibilityLabel="Send magic sign-in link"
+              />
 
               {!!otpChallengeId && (
                 <View style={styles.otpGroup}>
@@ -424,14 +429,16 @@ export default function LoginScreen() {
                     }}
                   />
 
-                  <AnimatedPressable
+                  <AppButton
+                    title={isOtpVerifying ? 'Verifying...' : 'Verify OTP & Log In'}
                     style={[styles.otpVerifyBtn, !canVerifyOtp && styles.primaryBtnDisabled]}
+                    titleStyle={styles.otpVerifyText}
+                    variant="primary"
+                    size="sm"
                     onPress={handleVerifyOtp}
-                    activeOpacity={0.9}
                     disabled={!canVerifyOtp}
-                  >
-                    <Text style={styles.otpVerifyText}>{isOtpVerifying ? 'Verifying...' : 'Verify OTP & Log In'}</Text>
-                  </AnimatedPressable>
+                    accessibilityLabel="Verify OTP and log in"
+                  />
                 </View>
               )}
             </View>
@@ -461,14 +468,16 @@ export default function LoginScreen() {
             )}
 
             <Reanimated.View style={shakeStyle} layout={Layout.springify()}>
-              <AnimatedPressable
+              <AppButton
+                title={isSubmitting ? 'Logging in...' : 'Log In'}
                 style={[styles.primaryBtn, !canSubmit && styles.primaryBtnDisabled]}
+                titleStyle={styles.primaryText}
+                variant="contrast"
+                size="md"
                 onPress={handleLogin}
-                activeOpacity={0.9}
                 disabled={!canSubmit}
-              >
-                <Text style={styles.primaryText}>{isSubmitting ? 'Logging in...' : 'Log In'}</Text>
-              </AnimatedPressable>
+                accessibilityLabel="Log in"
+              />
             </Reanimated.View>
 
             <View style={styles.switchRow}>
@@ -539,13 +548,11 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
   },
   otpRequestBtn: {
-    height: 46,
+    minHeight: 46,
     borderRadius: 23,
     borderWidth: 1,
     borderColor: Colors.border,
     backgroundColor: PANEL_BG,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   otpRequestText: {
     color: Colors.textPrimary,
@@ -567,10 +574,10 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   magicLinkBtn: {
-    height: 42,
+    minHeight: 42,
     borderRadius: 21,
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderWidth: 0,
+    backgroundColor: 'transparent',
     marginTop: 10,
   },
   magicLinkText: {
@@ -580,10 +587,9 @@ const styles = StyleSheet.create({
     textDecorationLine: 'underline',
   },
   otpVerifyBtn: {
-    height: 48,
+    minHeight: 48,
     borderRadius: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderWidth: 0,
     backgroundColor: Colors.accent,
   },
   otpVerifyText: {
@@ -595,7 +601,7 @@ const styles = StyleSheet.create({
   footer: { paddingTop: 8, position: 'relative' },
   infoText: { color: Colors.success, fontSize: 13, fontFamily: Typography.family.medium, textAlign: 'center', marginBottom: 12 },
   errorText: { color: Colors.danger, fontSize: 13, fontFamily: Typography.family.medium, textAlign: 'center', marginBottom: 12 },
-  primaryBtn: { backgroundColor: Colors.textPrimary, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center' },
+  primaryBtn: { backgroundColor: Colors.textPrimary, minHeight: 56, borderRadius: 28, borderWidth: 0 },
   primaryBtnDisabled: { opacity: 0.45 },
   primaryText: { color: Colors.background, fontSize: 16, fontFamily: Typography.family.semibold },
   switchRow: {

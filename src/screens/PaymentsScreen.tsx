@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
+import { AppButton } from '../components/ui/AppButton';
 import { View,
   Text,
   StyleSheet,
@@ -93,7 +94,13 @@ export default function PaymentsScreen({ navigation }: Props) {
       <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
       
       <View style={styles.header}>
-        <AnimatedPressable style={styles.backBtn} onPress={() => navigation.goBack()}>
+        <AnimatedPressable
+          style={styles.backBtn}
+          onPress={() => navigation.goBack()}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+          accessibilityHint="Returns to the previous screen"
+        >
           <Ionicons name="arrow-back" size={24} color={Colors.textPrimary} />
         </AnimatedPressable>
         <Text style={styles.hugeTitle}>Payments</Text>
@@ -110,7 +117,13 @@ export default function PaymentsScreen({ navigation }: Props) {
               <Text style={styles.paymentTitle}>Use Thryftverse Balance</Text>
               <Text style={styles.paymentSub}>Automatically apply {formatFromFiat(120.5, 'GBP', { displayMode: 'fiat' })} to purchases</Text>
             </View>
-            <AnimatedPressable onPress={() => setUseBalance(!useBalance)}>
+            <AnimatedPressable
+              onPress={() => setUseBalance(!useBalance)}
+              accessibilityRole="switch"
+              accessibilityLabel="Use Thryftverse balance"
+              accessibilityHint="Toggles automatic balance usage during checkout"
+              accessibilityState={{ checked: useBalance }}
+            >
               <Ionicons 
                 name={useBalance ? "toggle" : "toggle-outline"} 
                 size={36} 
@@ -172,10 +185,19 @@ export default function PaymentsScreen({ navigation }: Props) {
             </View>
           )}
           {allowCards ? (
-            <AnimatedPressable style={styles.addBtn} onPress={() => setAddCardSheetVisible(true)}>
-              <Ionicons name="add" size={20} color={Colors.textPrimary} />
-              <Text style={styles.addText}>Add new card</Text>
-            </AnimatedPressable>
+            <AppButton
+              title="Add new card"
+              icon={<Ionicons name="add" size={18} color={Colors.textPrimary} />}
+              style={styles.addBtn}
+              variant="secondary"
+              size="sm"
+              titleStyle={styles.addText}
+              contentStyle={styles.addBtnContent}
+              iconContainerStyle={styles.addIconWrap}
+              onPress={() => setAddCardSheetVisible(true)}
+              accessibilityLabel="Add new card"
+              accessibilityHint="Opens card setup"
+            />
           ) : null}
         </View>
 
@@ -230,10 +252,19 @@ export default function PaymentsScreen({ navigation }: Props) {
             </View>
           )}
           {allowBankAccounts ? (
-            <AnimatedPressable style={styles.addBtn} onPress={() => navigation.navigate('AddBankAccount')}>
-              <Ionicons name="add" size={20} color={Colors.textPrimary} />
-              <Text style={styles.addText}>Add new bank account</Text>
-            </AnimatedPressable>
+            <AppButton
+              title="Add new bank account"
+              icon={<Ionicons name="add" size={18} color={Colors.textPrimary} />}
+              style={styles.addBtn}
+              variant="secondary"
+              size="sm"
+              titleStyle={styles.addText}
+              contentStyle={styles.addBtnContent}
+              iconContainerStyle={styles.addIconWrap}
+              onPress={() => navigation.navigate('AddBankAccount')}
+              accessibilityLabel="Add new bank account"
+              accessibilityHint="Opens bank account setup"
+            />
           ) : null}
         </View>
       </ScrollView>
@@ -306,6 +337,8 @@ const styles = StyleSheet.create({
   },
   defaultText: { fontSize: 11, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary },
 
-  addBtn: { flexDirection: 'row', alignItems: 'center', paddingVertical: 16, gap: 12 },
+  addBtn: { borderRadius: 14, marginTop: 8, alignSelf: 'flex-start' },
+  addBtnContent: { gap: 8 },
+  addIconWrap: { width: 18, height: 18, borderRadius: 9, backgroundColor: 'transparent' },
   addText: { fontSize: 15, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary },
 });
