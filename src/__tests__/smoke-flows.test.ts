@@ -65,14 +65,18 @@ describe('co-own trade lifecycle smoke', () => {
     expect(ledger[1].referenceId).toBe(SAMPLE_ASSET.id);
   });
 
-  it('blocks trading when compliance is incomplete', () => {
+  it('allows trading when compliance profile is incomplete', () => {
     useStore.getState().updateCoOwnCompliance({
       kycVerified: false,
     });
 
     const result = useStore.getState().buyCoOwnUnits(SAMPLE_ASSET, 'u_buyer', 2);
-    expect(result.ok).toBe(false);
-    expect(result.message?.toLowerCase()).toContain('kyc');
+    expect(result.ok).toBe(true);
+
+    const runtimeAfterBuy = useStore.getState().coOwnRuntime[SAMPLE_ASSET.id];
+    expect(runtimeAfterBuy).toBeDefined();
+    expect(runtimeAfterBuy.availableUnits).toBe(18);
+    expect(runtimeAfterBuy.yourUnits).toBe(2);
   });
 
   it('initiates delivery when buyer reaches full ownership', () => {
