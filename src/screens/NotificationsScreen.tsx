@@ -17,9 +17,12 @@ import { RootStackParamList } from '../navigation/types';
 import { EmptyState } from '../components/EmptyState';
 import { AnimatedPressable } from '../components/AnimatedPressable';
 import { CachedImage } from '../components/CachedImage';
+import { SharedTransitionView } from '../components/SharedTransitionView';
 import { useToast } from '../context/ToastContext';
 import { useStore } from '../store/useStore';
 import { NotificationEvent, listNotificationEvents } from '../services/notificationsApi';
+import { useReducedMotion } from '../hooks/useReducedMotion';
+import { Motion } from '../constants/motion';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 
@@ -198,6 +201,7 @@ export default function NotificationsScreen() {
   const navigation = useNavigation<NavT>();
   const { show } = useToast();
   const currentUser = useStore((state) => state.currentUser);
+  const reducedMotionEnabled = useReducedMotion();
   const [notifications, setNotifications] = React.useState<NotificationCard[]>([]);
   const [isLoading, setIsLoading] = React.useState(false);
   const hasShownSyncErrorRef = React.useRef(false);
@@ -275,7 +279,7 @@ export default function NotificationsScreen() {
 
       const listingId = typeof notification.payload.listingId === 'string' ? notification.payload.listingId : null;
       if (listingId) {
-        navigation.navigate('ItemDetail', { itemId: listingId });
+        navigation.push('ItemDetail', { itemId: listingId });
         return;
       }
 
@@ -314,8 +318,17 @@ export default function NotificationsScreen() {
         )}
         renderItem={({ item, index }) => {
           const icon = getNotifIcon(item.type);
+          const listingId = typeof item.payload.listingId === 'string' ? item.payload.listingId : undefined;
           return (
-            <Reanimated.View entering={FadeInDown.delay(Math.min(index, 8) * 60).duration(350)}>
+            <Reanimated.View
+              entering={
+                reducedMotionEnabled
+                  ? undefined
+                  : FadeInDown
+                      .delay(Math.min(index, Motion.list.maxStaggerItems) * Motion.list.staggerStep)
+                      .duration(Motion.list.enterDuration)
+              }
+            >
               <AnimatedPressable
                 style={[styles.notifCard, !item.read && styles.notifCardUnread]}
                 activeOpacity={0.8}
@@ -325,7 +338,12 @@ export default function NotificationsScreen() {
                 {!item.read && <View style={styles.unreadDot} />}
 
                 <View style={styles.notifImageWrap}>
-                  <CachedImage uri={item.itemImage} style={styles.notifImage} contentFit="cover" />
+                  <SharedTransitionView
+                    style={styles.notifImageShared}
+                    sharedTransitionTag={listingId ? `image-${listingId}-0` : undefined}
+                  >
+                    <CachedImage uri={item.itemImage} style={styles.notifImage} contentFit="cover" />
+                  </SharedTransitionView>
                 </View>
 
                 <View style={styles.notifBody}>
@@ -432,6 +450,9 @@ const styles = StyleSheet.create({
     backgroundColor: PANEL_ALT,
     borderWidth: 1,
     borderColor: PANEL_BORDER,
+  },
+  notifImageShared: {
+    ...StyleSheet.absoluteFillObject,
   },
   notifImage: { width: '100%', height: '100%' },
 

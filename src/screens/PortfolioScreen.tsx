@@ -21,6 +21,8 @@ import { useStore } from '../store/useStore';
 import { resolveAssetMarketState } from '../data/mockSyndicateData';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { EmptyState } from '../components/EmptyState';
+import { useReducedMotion } from '../hooks/useReducedMotion';
+import { Motion } from '../constants/motion';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 const IS_LIGHT = ActiveTheme === 'light';
@@ -39,6 +41,7 @@ export default function PortfolioScreen() {
   const customCoOwns = useStore((state) => state.customCoOwns);
   const coOwnRuntime = useStore((state) => state.coOwnRuntime);
   const { formatFromFiat } = useFormattedPrice();
+  const reducedMotionEnabled = useReducedMotion();
 
   const baseAssets = React.useMemo(() => getCoOwnMarket(customCoOwns), [customCoOwns]);
 
@@ -89,7 +92,15 @@ export default function PortfolioScreen() {
     const pnl = (item.unitPriceGBP - avg) * item.yourUnits;
 
     return (
-      <Reanimated.View entering={FadeInDown.duration(380).delay(Math.min(index, 8) * 40)}>
+      <Reanimated.View
+        entering={
+          reducedMotionEnabled
+            ? undefined
+            : FadeInDown
+                .duration(Motion.list.enterDuration)
+                .delay(Math.min(index, Motion.list.maxStaggerItems) * Motion.list.staggerStep)
+        }
+      >
         <AnimatedPressable
           style={styles.holdingRow}
           activeOpacity={0.92}

@@ -28,6 +28,7 @@ import {
 } from '../services/commerceApi';
 import { calculatePlatformChargeGbp } from '../utils/currencyAuthoringFlows';
 import { CachedImage } from '../components/CachedImage';
+import { SharedTransitionView } from '../components/SharedTransitionView';
 import { getListingCoverUri } from '../utils/media';
 import { AppButton } from '../components/ui/AppButton';
 
@@ -337,10 +338,15 @@ export default function OrderDetailScreen() {
         {/* -- Item Card -- */}
         <AnimatedPressable
           style={styles.itemCard}
-          onPress={() => navigation.navigate('ItemDetail', { itemId: listing.id })}
+          onPress={() => navigation.push('ItemDetail', { itemId: listing.id })}
           activeOpacity={0.88}
         >
-          <CachedImage uri={getListingCoverUri(listing.images, 'https://picsum.photos/seed/order-detail-fallback/300/400')} style={styles.itemThumb} contentFit="cover" />
+          <SharedTransitionView
+            style={styles.itemThumb}
+            sharedTransitionTag={`image-${listing.id}-0`}
+          >
+            <CachedImage uri={getListingCoverUri(listing.images, 'https://picsum.photos/seed/order-detail-fallback/300/400')} style={styles.itemThumbImage} contentFit="cover" />
+          </SharedTransitionView>
           <View style={styles.itemInfo}>
             <Text style={styles.itemTitle} numberOfLines={2}>{listing.title}</Text>
             <Text style={styles.itemMeta}>{listing.size} - {listing.condition}</Text>
@@ -555,7 +561,8 @@ const styles = StyleSheet.create({
     gap: 14,
     marginBottom: 16,
   },
-  itemThumb: { width: 72, height: 72, borderRadius: 14 },
+  itemThumb: { width: 72, height: 72, borderRadius: 14, overflow: 'hidden' },
+  itemThumbImage: { width: '100%', height: '100%' },
   itemInfo: { flex: 1 },
   itemTitle: { fontSize: 15, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary, marginBottom: 4 },
   itemMeta: { fontSize: 13, fontFamily: 'Inter_400Regular', color: Colors.textMuted, marginBottom: 4 },

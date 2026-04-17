@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { useStore } from '../store/useStore';
 import { signupWithPassword } from '../services/authApi';
+import { useReducedMotion } from '../hooks/useReducedMotion';
 
 export default function SignUpScreen() {
   const navigation = useNavigation<any>();
@@ -28,6 +29,7 @@ export default function SignUpScreen() {
   const [password, setPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const reducedMotionEnabled = useReducedMotion();
   const canSubmit = username.trim().length > 0 && email.trim().length > 0 && password.length > 0 && !isSubmitting;
 
   const shakeOffset = useSharedValue(0);
@@ -45,6 +47,12 @@ export default function SignUpScreen() {
   const shakeStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: shakeOffset.value }]
   }));
+
+  const statusEnterAnimation = reducedMotionEnabled
+    ? undefined
+    : FadeInUp.springify().damping(20).duration(400);
+  const statusExitAnimation = reducedMotionEnabled ? undefined : FadeOutUp;
+  const layoutAnimation = reducedMotionEnabled ? undefined : Layout.springify();
 
   const handleSignUp = async () => {
     if (isSubmitting) {
@@ -182,16 +190,16 @@ export default function SignUpScreen() {
 
             {!!errorMsg && (
               <Reanimated.Text
-                entering={FadeInUp.springify().damping(20).duration(400)}
-                exiting={FadeOutUp}
-                layout={Layout.springify()}
+                entering={statusEnterAnimation}
+                exiting={statusExitAnimation}
+                layout={layoutAnimation}
                 style={styles.errorText}
               >
                 {errorMsg}
               </Reanimated.Text>
             )}
 
-            <Reanimated.View style={shakeStyle} layout={Layout.springify()}>
+            <Reanimated.View style={shakeStyle} layout={layoutAnimation}>
               <AnimatedPressable
                 style={[styles.primaryBtn, !canSubmit && styles.primaryBtnDisabled]}
                 onPress={handleSignUp}

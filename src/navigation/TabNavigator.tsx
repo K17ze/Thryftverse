@@ -114,7 +114,7 @@ export default function TabNavigator() {
           component={SearchScreen}
           options={{
             tabBarIcon: ({ color, focused }) => (
-              <TabIcon name={focused ? 'search' : 'search-outline'} color={color} focused={focused} />
+              <TabIcon name={focused ? 'compass' : 'compass-outline'} color={color} focused={focused} />
             ),
           }}
         />

@@ -19,6 +19,7 @@ import { ActiveTheme, Colors } from '../constants/colors';
 import { Typography } from '../constants/typography';
 import { useStore } from '../store/useStore';
 import { AppButton } from '../components/ui/AppButton';
+import { useReducedMotion } from '../hooks/useReducedMotion';
 import {
   loginWithPassword,
   requestEmailOtp,
@@ -46,6 +47,7 @@ export default function LoginScreen() {
   const [recoveryCode, setRecoveryCode] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [infoMsg, setInfoMsg] = useState('');
+  const reducedMotionEnabled = useReducedMotion();
   const login = useStore(state => state.login);
   const setTwoFactorEnabled = useStore(state => state.setTwoFactorEnabled);
   const canSubmit = email.trim().length > 0 && password.length > 0 && !isSubmitting;
@@ -68,6 +70,12 @@ export default function LoginScreen() {
   const shakeStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: shakeOffset.value }]
   }));
+
+  const statusEnterAnimation = reducedMotionEnabled
+    ? undefined
+    : FadeInUp.springify().damping(20).duration(400);
+  const statusExitAnimation = reducedMotionEnabled ? undefined : FadeOutUp;
+  const layoutAnimation = reducedMotionEnabled ? undefined : Layout.springify();
 
   const handleLogin = async () => {
     if (isSubmitting) {
@@ -447,9 +455,9 @@ export default function LoginScreen() {
           <View style={styles.footer}>
             {!!infoMsg && !errorMsg && (
               <Reanimated.Text
-                entering={FadeInUp.springify().damping(20).duration(400)}
-                exiting={FadeOutUp}
-                layout={Layout.springify()}
+                entering={statusEnterAnimation}
+                exiting={statusExitAnimation}
+                layout={layoutAnimation}
                 style={styles.infoText}
               >
                 {infoMsg}
@@ -458,16 +466,16 @@ export default function LoginScreen() {
 
             {!!errorMsg && (
               <Reanimated.Text
-                entering={FadeInUp.springify().damping(20).duration(400)}
-                exiting={FadeOutUp}
-                layout={Layout.springify()}
+                entering={statusEnterAnimation}
+                exiting={statusExitAnimation}
+                layout={layoutAnimation}
                 style={styles.errorText}
               >
                 {errorMsg}
               </Reanimated.Text>
             )}
 
-            <Reanimated.View style={shakeStyle} layout={Layout.springify()}>
+            <Reanimated.View style={shakeStyle} layout={layoutAnimation}>
               <AppButton
                 title={isSubmitting ? 'Logging in...' : 'Log In'}
                 style={[styles.primaryBtn, !canSubmit && styles.primaryBtnDisabled]}

@@ -14,6 +14,7 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import Reanimated, { FadeInDown, FadeOutUp } from 'react-native-reanimated';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { RootStackParamList } from '../navigation/types';
+import { useReducedMotion } from '../hooks/useReducedMotion';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 const IS_LIGHT = ActiveTheme === 'light';
@@ -49,6 +50,7 @@ const SLIDES = [
 
 export default function CoOwnOnboardingScreen() {
   const navigation = useNavigation<NavT>();
+  const reducedMotionEnabled = useReducedMotion();
   const [index, setIndex] = React.useState(0);
 
   const slide = SLIDES[index];
@@ -79,8 +81,8 @@ export default function CoOwnOnboardingScreen() {
       <View style={styles.hero}>
         <Reanimated.View
           key={slide.title}
-          entering={FadeInDown.duration(320)}
-          exiting={FadeOutUp.duration(220)}
+          entering={reducedMotionEnabled ? undefined : FadeInDown.duration(320)}
+          exiting={reducedMotionEnabled ? undefined : FadeOutUp.duration(220)}
           style={styles.heroSlide}
         >
           <View style={styles.iconRing}>

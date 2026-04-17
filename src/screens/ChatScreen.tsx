@@ -41,6 +41,7 @@ import { AppInput } from '../components/ui/AppInput';
 import { AppSegmentControl } from '../components/ui/AppSegmentControl';
 import { AppButton } from '../components/ui/AppButton';
 import { AppStatusPill } from '../components/ui/AppStatusPill';
+import { useReducedMotion } from '../hooks/useReducedMotion';
 
 type Props = StackScreenProps<RootStackParamList, 'Chat'>;
 
@@ -122,6 +123,7 @@ export default function ChatScreen({ navigation, route }: Props) {
     [conversationId, conversations]
   );
   const isGroup = conversation?.type === 'group';
+  const reducedMotionEnabled = useReducedMotion();
 
   const botLookup = useMemo(() => {
     const map = new Map<string, string>();
@@ -432,9 +434,16 @@ export default function ChatScreen({ navigation, route }: Props) {
   };
 
   const renderMessage = (msg: Message) => {
+    const layoutAnimation = reducedMotionEnabled ? undefined : Layout.springify();
+
     if (msg.date) {
       return (
-        <Reanimated.View key={msg.id + '_date'} entering={FadeIn} layout={Layout.springify()} style={styles.dateLabel}>
+        <Reanimated.View
+          key={msg.id + '_date'}
+          entering={reducedMotionEnabled ? undefined : FadeIn}
+          layout={layoutAnimation}
+          style={styles.dateLabel}
+        >
           <Text style={styles.dateLabelText}>{msg.date}</Text>
         </Reanimated.View>
       );
@@ -442,7 +451,12 @@ export default function ChatScreen({ navigation, route }: Props) {
     if (msg.type === 'purchase_status') {
       const lines = msg.text!.split('\n');
       return (
-        <Reanimated.View key={msg.id} entering={FadeIn.delay(200)} layout={Layout.springify()} style={styles.statusBlock}>
+        <Reanimated.View
+          key={msg.id}
+          entering={reducedMotionEnabled ? undefined : FadeIn.delay(200)}
+          layout={layoutAnimation}
+          style={styles.statusBlock}
+        >
           <Text style={styles.statusTitle}>{lines[0]}</Text>
           <Text style={styles.statusBody}>{lines.slice(1).join('\n')}</Text>
           <AnimatedPressable
@@ -463,8 +477,8 @@ export default function ChatScreen({ navigation, route }: Props) {
       return (
         <Reanimated.View 
           key={msg.id} 
-          entering={ZoomIn.duration(400).springify()}
-          layout={Layout.springify()}
+          entering={reducedMotionEnabled ? undefined : ZoomIn.duration(400).springify()}
+          layout={layoutAnimation}
           style={[styles.msgRow, isMe && styles.msgRowRight]}
         >
           <View style={[styles.offerBubble, isMe && styles.offerBubbleMe]}>
@@ -543,8 +557,14 @@ export default function ChatScreen({ navigation, route }: Props) {
     return (
       <Reanimated.View 
         key={msg.id} 
-        entering={isMe ? SlideInRight.springify() : SlideInLeft.springify()}
-        layout={Layout.springify()}
+        entering={
+          reducedMotionEnabled
+            ? undefined
+            : isMe
+              ? SlideInRight.springify()
+              : SlideInLeft.springify()
+        }
+        layout={layoutAnimation}
         style={[styles.msgRow, isMe && styles.msgRowRight]}
       >
          <View style={[styles.textBubble, isMe && styles.textBubbleMe]}>
@@ -669,15 +689,21 @@ export default function ChatScreen({ navigation, route }: Props) {
             <View style={styles.smallAvatar2}>
               <Ionicons name="person" size={16} color={MUTED} />
             </View>
-            <View>
-              <Text style={styles.sellerName}>Hi, I am {resolvedPartnerId ? userLookup.get(resolvedPartnerId) ?? resolvedPartnerId : 'your seller'}</Text>
-              <View style={styles.sellerMeta}>
-                 <Text style={styles.sellerMetaText}>United Kingdom, South Elmsall</Text>
-              </View>
-              <View style={styles.sellerMeta}>
-                 <Text style={styles.sellerMetaText}>Last seen 2 hours ago</Text>
-              </View>
+            <View style={styles.sellerInfoCol}>
+              <Text style={styles.sellerName}>Seller {resolvedPartnerId ? userLookup.get(resolvedPartnerId) ?? resolvedPartnerId : 'profile'}</Text>
+              <Text style={styles.sellerMetaText}>South Elmsall, UK | Last seen 2h ago</Text>
             </View>
+            {resolvedPartnerId ? (
+              <AnimatedPressable
+                style={styles.sellerProfileBtn}
+                onPress={() => navigation.navigate('UserProfile', { userId: resolvedPartnerId })}
+                accessibilityRole="button"
+                accessibilityLabel="Open seller profile"
+                accessibilityHint="View seller details"
+              >
+                <Text style={styles.sellerProfileBtnText}>Profile</Text>
+              </AnimatedPressable>
+            ) : null}
           </View>
         </View>
       )}
@@ -716,24 +742,25 @@ export default function ChatScreen({ navigation, route }: Props) {
         />
 
         <View style={styles.opsCommandRow}>
-          <View style={styles.opsMetricCard}>
-            <Text style={styles.opsMetricLabel}>THREAD</Text>
-            <Text style={styles.opsMetricValue}>{messageTelemetry.total} messages</Text>
-          </View>
-          <View style={styles.opsMetricCard}>
-            <Text style={styles.opsMetricLabel}>OFFERS</Text>
-            <Text style={styles.opsMetricValue}>{messageTelemetry.offerCount}</Text>
+          <View style={styles.opsSummaryCard}>
+            <Ionicons name="analytics-outline" size={16} color={MUTED} />
+            <View style={styles.opsSummaryBody}>
+              <Text style={styles.opsSummaryLabel}>Conversation overview</Text>
+              <Text style={styles.opsSummaryValue}>
+                {messageTelemetry.total} msgs | {messageTelemetry.offerCount} offers | {messageTelemetry.systemUpdateCount} updates
+              </Text>
+            </View>
           </View>
           <AnimatedPressable
             style={styles.opsActionBtn}
             onPress={() => setShowControls((prev) => !prev)}
             activeOpacity={0.85}
             accessibilityRole="button"
-            accessibilityLabel={showControls ? 'Close operations panel' : 'Open operations panel'}
+            accessibilityLabel={showControls ? 'Hide tools panel' : 'Show tools panel'}
             accessibilityHint="Shows or hides advanced conversation controls"
           >
-            <Ionicons name={showControls ? 'close-circle-outline' : 'options-outline'} size={18} color={TEXT} />
-            <Text style={styles.opsActionText}>{showControls ? 'Close Ops' : 'Open Ops'}</Text>
+            <Ionicons name={showControls ? 'chevron-up-outline' : 'chevron-down-outline'} size={18} color={TEXT} />
+            <Text style={styles.opsActionText}>{showControls ? 'Hide tools' : 'Tools'}</Text>
           </AnimatedPressable>
         </View>
 
@@ -1079,9 +1106,9 @@ const styles = StyleSheet.create({
   
   sellerBubble: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 14,
-    padding: 16,
+    alignItems: 'center',
+    gap: 12,
+    padding: 14,
     backgroundColor: CARD,
     borderWidth: 1,
     borderColor: BORDER,
@@ -1097,9 +1124,29 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  sellerName: { fontSize: 16, fontFamily: 'Inter_700Bold', color: TEXT, marginBottom: 6 },
+  sellerInfoCol: {
+    flex: 1,
+    gap: 3,
+  },
+  sellerName: { fontSize: 14, fontFamily: 'Inter_700Bold', color: TEXT },
   sellerMeta: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
-  sellerMetaText: { fontSize: 13, fontFamily: 'Inter_400Regular', color: MUTED },
+  sellerMetaText: { fontSize: 12, fontFamily: 'Inter_500Medium', color: MUTED },
+  sellerProfileBtn: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: BORDER,
+    backgroundColor: CARD_ALT,
+    paddingHorizontal: 10,
+    height: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sellerProfileBtnText: {
+    color: TEXT,
+    fontSize: 11,
+    fontFamily: 'Inter_700Bold',
+    letterSpacing: 0.2,
+  },
 
   opsContainer: {
     paddingHorizontal: 16,
@@ -1162,10 +1209,13 @@ const styles = StyleSheet.create({
   },
   opsCommandRow: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 10,
   },
-  opsMetricCard: {
+  opsSummaryCard: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     borderWidth: 1,
     borderColor: BORDER,
     borderRadius: 14,
@@ -1173,18 +1223,20 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     backgroundColor: CARD,
   },
-  opsMetricLabel: {
+  opsSummaryBody: {
+    flex: 1,
+  },
+  opsSummaryLabel: {
     color: MUTED,
     fontSize: 10,
     fontFamily: 'Inter_600SemiBold',
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
-    marginBottom: 4,
+    letterSpacing: 0.5,
+    marginBottom: 2,
   },
-  opsMetricValue: {
+  opsSummaryValue: {
     color: TEXT,
-    fontSize: 13,
-    fontFamily: 'Inter_700Bold',
+    fontSize: 11,
+    fontFamily: 'Inter_600SemiBold',
   },
   opsActionBtn: {
     borderWidth: 1,
@@ -1201,8 +1253,7 @@ const styles = StyleSheet.create({
     color: TEXT,
     fontSize: 11,
     fontFamily: 'Inter_700Bold',
-    textTransform: 'uppercase',
-    letterSpacing: 0.4,
+    letterSpacing: 0.2,
   },
   controlPanel: {
     borderWidth: 1,

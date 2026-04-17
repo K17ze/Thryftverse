@@ -25,6 +25,8 @@ import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { AppButton } from '../components/ui/AppButton';
 import { AppStatusPill } from '../components/ui/AppStatusPill';
 import { AppSegmentControl } from '../components/ui/AppSegmentControl';
+import { useReducedMotion } from '../hooks/useReducedMotion';
+import { Motion } from '../constants/motion';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 
@@ -48,6 +50,7 @@ export default function CoOwnHubScreen() {
   const customCoOwns = useStore((state) => state.customCoOwns);
   const coOwnRuntime = useStore((state) => state.coOwnRuntime);
   const { formatFromFiat } = useFormattedPrice();
+  const reducedMotionEnabled = useReducedMotion();
 
   const [query, setQuery] = React.useState('');
   const [sortBy, setSortBy] = React.useState<HubSort>('value');
@@ -107,7 +110,15 @@ export default function CoOwnHubScreen() {
     const openValue = item.availableUnits * item.unitPriceGBP;
 
     return (
-      <Reanimated.View entering={FadeInDown.duration(420).delay(Math.min(index, 8) * 45)}>
+      <Reanimated.View
+        entering={
+          reducedMotionEnabled
+            ? undefined
+            : FadeInDown
+                .duration(Motion.list.enterDuration)
+                .delay(Math.min(index, Motion.list.maxStaggerItems) * Motion.list.staggerStep)
+        }
+      >
         <AnimatedPressable
           style={styles.assetCard}
           activeOpacity={0.92}

@@ -30,6 +30,7 @@ import { buildCreateCoOwnPrefillFromSell } from '../utils/syndicatePrefill';
 import { filterImageUris } from '../utils/media';
 import { AppButton } from '../components/ui/AppButton';
 import { AppSegmentControl, AppSegmentOption } from '../components/ui/AppSegmentControl';
+import { useReducedMotion } from '../hooks/useReducedMotion';
 
 const CONDITIONS = ['New with tags', 'Very good', 'Good', 'Satisfactory'];
 const SIZES = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', 'One size'];
@@ -51,7 +52,7 @@ const OFFERING_WINDOW_OPTIONS: AppSegmentOption<OfferingWindowOption>[] = OFFERI
 }));
 
 const IS_LIGHT = ActiveTheme === 'light';
-const BRAND = IS_LIGHT ? '#2f251b' : '#d7b98f';
+const BRAND = IS_LIGHT ? '#2f251b' : Colors.accent;
 const HEADER_BG = IS_LIGHT ? '#f3eee7' : '#0a0a0a';
 const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111111';
 const PANEL_SOFT_BG = IS_LIGHT ? '#f7f4ef' : '#171717';
@@ -64,6 +65,7 @@ export default function SellScreen() {
   const navigation = useNavigation<any>();
   const { currencyCode } = useCurrencyPref();
   const currencySymbol = CURRENCIES[currencyCode].symbol;
+  const reducedMotionEnabled = useReducedMotion();
   
   const [pickerMode, setPickerMode] = useState<'Brand' | 'Size' | 'Condition' | 'Category' | null>(null);
 
@@ -96,6 +98,12 @@ export default function SellScreen() {
   const shakeStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: shakeOffset.value }]
   }));
+
+  const statusEnterAnimation = reducedMotionEnabled
+    ? undefined
+    : FadeInUp.springify().damping(20).duration(400);
+  const statusExitAnimation = reducedMotionEnabled ? undefined : FadeOutUp;
+  const layoutAnimation = reducedMotionEnabled ? undefined : Layout.springify();
 
   const coOwnModeValue: CoOwnMode = coOwnEnabled ? 'on' : 'off';
   const offeringWindowValue = `${offeringWindowHours}h` as OfferingWindowOption;
@@ -299,6 +307,33 @@ export default function SellScreen() {
       : 'Ready to publish'
     : `${incompleteReadinessCount} checks left`;
 
+  const flowSteps = [
+    { key: 'media', label: 'Media', done: hasBasePhotos },
+    { key: 'details', label: 'Details', done: hasRequiredDetails && hasDescription },
+    { key: 'pricing', label: 'Pricing', done: hasValidPrice },
+    { key: 'launch', label: coOwnEnabled ? 'Issue' : 'Publish', done: publishReady },
+  ];
+
+  const currentFlowStep = flowSteps.findIndex((step) => !step.done);
+  const flowStepCount = flowSteps.length;
+  const flowProgressLabel = currentFlowStep === -1
+    ? `Step ${flowStepCount}/${flowStepCount}`
+    : `Step ${currentFlowStep + 1}/${flowStepCount}`;
+
+  const nextFlowActionHint = !hasBasePhotos
+    ? 'Add at least one photo or video to unlock the listing flow.'
+    : !hasRequiredDetails
+      ? 'Complete title, category, size, and condition.'
+      : !hasDescription
+        ? 'Add a description with key details buyers care about.'
+        : !hasValidPrice
+          ? 'Set a valid price to enable publishing.'
+          : !coOwnFinancialReady
+            ? 'Complete share count and share price for co-own.'
+            : !coOwnAuthReady
+              ? 'Attach authentication photos before issuing co-own units.'
+              : 'Everything is ready. You can continue now.';
+
   React.useEffect(() => {
     if (publishReady && errorMsg) {
       setErrorMsg('');
@@ -366,7 +401,7 @@ export default function SellScreen() {
         {photos.length === 0 ? (
           <View style={styles.giantCameraBox}>
             <View style={styles.cameraCircle}>
-              <Ionicons name="camera" size={40} color={Colors.background} />
+              <Ionicons name="camera" size={32} color={Colors.background} />
             </View>
             <Text style={styles.cameraText}>Add listing media</Text>
             <Text style={styles.cameraSubtext}>Take a photo or video, or upload from your gallery</Text>
@@ -414,6 +449,46 @@ export default function SellScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+          <View style={styles.flowCard}>
+            <View style={styles.flowHeaderRow}>
+              <Text style={styles.flowTitle}>Listing Flow</Text>
+              <Text style={styles.flowProgress}>{flowProgressLabel}</Text>
+            </View>
+
+            <View style={styles.flowStepsRow}>
+              {flowSteps.map((step, index) => {
+                const isCurrent = currentFlowStep === index || (currentFlowStep === -1 && index === flowSteps.length - 1);
+
+                return (
+                  <View
+                    key={step.key}
+                    style={[
+                      styles.flowStepChip,
+                      step.done && styles.flowStepChipDone,
+                      isCurrent && styles.flowStepChipActive,
+                    ]}
+                  >
+                    <Ionicons
+                      name={step.done ? 'checkmark-circle' : 'ellipse-outline'}
+                      size={12}
+                      color={step.done ? BRAND : Colors.textMuted}
+                    />
+                    <Text
+                      style={[
+                        styles.flowStepText,
+                        step.done && styles.flowStepTextDone,
+                        isCurrent && styles.flowStepTextActive,
+                      ]}
+                    >
+                      {step.label}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+
+            <Text style={styles.flowHint}>{nextFlowActionHint}</Text>
+          </View>
           
           <Text style={styles.sectionHeading}>Item Details</Text>
 
@@ -681,7 +756,7 @@ export default function SellScreen() {
             </Text>
           </View>
 
-          <View style={{ height: 120 }} />
+          <View style={{ height: 72 }} />
         </ScrollView>
       </KeyboardAvoidingView>
 
@@ -689,15 +764,15 @@ export default function SellScreen() {
       <View style={styles.stickyFooter}>
         {!!errorMsg && (
           <Reanimated.Text 
-            entering={FadeInUp.springify().damping(20).duration(400)} 
-            exiting={FadeOutUp}
-            layout={Layout.springify()}
+            entering={statusEnterAnimation}
+            exiting={statusExitAnimation}
+            layout={layoutAnimation}
             style={styles.errorText}
           >
             {errorMsg}
           </Reanimated.Text>
         )}
-        <Reanimated.View style={[shakeStyle, { width: '100%' }]} layout={Layout.springify()}>
+        <Reanimated.View style={[shakeStyle, { width: '100%' }]} layout={layoutAnimation}>
           <AppButton
             title={publishReady ? (coOwnEnabled ? 'Continue to Issue' : 'Publish Item') : 'Complete Required Fields'}
             variant="primary"
@@ -733,9 +808,9 @@ const styles = StyleSheet.create({
   
   scanHeader: {
     backgroundColor: HEADER_BG,
-    borderBottomWidth: 1,
+    borderBottomWidth: 0,
     borderBottomColor: PANEL_BORDER,
-    paddingBottom: 24,
+    paddingBottom: 16,
   },
   coOwnInputHint: {
     marginTop: -4,
@@ -752,9 +827,9 @@ const styles = StyleSheet.create({
     height: 64,
   },
   iconBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: PANEL_BORDER,
     backgroundColor: PANEL_BG,
@@ -765,44 +840,48 @@ const styles = StyleSheet.create({
   
   giantCameraBox: {
     marginHorizontal: 20,
-    marginTop: 10,
-    minHeight: 220,
+    marginTop: 8,
+    minHeight: 144,
     backgroundColor: PANEL_BG,
-    borderRadius: 24,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 2,
+    borderWidth: 0,
     borderColor: PANEL_BORDER,
+    paddingVertical: 10,
   },
   cameraCircle: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     backgroundColor: Colors.textPrimary,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 16,
+    marginBottom: 10,
   },
   cameraText: {
-    fontSize: 18,
+    fontSize: 15,
     fontFamily: 'Inter_700Bold',
     color: Colors.textPrimary,
-    marginBottom: 4,
+    marginBottom: 3,
   },
   cameraSubtext: {
-    fontSize: 13,
+    fontSize: 11,
     fontFamily: 'Inter_500Medium',
     color: Colors.textMuted,
-    marginBottom: 16,
+    marginBottom: 10,
+    paddingHorizontal: 16,
+    textAlign: 'center',
+    lineHeight: 14,
   },
   uploadActionRow: {
     flexDirection: 'row',
-    gap: 10,
+    gap: 6,
   },
   uploadActionBtn: {
     borderRadius: 999,
-    minHeight: 38,
-    minWidth: 116,
+    minHeight: 32,
+    minWidth: 94,
   },
   uploadActionContent: {
     gap: 6,
@@ -815,11 +894,80 @@ const styles = StyleSheet.create({
   },
   uploadActionBtnText: {
     color: Colors.textInverse,
-    fontSize: 12,
+    fontSize: 10,
     fontFamily: 'Inter_700Bold',
   },
 
-  scrollContent: { paddingTop: 24, paddingHorizontal: 20 },
+  scrollContent: { paddingTop: 18, paddingHorizontal: 20 },
+  flowCard: {
+    backgroundColor: PANEL_BG,
+    borderWidth: 0,
+    borderColor: PANEL_BORDER,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 12,
+  },
+  flowHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+    gap: 8,
+  },
+  flowTitle: {
+    fontSize: 11,
+    fontFamily: 'Inter_700Bold',
+    color: Colors.textPrimary,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+  },
+  flowProgress: {
+    fontSize: 10,
+    fontFamily: 'Inter_600SemiBold',
+    color: Colors.textMuted,
+  },
+  flowStepsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  flowStepChip: {
+    borderRadius: 999,
+    borderWidth: 0,
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_SOFT_BG,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  flowStepChipDone: {
+    backgroundColor: IS_LIGHT ? '#ece4d8' : '#2f291f',
+  },
+  flowStepChipActive: {
+    borderColor: Colors.accent,
+    backgroundColor: IS_LIGHT ? '#ece4d8' : '#2f291f',
+  },
+  flowStepText: {
+    fontSize: 10,
+    fontFamily: 'Inter_600SemiBold',
+    color: Colors.textSecondary,
+  },
+  flowStepTextDone: {
+    color: BRAND,
+  },
+  flowStepTextActive: {
+    color: Colors.textPrimary,
+  },
+  flowHint: {
+    marginTop: 8,
+    color: Colors.textMuted,
+    fontSize: 10,
+    lineHeight: 14,
+    fontFamily: 'Inter_500Medium',
+  },
   sectionHeading: { fontSize: 14, fontFamily: 'Inter_700Bold', color: Colors.textPrimary, marginBottom: 12, textTransform: 'uppercase', letterSpacing: 1 },
 
   pillInputBox: {
@@ -1022,22 +1170,22 @@ const styles = StyleSheet.create({
   },
   readinessCard: {
     backgroundColor: PANEL_BG,
-    borderRadius: 20,
-    borderWidth: 1,
+    borderRadius: 16,
+    borderWidth: 0,
     borderColor: PANEL_BORDER,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    marginBottom: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 6,
   },
   readinessHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 10,
-    marginBottom: 10,
+    marginBottom: 8,
   },
   readinessTitle: {
-    fontSize: 13,
+    fontSize: 12,
     fontFamily: 'Inter_700Bold',
     color: Colors.textPrimary,
     textTransform: 'uppercase',
@@ -1050,21 +1198,20 @@ const styles = StyleSheet.create({
   },
   readinessChip: {
     borderRadius: 999,
-    borderWidth: 1,
+    borderWidth: 0,
     borderColor: PANEL_BORDER,
     backgroundColor: PANEL_SOFT_BG,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 5,
   },
   readinessChipDone: {
-    borderColor: BRAND,
     backgroundColor: IS_LIGHT ? '#efe5d5' : '#2f291f',
   },
   readinessChipText: {
-    fontSize: 11,
+    fontSize: 10,
     fontFamily: 'Inter_600SemiBold',
     color: Colors.textSecondary,
   },
@@ -1072,9 +1219,9 @@ const styles = StyleSheet.create({
     color: BRAND,
   },
   readinessHint: {
-    marginTop: 10,
-    fontSize: 11,
-    lineHeight: 16,
+    marginTop: 8,
+    fontSize: 10,
+    lineHeight: 14,
     fontFamily: 'Inter_500Medium',
     color: Colors.textMuted,
   },
@@ -1085,25 +1232,33 @@ const styles = StyleSheet.create({
   stickyFooter: {
     position: 'absolute',
     bottom: 0, left: 0, right: 0,
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: Platform.OS === 'ios' ? 34 : 24,
+    paddingHorizontal: 16,
+    paddingTop: 6,
+    paddingBottom: Platform.OS === 'ios' ? 16 : 10,
     backgroundColor: FOOTER_BG,
-    borderTopWidth: 1,
+    borderTopWidth: 0,
     borderTopColor: PANEL_BORDER,
   },
-  errorText: { color: Colors.danger, fontSize: 13, fontFamily: 'Inter_500Medium', textAlign: 'center', marginBottom: 12 },
+  footerFlowHint: {
+    color: Colors.textMuted,
+    fontSize: 10,
+    lineHeight: 14,
+    fontFamily: 'Inter_500Medium',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  errorText: { color: Colors.danger, fontSize: 12, fontFamily: 'Inter_500Medium', textAlign: 'center', marginBottom: 8 },
   uploadCta: {
     backgroundColor: Colors.accent,
-    height: 60,
-    borderRadius: 30,
+    height: 46,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
   },
   uploadCtaDisabled: {
     backgroundColor: PANEL_BORDER,
   },
-  uploadCtaText: { color: Colors.textInverse, fontSize: 18, fontFamily: 'Inter_700Bold', letterSpacing: -0.5 },
+  uploadCtaText: { color: Colors.textInverse, fontSize: 14, fontFamily: 'Inter_700Bold', letterSpacing: -0.2 },
   uploadCtaTextDisabled: {
     color: Colors.textMuted,
   },

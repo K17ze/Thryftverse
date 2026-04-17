@@ -31,6 +31,8 @@ import { fetchConversationsFromApi } from '../services/chatApi';
 import { AppInput } from '../components/ui/AppInput';
 import { AppButton } from '../components/ui/AppButton';
 import { AppSegmentControl } from '../components/ui/AppSegmentControl';
+import { useReducedMotion } from '../hooks/useReducedMotion';
+import { Motion } from '../constants/motion';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 const ACCENT = Colors.accent;
@@ -59,6 +61,7 @@ export default function InboxScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [segment, setSegment] = useState<InboxSegment>('direct');
+  const reducedMotionEnabled = useReducedMotion();
 
   const scrollY = useSharedValue(0);
   const scrollHandler = useAnimatedScrollHandler({
@@ -127,6 +130,21 @@ export default function InboxScreen() {
     return ordered;
   }, [filteredConversations]);
 
+  const unreadCount = useMemo(
+    () => conversations.filter((item) => item.unread).length,
+    [conversations],
+  );
+
+  const groupCount = useMemo(
+    () => conversations.filter((item) => item.type === 'group').length,
+    [conversations],
+  );
+
+  const offerThreadCount = useMemo(
+    () => conversations.filter((item) => item.messages.some((message) => message.offerPrice !== undefined)).length,
+    [conversations],
+  );
+
   const handleDelete = useCallback((id: string) => {
     deleteConversation(id);
     show('Conversation deleted', 'error');
@@ -172,7 +190,15 @@ export default function InboxScreen() {
     const deployedBotCount = item.botIds?.length ?? 0;
 
     return (
-      <Reanimated.View entering={FadeInDown.delay(Math.min(index, 7) * 60).duration(400)}>
+      <Reanimated.View
+        entering={
+          reducedMotionEnabled
+            ? undefined
+            : FadeInDown
+                .delay(Math.min(index, Motion.list.maxStaggerItems) * Motion.list.staggerStep)
+                .duration(Motion.list.enterDuration)
+        }
+      >
         <Swipeable
           friction={2}
           overshootLeft={false}
@@ -253,6 +279,7 @@ export default function InboxScreen() {
         <View style={styles.headerRow}>
           <View>
             <Text style={styles.hugeTitle}>Inbox</Text>
+            <Text style={styles.headerSubtitle}>Priority queue for offers, groups, and buyer updates</Text>
           </View>
           <View style={styles.headerActions}>
             <AppButton
@@ -316,8 +343,40 @@ export default function InboxScreen() {
           optionTextActiveStyle={styles.segmentChipTextActive}
         />
 
+        <View style={styles.quickRail}>
+          <AnimatedPressable
+            style={[styles.quickChip, segment === 'unread' && styles.quickChipActive]}
+            onPress={() => setSegment('unread')}
+            accessibilityRole="button"
+            accessibilityLabel="Show unread conversations"
+          >
+            <Ionicons name="mail-unread-outline" size={14} color={segment === 'unread' ? Colors.textInverse : Colors.textSecondary} />
+            <Text style={[styles.quickChipText, segment === 'unread' && styles.quickChipTextActive]}>Unread {unreadCount}</Text>
+          </AnimatedPressable>
+
+          <AnimatedPressable
+            style={styles.quickChip}
+            onPress={() => setSearchQuery('offer')}
+            accessibilityRole="button"
+            accessibilityLabel="Find offer conversations"
+          >
+            <Ionicons name="pricetag-outline" size={14} color={Colors.textSecondary} />
+            <Text style={styles.quickChipText}>Offers {offerThreadCount}</Text>
+          </AnimatedPressable>
+
+          <AnimatedPressable
+            style={[styles.quickChip, segment === 'groups' && styles.quickChipActive]}
+            onPress={() => setSegment('groups')}
+            accessibilityRole="button"
+            accessibilityLabel="Show group conversations"
+          >
+            <Ionicons name="people-outline" size={14} color={segment === 'groups' ? Colors.textInverse : Colors.textSecondary} />
+            <Text style={[styles.quickChipText, segment === 'groups' && styles.quickChipTextActive]}>Groups {groupCount}</Text>
+          </AnimatedPressable>
+        </View>
+
         <Text style={styles.listMeta}>
-          {visibleConversations.length} conversation{visibleConversations.length === 1 ? '' : 's'} | {conversations.filter((item) => item.unread).length} unread
+          {visibleConversations.length} conversation{visibleConversations.length === 1 ? '' : 's'} | {unreadCount} unread
         </Text>
       </View>
 
@@ -375,6 +434,12 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_700Bold',
     color: Colors.textPrimary,
     letterSpacing: -1,
+  },
+  headerSubtitle: {
+    marginTop: 3,
+    fontSize: 12,
+    fontFamily: 'Inter_500Medium',
+    color: Colors.textSecondary,
   },
   headerRow: {
     flexDirection: 'row',
@@ -445,7 +510,7 @@ const styles = StyleSheet.create({
   },
   segmentStrip: {
     marginTop: 2,
-    marginBottom: 10,
+    marginBottom: 8,
   },
   segmentChip: {
     height: 34,
@@ -468,6 +533,35 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
   segmentChipTextActive: {
+    color: Colors.textInverse,
+  },
+  quickRail: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 10,
+  },
+  quickChip: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 5,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.card,
+  },
+  quickChipActive: {
+    borderColor: Colors.accent,
+    backgroundColor: Colors.accent,
+  },
+  quickChipText: {
+    color: Colors.textSecondary,
+    fontSize: 11,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  quickChipTextActive: {
     color: Colors.textInverse,
   },
   listMeta: {

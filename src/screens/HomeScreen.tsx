@@ -46,6 +46,7 @@ import { SyncStatusPill } from '../components/SyncStatusPill';
 import { SyncRetryBanner } from '../components/SyncRetryBanner';
 import { SkeletonLoader } from '../components/SkeletonLoader';
 import { ThryftCartIcon } from '../components/icons/ThryftCartIcon';
+import { SharedTransitionView } from '../components/SharedTransitionView';
 import { getBackendSyncStatus } from '../utils/syncStatus';
 import { isVideoUri } from '../utils/media';
 import { AppButton } from '../components/ui/AppButton';
@@ -193,6 +194,10 @@ const ExploreGridItem = React.memo(function ExploreGridItem({
   onPress,
   onLongPress,
 }: ExploreGridItemProps) {
+  const sharedTag = item.mediaType === 'image' && item.routeId
+    ? `image-${item.routeId}-0`
+    : undefined;
+
   return (
     <View style={[styles.exploreItemBox, { width: tileWidth, height: Math.round(tileWidth * item.aspectRatio) }]}>
       <AnimatedPressable
@@ -204,16 +209,21 @@ const ExploreGridItem = React.memo(function ExploreGridItem({
         accessibilityRole="button"
         accessibilityHint="Opens item details. Long press to preview this listing"
       >
-        <MediaPreview
-          uri={item.mediaUri}
-          posterUri={item.posterUri}
-          style={styles.exploreImage}
-          autoPlay={item.mediaType === 'video'}
-          loop
-          muted
-          contentFit="cover"
-          isVisible
-        />
+        <SharedTransitionView
+          style={styles.exploreSharedMedia}
+          sharedTransitionTag={sharedTag}
+        >
+          <MediaPreview
+            uri={item.mediaUri}
+            posterUri={item.posterUri}
+            style={styles.exploreImage}
+            autoPlay={item.mediaType === 'video'}
+            loop
+            muted
+            contentFit="cover"
+            isVisible
+          />
+        </SharedTransitionView>
 
         <View style={styles.exploreOverlay}>
           <View style={styles.exploreTag}>
@@ -576,7 +586,7 @@ export default function HomeScreen() {
 
   const handleTilePress = React.useCallback((routeId: string | undefined) => {
     if (!routeId) return;
-    navigation.navigate('ItemDetail', { itemId: routeId });
+    navigation.push('ItemDetail', { itemId: routeId });
   }, [navigation]);
 
   const handleTileLongPress = React.useCallback((item: ExploreTile) => {
@@ -709,7 +719,7 @@ export default function HomeScreen() {
                     iconContainerStyle={styles.peekPrimaryIconWrap}
                     onPress={() => {
                       if (peekItem.routeId) {
-                        navigation.navigate('ItemDetail', { itemId: peekItem.routeId });
+                        navigation.push('ItemDetail', { itemId: peekItem.routeId });
                       }
                       closePeek();
                     }}
@@ -1208,6 +1218,9 @@ const styles = StyleSheet.create({
   exploreMediaWrap: {
     flex: 1,
     position: 'relative',
+  },
+  exploreSharedMedia: {
+    ...StyleSheet.absoluteFillObject,
   },
   exploreImage: {
     width: '100%',

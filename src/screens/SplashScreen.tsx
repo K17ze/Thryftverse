@@ -14,6 +14,7 @@ import Reanimated, {
   runOnJS,
   FadeInUp,
 } from 'react-native-reanimated';
+import { useReducedMotion } from '../hooks/useReducedMotion';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 const { height } = Dimensions.get('window');
@@ -22,11 +23,23 @@ const TITLE = "THRYFTVERSE".split('');
 
 export default function SplashScreen() {
   const navigation = useNavigation<NavT>();
+  const reducedMotionEnabled = useReducedMotion();
   const scale = useSharedValue(1);
   const opacity = useSharedValue(1);
   const translateY = useSharedValue(0);
 
   useEffect(() => {
+    if (reducedMotionEnabled) {
+      const reducedTimer = setTimeout(() => {
+        navigation.reset({
+          index: 0,
+          routes: [{ name: 'Login' as any }],
+        });
+      }, 450);
+
+      return () => clearTimeout(reducedTimer);
+    }
+
     // Stage 1: Wait for staggered entrance (TITLE.length * 80 + ~800 = ~1600ms)
     // Stage 2: Zoom out / dissolve
     const timer = setTimeout(() => {
@@ -41,7 +54,7 @@ export default function SplashScreen() {
     }, 2200);
 
     return () => clearTimeout(timer);
-  }, []);
+  }, [navigation, opacity, reducedMotionEnabled, scale, translateY]);
 
   const containerStyle = useAnimatedStyle(() => ({
     opacity: opacity.value,
@@ -57,13 +70,17 @@ export default function SplashScreen() {
       <Reanimated.View style={[styles.brandContainer, containerStyle]}>
         <View style={styles.titleRow}>
           {TITLE.map((letter, i) => {
-            const letterOffset = useSharedValue(40);
-            const letterOpacity = useSharedValue(0);
+            const letterOffset = useSharedValue(reducedMotionEnabled ? 0 : 40);
+            const letterOpacity = useSharedValue(reducedMotionEnabled ? 1 : 0);
             
             useEffect(() => {
+              if (reducedMotionEnabled) {
+                return;
+              }
+
               letterOffset.value = withDelay(i * 60, withSpring(0, { damping: 12, stiffness: 200 }));
               letterOpacity.value = withDelay(i * 60, withTiming(1, { duration: 200 }));
-            }, []);
+            }, [i, letterOffset, letterOpacity, reducedMotionEnabled]);
 
             const letterStyle = useAnimatedStyle(() => ({
               opacity: letterOpacity.value,
@@ -79,7 +96,11 @@ export default function SplashScreen() {
         </View>
         
         <Reanimated.Text 
-          entering={FadeInUp.delay(TITLE.length * 60 + 200).duration(800)}
+          entering={
+            reducedMotionEnabled
+              ? undefined
+              : FadeInUp.delay(TITLE.length * 60 + 200).duration(800)
+          }
           style={styles.subText}
         >
           The New Era of Thryfting

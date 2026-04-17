@@ -25,6 +25,8 @@ import { CommerceUserOrder, listUserOrders } from '../services/commerceApi';
 import { CachedImage } from '../components/CachedImage';
 import { getListingCoverUri } from '../utils/media';
 import { AppSegmentControl } from '../components/ui/AppSegmentControl';
+import { useReducedMotion } from '../hooks/useReducedMotion';
+import { Motion } from '../constants/motion';
 
 const { width } = Dimensions.get('window');
 
@@ -55,6 +57,7 @@ export default function MyOrdersScreen() {
   const navigation = useNavigation<any>();
   const { formatFromFiat } = useFormattedPrice();
   const { listings, refreshListings } = useBackendData();
+  const reducedMotionEnabled = useReducedMotion();
   const currentUser = useStore((state) => state.currentUser);
   const viewerId = currentUser?.id ?? 'u1';
   const [activeTab, setActiveTab] = useState<OrdersTab>('buying');
@@ -280,7 +283,16 @@ export default function MyOrdersScreen() {
                 : null;
 
               return (
-                <Reanimated.View key={order.id} entering={FadeInDown.delay(index * 60).duration(400)}>
+                <Reanimated.View
+                  key={order.id}
+                  entering={
+                    reducedMotionEnabled
+                      ? undefined
+                      : FadeInDown
+                          .delay(Math.min(index, Motion.list.maxStaggerItems) * Motion.list.staggerStep)
+                          .duration(Motion.list.enterDuration)
+                  }
+                >
                   <AnimatedPressable
                     style={styles.cardGroup}
                     onPress={() => navigation.navigate('OrderDetail', { orderId: order.id })}

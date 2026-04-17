@@ -12,6 +12,7 @@ import Reanimated, {
 } from 'react-native-reanimated';
 import { Colors } from '../constants/colors';
 import { Typography } from '../constants/typography';
+import { useReducedMotion } from '../hooks/useReducedMotion';
 
 interface BrandedSplashProps {
   onFinish: () => void;
@@ -20,9 +21,16 @@ interface BrandedSplashProps {
 const WORDMARK = 'THRYFTVERSE';
 
 export function BrandedSplash({ onFinish }: BrandedSplashProps) {
+  const reducedMotionEnabled = useReducedMotion();
   const pulse = useSharedValue(1);
 
   React.useEffect(() => {
+    if (reducedMotionEnabled) {
+      pulse.value = 1;
+      const reducedTimeoutId = setTimeout(onFinish, 700);
+      return () => clearTimeout(reducedTimeoutId);
+    }
+
     pulse.value = withRepeat(
       withSequence(
         withTiming(1.06, { duration: 850, easing: Easing.inOut(Easing.ease) }),
@@ -34,27 +42,34 @@ export function BrandedSplash({ onFinish }: BrandedSplashProps) {
 
     const timeoutId = setTimeout(onFinish, 1900);
     return () => clearTimeout(timeoutId);
-  }, [onFinish, pulse]);
+  }, [onFinish, pulse, reducedMotionEnabled]);
 
   const pulseStyle = useAnimatedStyle(() => ({
     transform: [{ scale: pulse.value }],
   }));
 
+  const wrapperEnterAnimation = reducedMotionEnabled ? undefined : FadeIn.duration(350);
+  const taglineEnterAnimation = reducedMotionEnabled ? undefined : FadeIn.delay(520).duration(420);
+
   return (
     <View style={styles.container}>
-      <Reanimated.View style={[styles.centerWrap, pulseStyle]} entering={FadeIn.duration(350)}>
+      <Reanimated.View style={[styles.centerWrap, pulseStyle]} entering={wrapperEnterAnimation}>
         <View style={styles.brandRow}>
           {WORDMARK.split('').map((letter, index) => (
             <Reanimated.Text
               key={`${letter}_${index}`}
-              entering={FadeInDown.duration(320).delay(Math.min(index, 12) * 45)}
+              entering={
+                reducedMotionEnabled
+                  ? undefined
+                  : FadeInDown.duration(320).delay(Math.min(index, 12) * 45)
+              }
               style={styles.brandLetter}
             >
               {letter}
             </Reanimated.Text>
           ))}
         </View>
-        <Reanimated.Text entering={FadeIn.delay(520).duration(420)} style={styles.tagline}>
+        <Reanimated.Text entering={taglineEnterAnimation} style={styles.tagline}>
           Resale meets investment
         </Reanimated.Text>
       </Reanimated.View>

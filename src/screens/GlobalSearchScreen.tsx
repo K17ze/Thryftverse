@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   AnimatedPressable } from '../components/AnimatedPressable';
 import {
@@ -8,8 +8,7 @@ import {
   TextInput,
   ScrollView,
   StatusBar,
-  KeyboardAvoidingView,
-  Platform
+  Dimensions,
 } from 'react-native';
 import Reanimated, {
   interpolateColor,
@@ -29,19 +28,233 @@ import { SyncStatusPill } from '../components/SyncStatusPill';
 import { SkeletonLoader } from '../components/SkeletonLoader';
 import { SyncRetryBanner } from '../components/SyncRetryBanner';
 import { getBackendSyncStatus } from '../utils/syncStatus';
+import { CachedImage } from '../components/CachedImage';
+import { SharedTransitionView } from '../components/SharedTransitionView';
+import { useFormattedPrice } from '../hooks/useFormattedPrice';
+import { AppButton } from '../components/ui/AppButton';
 
 type Props = StackScreenProps<RootStackParamList, 'GlobalSearch'>;
 
 const RECENT_SEARCHES = ['stussy hoodie', 'arcteryx alpha sv', 'carhartt detroit', 'vintage levis 501'];
 const TRENDING_TAGS = ['#y2k', '#gorpcore', 'archive', 'japanese denim', 'techwear', '#streetwear'];
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+interface RankedListing {
+  id: string;
+  title: string;
+  brand: string;
+  size: string;
+  condition: 'New with tags' | 'Very good' | 'Good' | 'Satisfactory';
+  image: string;
+  price: number;
+  likes: number;
+  createdAt?: string;
+  score: number;
+  reason: string;
+}
+
+type BrowseSortOption = 'Recommended' | 'Newest' | 'Price: Low to High' | 'Price: High to Low';
+
+const DISCOVER_SORT_OPTIONS: BrowseSortOption[] = [
+  'Recommended',
+  'Newest',
+  'Price: Low to High',
+  'Price: High to Low',
+];
+
+function buildAffinitySet(values: string[]) {
+  const counts = new Map<string, number>();
+
+  values.forEach((value) => {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized) {
+      return;
+    }
+
+    counts.set(normalized, (counts.get(normalized) ?? 0) + 1);
+  });
+
+  return new Set(
+    [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 3)
+      .map(([value]) => value),
+  );
+}
+
+function getRecencyBoost(createdAt?: string) {
+  if (!createdAt) {
+    return 0;
+  }
+
+  const createdTs = Date.parse(createdAt);
+  if (Number.isNaN(createdTs)) {
+    return 0;
+  }
+
+  const ageHours = (Date.now() - createdTs) / (1000 * 60 * 60);
+  return Math.max(0, 16 - ageHours / 8);
+}
 
 export default function GlobalSearchScreen({ navigation }: Props) {
   const [query, setQuery] = useState('');
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const inputRef = useRef<TextInput>(null);
+  const browseFilters = useStore((state) => state.browseFilters);
   const updateBrowseFilters = useStore((state) => state.updateBrowseFilters);
+  const resetBrowseFilters = useStore((state) => state.resetBrowseFilters);
+  const wishlistIds = useStore((state) => state.wishlist);
   const { listings, source, isSyncing, lastError, refreshListings } = useBackendData();
+  const { formatFromFiat } = useFormattedPrice();
   const focusProgress = useSharedValue(0);
+
+  const normalizedQuery = query.trim().toLowerCase();
+  const queryTokens = useMemo(
+    () => normalizedQuery.split(/\s+/).filter(Boolean),
+    [normalizedQuery],
+  );
+
+  const wishlistListings = useMemo(
+    () => listings.filter((listing) => wishlistIds.includes(listing.id)),
+    [listings, wishlistIds],
+  );
+
+  const affinityProfile = useMemo(
+    () => ({
+      brandSet: buildAffinitySet(wishlistListings.map((listing) => listing.brand)),
+      categorySet: buildAffinitySet(wishlistListings.map((listing) => listing.category)),
+      subcategorySet: buildAffinitySet(wishlistListings.map((listing) => listing.subcategory)),
+    }),
+    [wishlistListings],
+  );
+
+  const rankedListings = useMemo<RankedListing[]>(() => {
+    return listings
+      .filter((listing) => !wishlistIds.includes(listing.id))
+      .map((listing) => {
+        const title = listing.title.toLowerCase();
+        const brand = listing.brand.toLowerCase();
+        const category = listing.category.toLowerCase();
+        const subcategory = listing.subcategory.toLowerCase();
+
+        let score = Math.min(listing.likes, 120) * 0.22;
+        score += getRecencyBoost(listing.createdAt);
+
+        const reasons: string[] = [];
+
+        if (affinityProfile.brandSet.has(brand)) {
+          score += 16;
+          reasons.push('Matches brands you save often');
+        }
+
+        if (affinityProfile.categorySet.has(category)) {
+          score += 11;
+          reasons.push('Aligned with your closet categories');
+        }
+
+        if (affinityProfile.subcategorySet.has(subcategory)) {
+          score += 8;
+          reasons.push('Close to items in your wishlist');
+        }
+
+        const matchedTokens = queryTokens.filter(
+          (token) =>
+            title.includes(token)
+            || brand.includes(token)
+            || category.includes(token)
+            || subcategory.includes(token),
+        );
+
+        if (queryTokens.length > 0) {
+          if (matchedTokens.length > 0) {
+            score += 22 + matchedTokens.length * 7;
+            reasons.unshift(`Matches your search for "${matchedTokens[0]}"`);
+          } else {
+            score -= 18;
+          }
+        }
+
+        return {
+          id: listing.id,
+          title: listing.title,
+          brand: listing.brand,
+          size: listing.size,
+          condition: listing.condition,
+          image: listing.images[0] ?? `https://picsum.photos/seed/${listing.id}/500/600`,
+          price: listing.price,
+          likes: listing.likes,
+          createdAt: listing.createdAt,
+          score,
+          reason: reasons[0] ?? 'Recommended from current market momentum',
+        };
+      })
+      .filter((listing) => {
+        if (!queryTokens.length) {
+          return true;
+        }
+
+        return listing.score > 0;
+      })
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 8);
+  }, [affinityProfile.brandSet, affinityProfile.categorySet, affinityProfile.subcategorySet, listings, queryTokens, wishlistIds]);
+
+  const trendingTags = useMemo(() => {
+    const affinityBrands = [...affinityProfile.brandSet];
+    const queryBoost = normalizedQuery ? [normalizedQuery] : [];
+    return [...new Set([...queryBoost, ...affinityBrands, ...TRENDING_TAGS])].slice(0, 8);
+  }, [affinityProfile.brandSet, normalizedQuery]);
+
+  const activeFilterCount =
+    browseFilters.brands.length
+    + browseFilters.sizes.length
+    + (browseFilters.condition !== 'Any' ? 1 : 0);
+
+  const hasActiveDiscoverFilters = activeFilterCount > 0;
+
+  const discoverListings = useMemo(() => {
+    const selectedBrands = new Set(browseFilters.brands.map((brand) => brand.toLowerCase()));
+    const selectedSizes = new Set(browseFilters.sizes.map((size) => size.toLowerCase()));
+
+    const filtered = rankedListings.filter((listing) => {
+      if (selectedBrands.size > 0 && !selectedBrands.has(listing.brand.toLowerCase())) {
+        return false;
+      }
+
+      if (selectedSizes.size > 0 && !selectedSizes.has(listing.size.toLowerCase())) {
+        return false;
+      }
+
+      if (browseFilters.condition !== 'Any' && listing.condition !== browseFilters.condition) {
+        return false;
+      }
+
+      return true;
+    });
+
+    const sorted = [...filtered];
+    switch (browseFilters.sort) {
+      case 'Price: Low to High':
+        sorted.sort((a, b) => a.price - b.price);
+        break;
+      case 'Price: High to Low':
+        sorted.sort((a, b) => b.price - a.price);
+        break;
+      case 'Newest':
+        sorted.sort((a, b) => {
+          const aDate = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const bDate = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+          return bDate - aDate;
+        });
+        break;
+      case 'Recommended':
+      default:
+        sorted.sort((a, b) => b.score - a.score || b.likes - a.likes);
+        break;
+    }
+
+    return sorted.slice(0, 8);
+  }, [browseFilters.brands, browseFilters.condition, browseFilters.sizes, browseFilters.sort, rankedListings]);
 
   // Auto-focus the search bar when the screen mounts
   useEffect(() => {
@@ -81,10 +294,6 @@ export default function GlobalSearchScreen({ navigation }: Props) {
 
     updateBrowseFilters({
       query: trimmedQuery,
-      sort: 'Recommended',
-      brands: [],
-      sizes: [],
-      condition: 'Any',
     });
 
     navigation.navigate('Browse', {
@@ -100,10 +309,6 @@ export default function GlobalSearchScreen({ navigation }: Props) {
 
     updateBrowseFilters({
       query: normalizedTag,
-      sort: 'Recommended',
-      brands: [],
-      sizes: [],
-      condition: 'Any',
     });
 
     navigation.navigate('Browse', {
@@ -130,6 +335,30 @@ export default function GlobalSearchScreen({ navigation }: Props) {
   );
 
   const showSearchLoadingSkeleton = isSyncing && source === 'mock' && listings.length === 0 && !lastError;
+
+  const handleCycleSort = () => {
+    const activeSortIndex = DISCOVER_SORT_OPTIONS.indexOf(browseFilters.sort);
+    const nextSort = DISCOVER_SORT_OPTIONS[(activeSortIndex + 1) % DISCOVER_SORT_OPTIONS.length];
+    updateBrowseFilters({ sort: nextSort, query: normalizedQuery });
+  };
+
+  const handleOpenFilter = () => {
+    updateBrowseFilters({ query: normalizedQuery });
+    navigation.navigate('Filter', {
+      categoryId: 'search',
+      title: 'Discover',
+    });
+  };
+
+  const handleClearDiscoverFilters = () => {
+    const preservedQuery = normalizedQuery;
+    resetBrowseFilters();
+    updateBrowseFilters({ query: preservedQuery });
+  };
+
+  const handleOpenRecommendation = (listingId: string) => {
+    navigation.push('ItemDetail', { itemId: listingId });
+  };
 
   const renderSearchLoadingState = () => (
     <View style={styles.loadingStateWrap}>
@@ -202,11 +431,104 @@ export default function GlobalSearchScreen({ navigation }: Props) {
         />
       ) : null}
 
+      <View style={styles.controlRail}>
+        <AppButton
+          title={`Sort: ${browseFilters.sort}`}
+          icon={<Ionicons name="swap-vertical-outline" size={14} color={Colors.textPrimary} />}
+          variant="secondary"
+          size="sm"
+          style={styles.controlBtn}
+          iconContainerStyle={styles.controlBtnIconWrap}
+          titleStyle={styles.controlBtnText}
+          onPress={handleCycleSort}
+          accessibilityLabel="Cycle discover sort"
+          accessibilityHint="Cycles between recommended, newest, and price sorting"
+        />
+        <AppButton
+          title={hasActiveDiscoverFilters ? `Filter (${activeFilterCount})` : 'Filter'}
+          icon={<Ionicons name="options-outline" size={14} color={Colors.textPrimary} />}
+          variant="secondary"
+          size="sm"
+          style={styles.controlBtn}
+          iconContainerStyle={styles.controlBtnIconWrap}
+          titleStyle={styles.controlBtnText}
+          onPress={handleOpenFilter}
+          accessibilityLabel="Open discover filters"
+          accessibilityHint="Open brand size and condition filters"
+        />
+      </View>
+
+      {hasActiveDiscoverFilters ? (
+        <View style={styles.controlMetaRow}>
+          <Text style={styles.controlMetaText}>Active filters: {activeFilterCount}</Text>
+          <AppButton
+            title="Clear"
+            variant="secondary"
+            size="sm"
+            style={styles.controlClearBtn}
+            titleStyle={styles.controlClearText}
+            onPress={handleClearDiscoverFilters}
+            accessibilityLabel="Clear discover filters"
+          />
+        </View>
+      ) : null}
+
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         {showSearchLoadingSkeleton ? (
           renderSearchLoadingState()
         ) : (
           <>
+            <View style={styles.recoSection}>
+              <View style={styles.recoHeaderRow}>
+                <Text style={[styles.sectionTitle, { paddingHorizontal: 0, marginBottom: 0 }]}>{normalizedQuery ? 'Smart Matches' : 'For You'}</Text>
+                <Text style={styles.recoHeaderMeta}>{discoverListings.length} picks</Text>
+              </View>
+
+              {discoverListings.length > 0 ? (
+                <View style={styles.recoGrid}>
+                  {discoverListings.map((listing) => (
+                    <AnimatedPressable
+                      key={listing.id}
+                      style={styles.recoCard}
+                      activeOpacity={0.9}
+                      onPress={() => handleOpenRecommendation(listing.id)}
+                      accessibilityRole="button"
+                      accessibilityLabel={`${listing.title}, ${formatFromFiat(listing.price, 'GBP', { displayMode: 'fiat' })}`}
+                      accessibilityHint="Opens item detail"
+                    >
+                      <SharedTransitionView
+                        style={styles.recoImageContainer}
+                        sharedTransitionTag={`image-${listing.id}-0`}
+                      >
+                        <CachedImage
+                          uri={listing.image}
+                          style={styles.recoImage}
+                          contentFit="cover"
+                        />
+                      </SharedTransitionView>
+                      <View style={styles.recoBody}>
+                        <Text style={styles.recoReason} numberOfLines={1}>{listing.reason}</Text>
+                        <Text style={styles.recoTitle} numberOfLines={2}>{listing.title}</Text>
+                        <View style={styles.recoMetaRow}>
+                          <Text style={styles.recoBrand} numberOfLines={1}>{listing.brand}</Text>
+                          <Text style={styles.recoPrice}>{formatFromFiat(listing.price, 'GBP', { displayMode: 'fiat' })}</Text>
+                        </View>
+                      </View>
+                    </AnimatedPressable>
+                  ))}
+                </View>
+              ) : (
+                <View style={styles.recoEmptyState}>
+                  <Ionicons name="sparkles-outline" size={18} color={Colors.textMuted} />
+                  <Text style={styles.recoEmptyText}>
+                    {hasActiveDiscoverFilters
+                      ? 'No picks match your current filters. Adjust or clear them.'
+                      : 'No ranked results yet. Try a shorter keyword.'}
+                  </Text>
+                </View>
+              )}
+            </View>
+
             {/* Trending Tags Row */}
             <Text style={styles.sectionTitle}>Trending</Text>
             <ScrollView 
@@ -215,7 +537,7 @@ export default function GlobalSearchScreen({ navigation }: Props) {
               style={styles.trendingRow}
               contentContainerStyle={{ paddingHorizontal: 20, gap: 10 }}
             >
-              {TRENDING_TAGS.map((tag, idx) => (
+              {trendingTags.map((tag, idx) => (
                 <AnimatedPressable key={idx} style={styles.trendingPill} activeOpacity={0.8} onPress={() => handlePillPress(tag)}>
                   <Text style={styles.trendingPillText}>{tag}</Text>
                 </AnimatedPressable>
@@ -301,6 +623,56 @@ const styles = StyleSheet.create({
     marginHorizontal: 20,
     marginBottom: 14,
   },
+  controlRail: {
+    paddingHorizontal: 20,
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 8,
+  },
+  controlBtn: {
+    flex: 1,
+    minHeight: 38,
+    borderRadius: 14,
+    borderColor: Colors.glassBorder,
+    backgroundColor: Colors.card,
+  },
+  controlBtnIconWrap: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: 'transparent',
+  },
+  controlBtnText: {
+    fontSize: 11,
+    fontFamily: 'Inter_700Bold',
+    color: Colors.textPrimary,
+    letterSpacing: 0.2,
+  },
+  controlMetaRow: {
+    marginHorizontal: 20,
+    marginBottom: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  controlMetaText: {
+    color: Colors.textMuted,
+    fontSize: 11,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  controlClearBtn: {
+    minHeight: 30,
+    borderRadius: 14,
+    borderColor: Colors.glassBorder,
+    backgroundColor: Colors.card,
+    paddingHorizontal: 10,
+  },
+  controlClearText: {
+    color: Colors.textSecondary,
+    fontSize: 11,
+    fontFamily: 'Inter_700Bold',
+  },
   loadingStateWrap: {
     paddingHorizontal: 20,
     gap: 26,
@@ -328,6 +700,97 @@ const styles = StyleSheet.create({
     letterSpacing: 0.25,
     paddingHorizontal: 20,
     marginBottom: 12,
+  },
+
+  recoSection: {
+    paddingHorizontal: 20,
+    marginBottom: 28,
+  },
+  recoHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+    gap: 8,
+  },
+  recoHeaderMeta: {
+    color: Colors.textMuted,
+    fontSize: 12,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  recoGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    rowGap: 12,
+  },
+  recoCard: {
+    width: (SCREEN_WIDTH - 52) / 2,
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.glassBorder,
+    backgroundColor: Colors.card,
+  },
+  recoImageContainer: {
+    width: '100%',
+    height: 140,
+  },
+  recoImage: {
+    width: '100%',
+    height: '100%',
+  },
+  recoBody: {
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    gap: 5,
+  },
+  recoReason: {
+    color: Colors.accent,
+    fontSize: 10,
+    fontFamily: 'Inter_700Bold',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  recoTitle: {
+    color: Colors.textPrimary,
+    fontSize: 13,
+    fontFamily: 'Inter_600SemiBold',
+    lineHeight: 18,
+    minHeight: 36,
+  },
+  recoMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  recoBrand: {
+    flex: 1,
+    color: Colors.textMuted,
+    fontSize: 11,
+    fontFamily: 'Inter_500Medium',
+  },
+  recoPrice: {
+    color: Colors.textPrimary,
+    fontSize: 12,
+    fontFamily: 'Inter_700Bold',
+  },
+  recoEmptyState: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.glassBorder,
+    borderRadius: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    backgroundColor: Colors.card,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  recoEmptyText: {
+    color: Colors.textSecondary,
+    fontSize: 12,
+    fontFamily: 'Inter_500Medium',
   },
 
   trendingRow: {

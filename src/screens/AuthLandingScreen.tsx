@@ -26,6 +26,7 @@ import { Typography } from '../constants/typography';
 import { AnimatedPressable } from '../components/AnimatedPressable';
 import { CachedImage } from '../components/CachedImage';
 import { useStore } from '../store/useStore';
+import { useReducedMotion } from '../hooks/useReducedMotion';
 import { consumeMagicLink, loginWithAppleIdentityToken, loginWithGoogleIdToken } from '../services/authApi';
 
 const { width, height } = Dimensions.get('window');
@@ -50,6 +51,7 @@ export default function AuthLandingScreen() {
   const navigation = useNavigation<any>();
   const login = useStore((state) => state.login);
   const setTwoFactorEnabled = useStore((state) => state.setTwoFactorEnabled);
+  const reducedMotionEnabled = useReducedMotion();
   const [socialLoading, setSocialLoading] = useState<'google' | 'apple' | null>(null);
   const [isMagicLinkLoading, setIsMagicLinkLoading] = useState(false);
 
@@ -236,21 +238,28 @@ export default function AuthLandingScreen() {
 
       <SafeAreaView style={styles.safeArea}>
         {/* Top - animated brand wordmark */}
-        <Reanimated.View entering={FadeIn.delay(200).duration(600)} style={styles.topSection}>
+        <Reanimated.View
+          entering={reducedMotionEnabled ? undefined : FadeIn.delay(200).duration(600)}
+          style={styles.topSection}
+        >
           <Text style={styles.logo}>entry 01</Text>
         </Reanimated.View>
 
         {/* Middle - main copy */}
         <View style={styles.content}>
           <Reanimated.Text
-            entering={FadeInDown.delay(400).duration(600).springify()}
+            entering={
+              reducedMotionEnabled
+                ? undefined
+                : FadeInDown.delay(400).duration(600).springify()
+            }
             style={styles.title}
           >
             THRYFT
           </Reanimated.Text>
 
           <Reanimated.Text
-            entering={FadeInDown.delay(600).duration(500)}
+            entering={reducedMotionEnabled ? undefined : FadeInDown.delay(600).duration(500)}
             style={styles.subtitle}
           >
             buy, sell, trade. no noise.
@@ -258,7 +267,14 @@ export default function AuthLandingScreen() {
         </View>
 
         {/* Bottom - CTAs */}
-        <Reanimated.View entering={FadeInUp.delay(700).duration(500).springify()} style={styles.footer}>
+        <Reanimated.View
+          entering={
+            reducedMotionEnabled
+              ? undefined
+              : FadeInUp.delay(700).duration(500).springify()
+          }
+          style={styles.footer}
+        >
           <AnimatedPressable
             style={styles.primaryBtn}
             activeOpacity={0.9}

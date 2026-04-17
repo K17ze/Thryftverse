@@ -33,6 +33,9 @@ import { getBackendSyncStatus } from '../utils/syncStatus';
 import { useToast } from '../context/ToastContext';
 import { ENABLE_RUNTIME_MOCKS } from '../constants/runtimeFlags';
 import { AppButton } from '../components/ui/AppButton';
+import { SharedTransitionView } from '../components/SharedTransitionView';
+import { useReducedMotion } from '../hooks/useReducedMotion';
+import { Motion } from '../constants/motion';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -109,6 +112,7 @@ function LookCard({
   onSavePress,
   isLiked,
   isSaved,
+  sharedTransitionTag,
 }: {
   look: SavedLook;
   onPress: () => void;
@@ -117,6 +121,7 @@ function LookCard({
   onSavePress: () => void;
   isLiked: boolean;
   isSaved: boolean;
+  sharedTransitionTag?: string;
 }) {
   const likeCount = look.likes + (isLiked ? 1 : 0);
 
@@ -124,7 +129,12 @@ function LookCard({
     <AnimatedPressable style={lookStyles.card} onPress={onPress} activeOpacity={0.92}>
       {/* Cover Image */}
       <View style={lookStyles.imageWrap}>
-        <CachedImage uri={look.coverImage} style={lookStyles.image} containerStyle={{ width: '100%', height: 200, borderRadius: 14 }} contentFit="cover" />
+        <SharedTransitionView
+          style={lookStyles.imageShared}
+          sharedTransitionTag={sharedTransitionTag}
+        >
+          <CachedImage uri={look.coverImage} style={lookStyles.image} containerStyle={{ width: '100%', height: 200, borderRadius: 14 }} contentFit="cover" />
+        </SharedTransitionView>
         
         {/* Floating item tags */}
         {look.items.map((item, i) => (
@@ -203,6 +213,7 @@ export default function SearchScreen() {
 
   const [refreshing, setRefreshing] = useState(false);
   const scrollY = useSharedValue(0);
+  const reducedMotionEnabled = useReducedMotion();
 
   const wishlistItems = React.useMemo(
     () => listings.filter(l => wishlistIds.includes(l.id)),
@@ -297,7 +308,7 @@ export default function SearchScreen() {
     !searchQuery;
 
   const closetTabs = [
-    { key: 'SAVED' as const, label: 'Saved', icon: 'layers-outline' as const },
+    { key: 'SAVED' as const, label: 'Saved', icon: 'bookmark-outline' as const },
     { key: 'WISHLIST' as const, label: 'Wishlist', icon: 'heart-outline' as const },
   ];
 
@@ -334,6 +345,18 @@ export default function SearchScreen() {
           <View style={styles.headerStatusWrap}>
             <SyncStatusPill tone={closetStatus.tone} label={closetStatus.label} compact />
           </View>
+          <AppButton
+            title="Discover"
+            icon={<Ionicons name="compass-outline" size={14} color={Colors.textPrimary} />}
+            variant="secondary"
+            size="sm"
+            style={styles.discoverBtn}
+            titleStyle={styles.discoverBtnText}
+            iconContainerStyle={styles.discoverBtnIconWrap}
+            onPress={() => navigation.navigate('GlobalSearch')}
+            accessibilityLabel="Open discover search"
+            accessibilityHint="Find recommended listings with smarter search"
+          />
         </View>
       </View>
 
@@ -426,24 +449,36 @@ export default function SearchScreen() {
                   progressBackgroundColor="transparent"
                 />
               }
-              renderItem={({ item, index }: any) => (
-                <Reanimated.View entering={FadeInDown.delay(Math.min(index, 10) * 50).duration(400)}>
-                  <LookCard
-                    look={item}
-                    isLiked={Boolean(likedLooks[item.id])}
-                    isSaved={Boolean(savedLooksMap[item.id] ?? item.saved)}
-                    onPress={() => {
-                      const itemId = resolveLookItemId(item);
-                      if (itemId) {
-                        navigation.navigate('ItemDetail', { itemId });
-                      }
-                    }}
-                    onLikePress={() => handleToggleLookLike(item)}
-                    onCommentPress={() => handleOpenLookComments(item)}
-                    onSavePress={() => handleToggleLookSave(item)}
-                  />
-                </Reanimated.View>
-              )}
+              renderItem={({ item, index }: any) => {
+                const itemId = resolveLookItemId(item);
+
+                return (
+                  <Reanimated.View
+                    entering={
+                      reducedMotionEnabled
+                        ? undefined
+                        : FadeInDown
+                            .delay(Math.min(index, Motion.list.maxStaggerItems) * Motion.list.staggerStep)
+                            .duration(Motion.list.enterDuration)
+                    }
+                  >
+                    <LookCard
+                      look={item}
+                      isLiked={Boolean(likedLooks[item.id])}
+                      isSaved={Boolean(savedLooksMap[item.id] ?? item.saved)}
+                      sharedTransitionTag={itemId ? `image-${itemId}-0` : undefined}
+                      onPress={() => {
+                        if (itemId) {
+                          navigation.push('ItemDetail', { itemId });
+                        }
+                      }}
+                      onLikePress={() => handleToggleLookLike(item)}
+                      onCommentPress={() => handleOpenLookComments(item)}
+                      onSavePress={() => handleToggleLookSave(item)}
+                    />
+                  </Reanimated.View>
+                );
+              }}
               ListFooterComponent={<View style={styles.emptyFooter} />}
             />
           ) : (
@@ -476,10 +511,18 @@ export default function SearchScreen() {
                 />
               }
               renderItem={({ item, index }: any) => (
-                <Reanimated.View entering={FadeInDown.delay(Math.min(index, 10) * 50).duration(400)}>
+                <Reanimated.View
+                  entering={
+                    reducedMotionEnabled
+                      ? undefined
+                      : FadeInDown
+                          .delay(Math.min(index, Motion.list.maxStaggerItems) * Motion.list.staggerStep)
+                          .duration(Motion.list.enterDuration)
+                  }
+                >
                   <ProductCard
                     item={item}
-                    onPress={() => navigation.navigate('ItemDetail', { itemId: item.id })}
+                    onPress={() => navigation.push('ItemDetail', { itemId: item.id })}
                   />
                 </Reanimated.View>
               )}
@@ -514,6 +557,9 @@ const lookStyles = StyleSheet.create({
   image: {
     width: '100%',
     height: '100%',
+  },
+  imageShared: {
+    ...StyleSheet.absoluteFillObject,
   },
   gradient: {
     position: 'absolute',
@@ -630,6 +676,28 @@ const styles = StyleSheet.create({
   },
   headerStatusWrap: {
     marginTop: 7,
+  },
+  discoverBtn: {
+    marginTop: 9,
+    minHeight: 30,
+    borderRadius: 15,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: PANEL_BG,
+    alignSelf: 'flex-end',
+    paddingHorizontal: 8,
+  },
+  discoverBtnIconWrap: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: 'transparent',
+  },
+  discoverBtnText: {
+    color: Colors.textPrimary,
+    fontSize: 11,
+    fontFamily: Typography.family.semibold,
+    letterSpacing: 0.2,
   },
 
   // Search

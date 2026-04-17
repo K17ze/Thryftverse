@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { FlashList } from '@shopify/flash-list';
 import { CachedImage } from '../components/CachedImage';
+import { SharedTransitionView } from '../components/SharedTransitionView';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -424,12 +425,17 @@ export default function AuctionsScreen() {
             <AnimatedPressable
               style={styles.upcomingCard}
               activeOpacity={0.9}
-              onPress={() => navigation.navigate('ItemDetail', { itemId: item.listingId })}
+              onPress={() => navigation.push('ItemDetail', { itemId: item.listingId })}
               accessibilityRole="button"
               accessibilityLabel={`Open upcoming auction ${item.title}`}
               accessibilityHint="Opens listing details before auction starts"
             >
-              <CachedImage uri={item.image} style={styles.upcomingImage} containerStyle={{ width: '100%', height: 120, borderRadius: 14 }} contentFit="cover" />
+              <SharedTransitionView
+                style={styles.upcomingImageFrame}
+                sharedTransitionTag={`image-${item.listingId}-0`}
+              >
+                <CachedImage uri={item.image} style={styles.upcomingImage} containerStyle={{ width: '100%', height: 120, borderRadius: 14 }} contentFit="cover" />
+              </SharedTransitionView>
               <View style={styles.upcomingMeta}>
                 <Text style={styles.upcomingTitle} numberOfLines={1}>{item.title}</Text>
                 <Text style={styles.upcomingTimer}>
@@ -534,12 +540,17 @@ export default function AuctionsScreen() {
     <AnimatedPressable
       style={styles.liveCard}
       activeOpacity={0.95}
-      onPress={() => navigation.navigate('ItemDetail', { itemId: item.listingId })}
+      onPress={() => navigation.push('ItemDetail', { itemId: item.listingId })}
       accessibilityRole="button"
       accessibilityLabel={`Open live auction ${item.title}`}
       accessibilityHint="Opens listing details and auction context"
     >
-      <CachedImage uri={item.image} style={styles.liveImage} containerStyle={{ width: '100%', height: 160, borderTopLeftRadius: 18, borderTopRightRadius: 18 }} contentFit="cover" />
+      <SharedTransitionView
+        style={styles.liveImageFrame}
+        sharedTransitionTag={`image-${item.listingId}-0`}
+      >
+        <CachedImage uri={item.image} style={styles.liveImage} containerStyle={{ width: '100%', height: 160, borderTopLeftRadius: 18, borderTopRightRadius: 18 }} contentFit="cover" />
+      </SharedTransitionView>
 
       <View style={styles.liveBody}>
         <View style={styles.liveTopRow}>
@@ -935,6 +946,10 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 110,
   },
+  upcomingImageFrame: {
+    width: '100%',
+    height: 120,
+  },
   upcomingMeta: {
     padding: 10,
   },
@@ -984,6 +999,10 @@ const styles = StyleSheet.create({
   liveImage: {
     width: '100%',
     height: 172,
+  },
+  liveImageFrame: {
+    width: '100%',
+    height: 160,
   },
   liveBody: {
     padding: 12,

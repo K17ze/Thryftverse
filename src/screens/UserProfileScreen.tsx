@@ -18,7 +18,6 @@ import Reanimated, {
   useAnimatedStyle,
   interpolate,
   Extrapolation,
-  FadeInDown,
 } from 'react-native-reanimated';
 import { CachedImage } from '../components/CachedImage';
 import { BottomSheet } from '../components/BottomSheet';
@@ -33,11 +32,12 @@ import { useToast } from '../context/ToastContext';
 import { Typography } from '../constants/typography';
 import { AppButton } from '../components/ui/AppButton';
 import { AppSegmentControl } from '../components/ui/AppSegmentControl';
+import { SharedTransitionView } from '../components/SharedTransitionView';
 
 type Props = StackScreenProps<RootStackParamList, 'UserProfile'>;
 
 const IS_LIGHT = ActiveTheme === 'light';
-const ACCENT = IS_LIGHT ? '#2f251b' : '#d7b98f';
+const ACCENT = IS_LIGHT ? '#2f251b' : Colors.accent;
 const BG = Colors.background;
 const CARD = IS_LIGHT ? '#ffffff' : '#111111';
 const CARD_ALT = IS_LIGHT ? '#f3eee7' : '#1a1a1a';
@@ -173,7 +173,7 @@ export default function UserProfileScreen({ navigation, route }: Props) {
         if (isSelfProfile) {
           navigation.navigate('ManageListing', { itemId: item.id });
         } else {
-          navigation.navigate('ItemDetail', { itemId: item.id });
+          navigation.push('ItemDetail', { itemId: item.id });
         }
       }}
       accessibilityRole="button"
@@ -181,11 +181,16 @@ export default function UserProfileScreen({ navigation, route }: Props) {
       accessibilityHint={isSelfProfile ? 'Opens listing management' : 'Opens listing details'}
     >
       <View style={styles.gridImageWrap}>
-        <CachedImage
-          uri={item.images[0] || `https://picsum.photos/seed/${item.id}/600/800`}
-          style={styles.gridImage}
-          contentFit="cover"
-        />
+        <SharedTransitionView
+          style={styles.gridSharedImage}
+          sharedTransitionTag={`image-${item.id}-0`}
+        >
+          <CachedImage
+            uri={item.images[0] || `https://picsum.photos/seed/${item.id}/600/800`}
+            style={styles.gridImage}
+            contentFit="cover"
+          />
+        </SharedTransitionView>
         <View style={styles.likeBtnPill}>
           <Ionicons name="heart-outline" size={14} color="#fff" />
         </View>
@@ -569,8 +574,6 @@ const styles = StyleSheet.create({
   heroRow: { flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 24 },
   avatarLarge: {
     width: 80, height: 80, borderRadius: 40,
-    borderWidth: 1,
-    borderColor: BORDER,
     backgroundColor: CARD_ALT,
     alignItems: 'center', justifyContent: 'center',
   },
@@ -594,7 +597,7 @@ const styles = StyleSheet.create({
   statCol: { flex: 1, alignItems: 'center' },
   statValue: { fontSize: Typography.size.title, fontFamily: Typography.family.bold, color: TEXT, marginBottom: 2 },
   statLabel: { fontSize: Typography.size.caption, fontFamily: Typography.family.medium, color: MUTED },
-  statDivider: { width: StyleSheet.hairlineWidth, backgroundColor: BORDER },
+  statDivider: { width: 6, backgroundColor: 'transparent' },
   
   heroActionRow: {
     flexDirection: 'row',
@@ -634,8 +637,6 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 14,
-    borderWidth: 1,
-    borderColor: BORDER,
     backgroundColor: CARD,
     alignItems: 'center',
     justifyContent: 'center',
@@ -679,6 +680,9 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     backgroundColor: CARD,
     marginBottom: 12,
+  },
+  gridSharedImage: {
+    ...StyleSheet.absoluteFillObject,
   },
   gridImage: { width: '100%', height: '100%' },
   likeBtnPill: {

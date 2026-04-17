@@ -6,28 +6,28 @@ const THEME_OVERRIDE_GLOBAL_KEY = '__THRYFTVERSE_THEME_OVERRIDE__';
 
 const DARK_COLORS = {
   // Backgrounds
-  background: '#090909',
-  surface: '#121212',
-  card: '#181818',
-  cardAlt: '#1f1f1f',
+  background: '#0c0b09',
+  surface: '#151311',
+  card: '#1b1814',
+  cardAlt: '#24201b',
 
   // Borders
-  border: '#2d2923',
-  borderLight: '#3a342d',
+  border: '#3a3126',
+  borderLight: '#4a3e30',
 
   // Accent / CTAs
-  accent: '#d7b98f',
-  accentPress: '#c49f72',
+  accent: '#e2d5c2',
+  accentPress: '#cfc0aa',
 
   // Financial accent (CO-OWN + 1ze only)
-  accentGold: '#d4a94a',
-  accentGoldPress: '#b68c32',
-  accentGoldMuted: '#3a2f15',
+  accentGold: '#d5ac64',
+  accentGoldPress: '#b8914f',
+  accentGoldMuted: '#3d3018',
 
   // Text
-  textPrimary: '#f6f2ea',
-  textSecondary: '#b7afa2',
-  textMuted: '#857d71',
+  textPrimary: '#f6f0e5',
+  textSecondary: '#c8bcaa',
+  textMuted: '#9a8f7d',
   textInverse: '#0b0907',
   textEmphasis: '#ffffff',
 
@@ -38,16 +38,16 @@ const DARK_COLORS = {
   star: '#ffc107',
 
   // Tab bar
-  tabActive: '#d7b98f',
-  tabInactive: '#7c7469',
+  tabActive: '#e2d5c2',
+  tabInactive: '#8e816d',
 
   // Transparent overlays
   overlay: 'rgba(0,0,0,0.6)',
   overlayLight: 'rgba(0,0,0,0.4)',
 
   // Glass / blur surfaces
-  glass: 'rgba(18,18,18,0.72)',
-  glassBorder: 'rgba(255,255,255,0.08)',
+  glass: 'rgba(24,21,18,0.74)',
+  glassBorder: 'rgba(236,225,207,0.12)',
 } as const;
 
 const LIGHT_COLORS = {

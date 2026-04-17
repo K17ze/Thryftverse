@@ -55,53 +55,11 @@ const POSITIVE_BG = IS_LIGHT ? '#ece4d8' : '#14302a';
 const NEGATIVE_BG = IS_LIGHT ? '#f3dddd' : '#301919';
 const CO_OWN_MAX_UNITS = 20;
 
-const COUNTRY_OPTIONS = [
-  { code: 'GB', label: 'United Kingdom' },
-  { code: 'EU', label: 'European Union' },
-  { code: 'SG', label: 'Singapore' },
-  { code: 'AE', label: 'UAE' },
-  { code: 'US', label: 'United States' },
-  { code: 'CA', label: 'Canada' },
-] as const;
-
 const settlementLabelMap: Record<'GBP' | 'TVUSD' | 'HYBRID', string> = {
   GBP: '1ze settlement',
   TVUSD: '1ze settlement',
   HYBRID: '1ze settlement',
 };
-
-const COMPLIANCE_BLOCK_CODES = new Set([
-  'RISK_DISCLOSURE_REQUIRED',
-  'KYC_REQUIRED',
-  'KYC_LEVEL_INSUFFICIENT',
-  'JURISDICTION_BLOCKED',
-  'JURISDICTION_RULE_MISSING',
-  'SANCTIONS_BLOCKED',
-  'SANCTIONS_REVIEW_REQUIRED',
-  'TRADING_DISABLED',
-  'MAX_ORDER_NOTIONAL_EXCEEDED',
-  'MAX_DAILY_NOTIONAL_EXCEEDED',
-  'MAX_OPEN_ORDERS_EXCEEDED',
-  'AML_BLOCKED',
-]);
-
-function shouldOpenComplianceModal(errorMessage: string, errorCode: string | null) {
-  if (errorCode && COMPLIANCE_BLOCK_CODES.has(errorCode)) {
-    return true;
-  }
-
-  const normalized = errorMessage.toLowerCase();
-  return [
-    'kyc',
-    'jurisdiction',
-    'country',
-    'sanction',
-    'aml',
-    'risk',
-    'compliance',
-    'trading disabled',
-  ].some((token) => normalized.includes(token));
-}
 
 type ComposerMode = 'buy' | 'sell';
 
@@ -118,16 +76,12 @@ export default function CoOwnScreen() {
   const currentUser = useStore((state) => state.currentUser);
   const customCoOwns = useStore((state) => state.customCoOwns);
   const coOwnRuntime = useStore((state) => state.coOwnRuntime);
-  const coOwnCompliance = useStore((state) => state.coOwnCompliance);
-  const updateCoOwnCompliance = useStore((state) => state.updateCoOwnCompliance);
-  const checkCoOwnEligibility = useStore((state) => state.checkCoOwnEligibility);
 
   const actingUserId = currentUser?.id ?? 'u1';
 
   const [refreshing, setRefreshing] = React.useState(false);
   const [activeView, setActiveView] = React.useState<CoOwnView>('ISSUED');
   const [unitsComposerVisible, setUnitsComposerVisible] = React.useState(false);
-  const [complianceModalVisible, setComplianceModalVisible] = React.useState(false);
   const [composerMode, setComposerMode] = React.useState<ComposerMode>('buy');
   const [selectedAsset, setSelectedAsset] = React.useState<CoOwnAsset | null>(null);
   const [unitsInput, setUnitsInput] = React.useState('1');
@@ -150,8 +104,8 @@ export default function CoOwnScreen() {
         availableUnits: item.availableUnits,
         unitPriceGBP: item.unitPriceGbp,
         unitPriceStable: item.unitPriceStable,
-        settlementMode: item.settlementMode,
-        issuerJurisdiction: item.issuerJurisdiction ?? undefined,
+        settlementMode: 'TVUSD',
+        issuerJurisdiction: undefined,
         marketMovePct24h: item.marketMovePct24h,
         holders: item.holders,
         volume24hGBP: item.volume24hGbp,
@@ -190,7 +144,11 @@ export default function CoOwnScreen() {
       if (item.issuerId !== actingUserId) {
         continue;
       }
-      merged.set(item.id, item);
+      merged.set(item.id, {
+        ...item,
+        settlementMode: 'TVUSD',
+        issuerJurisdiction: undefined,
+      });
     }
 
     return [...merged.values()];
@@ -258,8 +216,6 @@ export default function CoOwnScreen() {
     [marketAssets]
   );
 
-  const marketEligibility = checkCoOwnEligibility('HYBRID');
-
   const poolStatus = React.useMemo(() => {
     if (isSyncingAssets) {
       return {
@@ -296,13 +252,6 @@ export default function CoOwnScreen() {
   }, [isSyncingAssets, marketAssets.length, remoteAssets.length, syncError]);
 
   const openUnitsComposer = (asset: CoOwnAsset, mode: ComposerMode) => {
-    const eligibility = checkCoOwnEligibility(asset.settlementMode);
-    if (!eligibility.ok) {
-      show(eligibility.message ?? t('syndicate.compliance.incomplete'), 'error');
-      setComplianceModalVisible(true);
-      return;
-    }
-
     setComposerMode(mode);
     setSelectedAsset(asset);
     if (mode === 'sell') {
@@ -357,9 +306,6 @@ export default function CoOwnScreen() {
         const parsedError = parseApiError(error, t('syndicate.order.error.unableSubmit'));
         if (!parsedError.isNetworkError) {
           show(parsedError.message, 'error');
-          if (shouldOpenComplianceModal(parsedError.message, parsedError.code)) {
-            setComplianceModalVisible(true);
-          }
           return;
         }
 
@@ -455,37 +401,6 @@ export default function CoOwnScreen() {
           </Text>
         </View>
       </View>
-
-      <AnimatedPressable
-        style={styles.complianceCard}
-        activeOpacity={0.9}
-        onPress={() => setComplianceModalVisible(true)}
-        accessibilityRole="button"
-        accessibilityLabel={t('syndicate.compliance.title')}
-        accessibilityHint="Opens compliance checks and jurisdiction controls"
-      >
-        <View style={styles.complianceTopRow}>
-          <Ionicons name="shield-checkmark-outline" size={16} color={BRAND} />
-          <Text style={styles.complianceTitle}>{t('syndicate.compliance.title')}</Text>
-          <Ionicons name="chevron-forward" size={14} color={Colors.textMuted} />
-        </View>
-        <Text style={styles.complianceText}>
-          {t('syndicate.compliance.summary', {
-            country: coOwnCompliance.countryCode,
-            kyc: coOwnCompliance.kycVerified
-              ? t('syndicate.compliance.state.on')
-              : t('syndicate.compliance.state.off'),
-            disclosure: coOwnCompliance.riskDisclosureAccepted
-              ? t('syndicate.compliance.state.accepted')
-              : t('syndicate.compliance.state.pending'),
-          })}
-        </Text>
-        {!marketEligibility.ok ? (
-          <Text style={styles.complianceErrorText}>{marketEligibility.message}</Text>
-        ) : (
-          <Text style={styles.complianceOkText}>{t('syndicate.compliance.eligible')}</Text>
-        )}
-      </AnimatedPressable>
 
       <View style={styles.issueRow}>
         <View>
@@ -591,10 +506,9 @@ export default function CoOwnScreen() {
     const avgEntry = item.avgEntryPriceGBP ?? item.unitPriceGBP;
     const unrealized = item.yourUnits > 0 ? (item.unitPriceGBP - avgEntry) * item.yourUnits : 0;
     const unitPriceIze = toIze(item.unitPriceGBP, 'GBP', goldRates);
-    const eligibility = checkCoOwnEligibility(item.settlementMode);
     const primaryDisabled = isHoldingsMode
       ? item.yourUnits === 0
-      : !item.isOpen || item.availableUnits === 0 || !eligibility.ok;
+      : !item.isOpen || item.availableUnits === 0;
 
     return (
       <AnimatedPressable
@@ -626,13 +540,11 @@ export default function CoOwnScreen() {
 
           <View style={styles.assetBadgesRow}>
             <View style={styles.assetBadgePill}>
-              <Text style={styles.assetBadgeText}>{settlementLabelMap[item.settlementMode]}</Text>
+              <Text style={styles.assetBadgeText}>{settlementLabelMap.TVUSD}</Text>
             </View>
-            {item.issuerJurisdiction ? (
-              <View style={styles.assetBadgePillMuted}>
-                <Text style={styles.assetBadgeTextMuted}>{item.issuerJurisdiction}</Text>
-              </View>
-            ) : null}
+            <View style={styles.assetBadgePillMuted}>
+              <Text style={styles.assetBadgeTextMuted}>Local fiat reference</Text>
+            </View>
           </View>
 
           <View style={styles.priceRow}>
@@ -669,12 +581,6 @@ export default function CoOwnScreen() {
                 } else {
                   if (!item.isOpen || item.availableUnits === 0) {
                     show(t('syndicate.asset.error.poolClosed'), 'error');
-                    return;
-                  }
-
-                  if (!eligibility.ok) {
-                    show(eligibility.message ?? t('syndicate.asset.error.completeCompliance'), 'error');
-                    setComplianceModalVisible(true);
                     return;
                   }
 
@@ -862,137 +768,6 @@ export default function CoOwnScreen() {
     );
   };
 
-  const renderComplianceModal = () => (
-    <Modal
-      visible={complianceModalVisible}
-      transparent
-      animationType="fade"
-      onRequestClose={() => setComplianceModalVisible(false)}
-    >
-      <View style={styles.complianceModalOverlay}>
-        <AnimatedPressable
-          style={styles.complianceModalDismissLayer}
-          activeOpacity={1}
-          onPress={() => setComplianceModalVisible(false)}
-          accessibilityRole="button"
-          accessibilityLabel="Dismiss compliance modal"
-          accessibilityHint="Closes compliance settings"
-        />
-
-        <View style={styles.complianceModalCard}>
-          <Text style={styles.complianceModalTitle}>{t('syndicate.compliance.modal.title')}</Text>
-
-          <Text style={styles.complianceFieldLabel}>{t('syndicate.compliance.modal.country')}</Text>
-          <View style={styles.countryChipsWrap}>
-            {COUNTRY_OPTIONS.map((country) => {
-              const active = coOwnCompliance.countryCode === country.code;
-              return (
-                <AnimatedPressable
-                  key={country.code}
-                  style={[styles.countryChip, active && styles.countryChipActive]}
-                  onPress={() => updateCoOwnCompliance({ countryCode: country.code })}
-                  activeOpacity={0.9}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: active }}
-                  accessibilityLabel={`Set country to ${country.label}`}
-                  accessibilityHint="Updates jurisdiction for compliance checks"
-                >
-                  <Text style={[styles.countryChipText, active && styles.countryChipTextActive]}>{country.code}</Text>
-                </AnimatedPressable>
-              );
-            })}
-          </View>
-
-          <View style={styles.complianceToggleRow}>
-            <Text style={styles.complianceToggleText}>{t('syndicate.compliance.modal.kycVerified')}</Text>
-            <AnimatedPressable
-              style={[styles.complianceToggleBtn, coOwnCompliance.kycVerified && styles.complianceToggleBtnActive]}
-              onPress={() => updateCoOwnCompliance({ kycVerified: !coOwnCompliance.kycVerified })}
-              activeOpacity={0.9}
-              accessibilityRole="switch"
-              accessibilityState={{ checked: coOwnCompliance.kycVerified }}
-              accessibilityLabel={t('syndicate.compliance.modal.kycVerified')}
-              accessibilityHint="Toggles KYC verification status"
-            >
-              <Text style={[styles.complianceToggleBtnText, coOwnCompliance.kycVerified && styles.complianceToggleBtnTextActive]}>
-                {coOwnCompliance.kycVerified ? t('syndicate.compliance.modal.toggleOn') : t('syndicate.compliance.modal.toggleOff')}
-              </Text>
-            </AnimatedPressable>
-          </View>
-
-          <View style={styles.complianceToggleRow}>
-            <Text style={styles.complianceToggleText}>{t('syndicate.compliance.modal.riskDisclosure')}</Text>
-            <AnimatedPressable
-              style={[styles.complianceToggleBtn, coOwnCompliance.riskDisclosureAccepted && styles.complianceToggleBtnActive]}
-              onPress={() =>
-                updateCoOwnCompliance({ riskDisclosureAccepted: !coOwnCompliance.riskDisclosureAccepted })
-              }
-              activeOpacity={0.9}
-              accessibilityRole="switch"
-              accessibilityState={{ checked: coOwnCompliance.riskDisclosureAccepted }}
-              accessibilityLabel={t('syndicate.compliance.modal.riskDisclosure')}
-              accessibilityHint="Toggles risk disclosure acceptance"
-            >
-              <Text
-                style={[
-                  styles.complianceToggleBtnText,
-                  coOwnCompliance.riskDisclosureAccepted && styles.complianceToggleBtnTextActive,
-                ]}
-              >
-                {coOwnCompliance.riskDisclosureAccepted
-                  ? t('syndicate.compliance.modal.toggleOn')
-                  : t('syndicate.compliance.modal.toggleOff')}
-              </Text>
-            </AnimatedPressable>
-          </View>
-
-          <View style={styles.complianceToggleRow}>
-            <Text style={styles.complianceToggleText}>{t('syndicate.compliance.modal.walletConnected', { coin: STABLE_COIN })}</Text>
-            <AnimatedPressable
-              style={[styles.complianceToggleBtn, coOwnCompliance.stableCoinWalletConnected && styles.complianceToggleBtnActive]}
-              onPress={() =>
-                updateCoOwnCompliance({ stableCoinWalletConnected: !coOwnCompliance.stableCoinWalletConnected })
-              }
-              activeOpacity={0.9}
-              accessibilityRole="switch"
-              accessibilityState={{ checked: coOwnCompliance.stableCoinWalletConnected }}
-              accessibilityLabel={t('syndicate.compliance.modal.walletConnected', { coin: STABLE_COIN })}
-              accessibilityHint="Toggles wallet connection status"
-            >
-              <Text
-                style={[
-                  styles.complianceToggleBtnText,
-                  coOwnCompliance.stableCoinWalletConnected && styles.complianceToggleBtnTextActive,
-                ]}
-              >
-                {coOwnCompliance.stableCoinWalletConnected
-                  ? t('syndicate.compliance.modal.toggleOn')
-                  : t('syndicate.compliance.modal.toggleOff')}
-              </Text>
-            </AnimatedPressable>
-          </View>
-
-          <View style={[styles.complianceStatusBanner, marketEligibility.ok ? styles.complianceStatusOk : styles.complianceStatusError]}>
-            <Text style={[styles.complianceStatusText, marketEligibility.ok ? styles.complianceStatusTextOk : styles.complianceStatusTextError]}>
-              {marketEligibility.ok ? t('syndicate.compliance.modal.eligible') : marketEligibility.message}
-            </Text>
-          </View>
-
-          <AnimatedPressable
-            style={styles.complianceDoneBtn}
-            onPress={() => setComplianceModalVisible(false)}
-            activeOpacity={0.9}
-            accessibilityRole="button"
-            accessibilityLabel={t('syndicate.compliance.modal.done')}
-            accessibilityHint="Saves compliance choices and closes modal"
-          >
-            <Text style={styles.complianceDoneBtnText}>{t('syndicate.compliance.modal.done')}</Text>
-          </AnimatedPressable>
-        </View>
-      </View>
-    </Modal>
-  );
-
   const renderLoadingState = () => (
     <View style={styles.loadingStateWrap}>
       {Array.from({ length: 3 }).map((_, index) => (
@@ -1056,7 +831,6 @@ export default function CoOwnScreen() {
         }
       />
       {renderUnitsComposer()}
-      {renderComplianceModal()}
     </>
   );
 }

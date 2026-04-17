@@ -33,8 +33,10 @@ import { resolveAssetMarketState } from '../data/mockSyndicateData';
 import { AnimatedPressable } from '../components/AnimatedPressable';
 import { AnimatedCounter } from '../components/AnimatedCounter';
 import { CachedImage } from '../components/CachedImage';
+import { SharedTransitionView } from '../components/SharedTransitionView';
 import { useToast } from '../context/ToastContext';
 import { AppButton } from '../components/ui/AppButton';
+import { useReducedMotion } from '../hooks/useReducedMotion';
 import {
   setStoredUserAvatar,
   setStoredUserAvatarForUser,
@@ -49,7 +51,7 @@ const COVER_HEIGHT = 170;
 const AVATAR_SIZE = 82;
 const HERO_MEDIA_GAP = 6;
 const HERO_MEDIA_TILE = (SCREEN_WIDTH - 40 - HERO_MEDIA_GAP * 2) / 3;
-const ACCENT = '#d7b98f';
+const ACCENT = Colors.accent;
 const IS_LIGHT = ActiveTheme === 'light';
 const BRAND = IS_LIGHT ? '#2f251b' : ACCENT;
 const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111';
@@ -70,6 +72,7 @@ interface QuickAccessItem {
 export default function MyProfileScreen() {
   const navigation = useNavigation<NavT>();
   const insets = useSafeAreaInsets();
+  const reducedMotionEnabled = useReducedMotion();
   const { show } = useToast();
   const { formatFromFiat } = useFormattedPrice();
   const { listings } = useBackendData();
@@ -399,7 +402,14 @@ export default function MyProfileScreen() {
             </AnimatedPressable>
           </View>
 
-          <Reanimated.View entering={FadeInDown.delay(200).duration(400)} style={styles.statsRow}>
+          <Reanimated.View
+            entering={
+              reducedMotionEnabled
+                ? undefined
+                : FadeInDown.delay(200).duration(400)
+            }
+            style={styles.statsRow}
+          >
             <AnimatedPressable
               style={styles.statItem}
               onPress={() => navigation.navigate('UserProfile', { userId: MY_USER.id, isMe: true })}
@@ -440,7 +450,7 @@ export default function MyProfileScreen() {
                   accessibilityLabel={`Open ${item.label}`}
                   accessibilityHint={item.value ? `Shows ${item.label.toLowerCase()} with ${item.value}` : `Navigates to ${item.label.toLowerCase()}`}
                 >
-                  <View style={[styles.quickIconCircle, { borderColor: item.color + '40' }]}>
+                  <View style={styles.quickIconCircle}>
                     <Ionicons name={item.icon as any} size={18} color={item.color} />
                   </View>
                   <Text style={styles.quickLabel}>{item.label}</Text>
@@ -456,17 +466,22 @@ export default function MyProfileScreen() {
                 key={`hero_media_${item.id}_${index}`}
                 style={[styles.mediaTile, (index + 1) % 3 === 0 && styles.mediaTileLast]}
                 activeOpacity={0.9}
-                onPress={() => navigation.navigate('ItemDetail', { itemId: item.id })}
+                onPress={() => navigation.push('ItemDetail', { itemId: item.id })}
                 accessibilityRole="button"
                 accessibilityLabel={`Open listing ${item.title}`}
                 accessibilityHint="Opens the item detail page"
               >
-                <CachedImage
-                  uri={item.images[0]}
-                  style={styles.mediaThumb}
-                  containerStyle={styles.mediaThumbWrap}
-                  contentFit="cover"
-                />
+                <SharedTransitionView
+                  style={styles.mediaThumbWrap}
+                  sharedTransitionTag={`image-${item.id}-0`}
+                >
+                  <CachedImage
+                    uri={item.images[0]}
+                    style={styles.mediaThumb}
+                    containerStyle={{ width: '100%', height: '100%', borderRadius: 10 }}
+                    contentFit="cover"
+                  />
+                </SharedTransitionView>
                 <View style={styles.mediaTilePricePill}>
                   <Text style={styles.mediaTilePriceText}>
                     {formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}
@@ -555,12 +570,17 @@ export default function MyProfileScreen() {
                 key={item.id}
                 style={styles.wardrobeItem}
                 activeOpacity={0.9}
-                onPress={() => navigation.navigate('ItemDetail', { itemId: item.id })}
+                onPress={() => navigation.push('ItemDetail', { itemId: item.id })}
                 accessibilityRole="button"
                 accessibilityLabel={`Open wardrobe listing ${item.title}`}
                 accessibilityHint="Opens listing details"
               >
-                <CachedImage uri={item.images[0]} style={styles.wardrobeImage} containerStyle={styles.wardrobeImageWrap} contentFit="cover" />
+                <SharedTransitionView
+                  style={styles.wardrobeImageWrap}
+                  sharedTransitionTag={`image-${item.id}-0`}
+                >
+                  <CachedImage uri={item.images[0]} style={styles.wardrobeImage} containerStyle={{ width: '100%', height: '100%', borderRadius: 16 }} contentFit="cover" />
+                </SharedTransitionView>
                 <View style={styles.wardrobeInfo}>
                   <Text style={styles.wardrobePrice}>{formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}</Text>
                   <Text style={styles.wardrobeBrand} numberOfLines={1}>@{item.brand.toLowerCase()}</Text>
@@ -643,8 +663,6 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 20,
     backgroundColor: 'rgba(0,0,0,0.5)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -653,8 +671,6 @@ const styles = StyleSheet.create({
     minHeight: 36,
     paddingHorizontal: 10,
     borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.24)',
   },
   topUtilityPillIconWrap: {
     width: 20,
@@ -714,8 +730,6 @@ const styles = StyleSheet.create({
     height: 28,
     borderRadius: 14,
     backgroundColor: '#1c1c1c',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -779,8 +793,6 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 14,
-    borderWidth: 1,
-    borderColor: Colors.border,
     backgroundColor: PANEL_BG,
     alignItems: 'center',
     justifyContent: 'center',
@@ -853,21 +865,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: PANEL_BG,
+    backgroundColor: 'transparent',
     borderRadius: 20,
-    paddingHorizontal: 10,
-    paddingVertical: 10,
-    marginTop: 10,
+    paddingHorizontal: 0,
+    paddingVertical: 4,
+    marginTop: 8,
     width: '100%',
-    borderWidth: 1,
-    borderColor: PANEL_BORDER,
   },
   statItem: {
     flex: 1,
     alignItems: 'center',
     borderRadius: 12,
-    backgroundColor: PANEL_SOFT,
-    paddingVertical: 9,
+    backgroundColor: 'transparent',
+    paddingVertical: 6,
   },
   statNumber: {
     fontSize: 18,
@@ -882,19 +892,18 @@ const styles = StyleSheet.create({
     letterSpacing: 0.55,
   },
   statDivider: {
-    width: 6,
+    width: 4,
+    backgroundColor: 'transparent',
   },
 
   // Quick Access (original layout preserved)
   quickAccessCard: {
     width: '100%',
-    marginTop: 12,
-    backgroundColor: PANEL_BG,
+    marginTop: 10,
+    backgroundColor: 'transparent',
     borderRadius: 14,
-    paddingHorizontal: 10,
-    paddingVertical: 10,
-    borderWidth: 1,
-    borderColor: PANEL_BORDER,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
   },
   quickAccessHeaderRow: {
     flexDirection: 'row',
@@ -925,9 +934,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: '3.2%',
     marginBottom: 6,
-    minHeight: 70,
+    minHeight: 66,
     borderRadius: 10,
-    backgroundColor: PANEL_SOFT,
+    backgroundColor: 'transparent',
     paddingHorizontal: 6,
     paddingVertical: 7,
   },
@@ -938,11 +947,10 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 10,
-    backgroundColor: PANEL_ICON,
+    backgroundColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 4,
-    borderWidth: 1,
   },
   quickLabel: {
     fontSize: 9,
@@ -963,12 +971,10 @@ const styles = StyleSheet.create({
   // Portfolio Summary (original layout preserved)
   portfolioSummaryCard: {
     marginHorizontal: 20,
-    backgroundColor: PANEL_BG,
+    backgroundColor: 'transparent',
     borderRadius: 24,
     padding: 20,
     marginBottom: 24,
-    borderWidth: 1,
-    borderColor: PANEL_BORDER,
   },
   portfolioSummaryTop: {
     flexDirection: 'row',
@@ -1126,12 +1132,10 @@ const styles = StyleSheet.create({
   // Badges (original preserved)
   badgesCard: {
     marginHorizontal: 20,
-    backgroundColor: PANEL_BG,
-    borderRadius: 24,
-    padding: 20,
+    backgroundColor: 'transparent',
+    borderRadius: 0,
+    padding: 0,
     marginBottom: 16,
-    borderWidth: 1,
-    borderColor: PANEL_BORDER,
   },
   badgesSectionLabel: {
     fontSize: 11,
@@ -1144,20 +1148,18 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontFamily: Typography.family.bold,
     color: Colors.textPrimary,
-    marginBottom: 20,
+    marginBottom: 14,
     letterSpacing: -0.2,
   },
-  badgeRow: { flexDirection: 'row', gap: 16 },
-  badgeItem: { alignItems: 'center', gap: 8 },
+  badgeRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 },
+  badgeItem: { alignItems: 'center', gap: 6 },
   badgeCircle: {
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: PANEL_ICON,
+    backgroundColor: 'transparent',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: PANEL_BORDER,
   },
   badgeCircleEarned: {
     borderColor: BRAND + '50',

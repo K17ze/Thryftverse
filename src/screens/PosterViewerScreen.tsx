@@ -21,6 +21,7 @@ import { RootStackParamList } from '../navigation/types';
 import { getFreshPosters } from '../data/posters';
 import { useStore } from '../store/useStore';
 import { useToast } from '../context/ToastContext';
+import { SharedTransitionView } from '../components/SharedTransitionView';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const AUTO_ADVANCE_MS = 5000;
@@ -141,7 +142,12 @@ export default function PosterViewerScreen() {
     <View style={styles.container}>
       <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor="#000" />
 
-      <CachedImage uri={posterImageUri} style={styles.posterImage} contentFit="cover" priority="high" containerStyle={StyleSheet.absoluteFillObject} />
+      <SharedTransitionView
+        style={StyleSheet.absoluteFillObject}
+        sharedTransitionTag={`image-${activePoster.listingId}-0`}
+      >
+        <CachedImage uri={posterImageUri} style={styles.posterImage} contentFit="cover" priority="high" containerStyle={StyleSheet.absoluteFillObject} />
+      </SharedTransitionView>
       <View style={styles.backdropOverlay} />
 
       <SafeAreaView style={styles.overlay} edges={['top', 'bottom']}>
@@ -209,7 +215,7 @@ export default function PosterViewerScreen() {
             <AnimatedPressable
               style={styles.viewListingBtn}
               activeOpacity={0.9}
-              onPress={() => navigation.navigate('ItemDetail', { itemId: activePoster.listingId })}
+              onPress={() => navigation.push('ItemDetail', { itemId: activePoster.listingId })}
             >
               <Text style={styles.viewListingText}>View Listing</Text>
               <Ionicons name="arrow-forward" size={14} color={Colors.background} />

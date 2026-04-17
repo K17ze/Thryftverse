@@ -18,6 +18,7 @@ import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useBackendData } from '../context/BackendDataContext';
 import { CachedImage } from '../components/CachedImage';
 import { getListingCoverUri } from '../utils/media';
+import { SharedTransitionView } from '../components/SharedTransitionView';
 
 const { width } = Dimensions.get('window');
 const GRID_SPACING = 2;
@@ -75,12 +76,17 @@ export default function CategoryDetailScreen() {
               key={item.id} 
               style={styles.gridItem} 
               activeOpacity={0.9}
-              onPress={() => navigation.navigate('ItemDetail', { itemId: item.id })}
+              onPress={() => navigation.push('ItemDetail', { itemId: item.id })}
               accessibilityRole="button"
               accessibilityLabel={`Open ${item.title}`}
               accessibilityHint={`View listing details priced at ${formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}`}
             >
-              <CachedImage uri={getListingCoverUri(item.images, 'https://picsum.photos/seed/category-grid-fallback/400/500')} style={styles.gridImage} contentFit="cover" />
+              <SharedTransitionView
+                style={styles.sharedImageLayer}
+                sharedTransitionTag={`image-${item.id}-0`}
+              >
+                <CachedImage uri={getListingCoverUri(item.images, 'https://picsum.photos/seed/category-grid-fallback/400/500')} style={styles.gridImage} contentFit="cover" />
+              </SharedTransitionView>
               <View style={styles.pricePill}>
                 <Text style={styles.priceText}>{formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}</Text>
               </View>
@@ -107,6 +113,7 @@ const styles = StyleSheet.create({
   chipText: { color: Colors.textPrimary, fontSize: 13, fontFamily: 'Inter_600SemiBold' },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: GRID_SPACING },
   gridItem: { width: ITEM_SIZE, height: ITEM_SIZE * 1.25, backgroundColor: Colors.card, position: 'relative', overflow: 'hidden' },
+  sharedImageLayer: { ...StyleSheet.absoluteFillObject },
   gridImage: { width: '100%', height: '100%' },
   pricePill: { position: 'absolute', bottom: 6, left: 6, backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 6, paddingVertical: 4, borderRadius: 8 },
   priceText: { color: '#fff', fontSize: 11, fontFamily: 'Inter_700Bold' },

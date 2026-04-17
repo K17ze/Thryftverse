@@ -17,6 +17,7 @@ import { useToast } from '../context/ToastContext';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { Ionicons } from '@expo/vector-icons';
 import { isVideoUri } from '../utils/media';
+import { SharedTransitionView } from './SharedTransitionView';
 
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = (width - 48) / 2;
@@ -54,12 +55,17 @@ export function ProductCard({ item, onPress, compact }: Props) {
   return (
     <AnimatedPressable style={[styles.container, compact && styles.containerCompact]} onPress={onPress} accessibilityLabel={`${item.title} by ${item.brand}, ${formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}${item.isSold ? ', sold' : ''}`}>
       <View style={[styles.imageContainer, compact && styles.imageContainerCompact]}>
-        <CachedImage
-          uri={item.images[0]}
-          style={styles.image}
-          contentFit="cover"
-          priority={compact ? 'low' : 'normal'}
-        />
+        <SharedTransitionView
+          style={styles.sharedMediaLayer}
+          sharedTransitionTag={`image-${item.id}-0`}
+        >
+          <CachedImage
+            uri={item.images[0]}
+            style={styles.image}
+            contentFit="cover"
+            priority={compact ? 'low' : 'normal'}
+          />
+        </SharedTransitionView>
 
         {/* Sold overlay */}
         {item.isSold && (
@@ -147,6 +153,9 @@ const styles = StyleSheet.create({
   image: {
     width: '100%',
     height: '100%',
+  },
+  sharedMediaLayer: {
+    ...StyleSheet.absoluteFillObject,
   },
   soldOverlay: {
     ...StyleSheet.absoluteFillObject,

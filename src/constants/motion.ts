@@ -18,4 +18,15 @@ export const Motion = {
     pressOut: 110,
     focus: 180,
   },
+  list: {
+    enterDuration: 360,
+    staggerStep: 45,
+    maxStaggerItems: 10,
+  },
+  navigation: {
+    pushOpenDuration: 280,
+    pushCloseDuration: 240,
+    modalOpenDuration: 320,
+    modalCloseDuration: 280,
+  },
 } as const;

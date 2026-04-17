@@ -2,6 +2,7 @@ import React from 'react';
 import { createStackNavigator, CardStyleInterpolators } from '@react-navigation/stack';
 import { RootStackParamList } from './types';
 import { useStore } from '../store/useStore';
+import { Motion } from '../constants/motion';
 
 import AuthLandingScreen from '../screens/AuthLandingScreen';
 import LoginScreen from '../screens/LoginScreen';
@@ -78,6 +79,57 @@ import ReportScreen from '../screens/ReportScreen';
 
 const Stack = createStackNavigator<RootStackParamList>();
 
+const pushScreenOptions = {
+  headerShown: false,
+  cardStyleInterpolator: CardStyleInterpolators.forHorizontalIOS,
+  gestureEnabled: true,
+  gestureDirection: 'horizontal' as const,
+  transitionSpec: {
+    open: {
+      animation: 'timing' as const,
+      config: {
+        duration: Motion.navigation.pushOpenDuration,
+      },
+    },
+    close: {
+      animation: 'timing' as const,
+      config: {
+        duration: Motion.navigation.pushCloseDuration,
+      },
+    },
+  },
+};
+
+const modalScreenOptions = {
+  presentation: 'modal' as const,
+  cardStyleInterpolator: CardStyleInterpolators.forVerticalIOS,
+  gestureEnabled: true,
+  gestureDirection: 'vertical' as const,
+  transitionSpec: {
+    open: {
+      animation: 'timing' as const,
+      config: {
+        duration: Motion.navigation.modalOpenDuration,
+      },
+    },
+    close: {
+      animation: 'timing' as const,
+      config: {
+        duration: Motion.navigation.modalCloseDuration,
+      },
+    },
+  },
+};
+
+const transparentSheetScreenOptions = {
+  presentation: 'transparentModal' as const,
+  headerShown: false,
+  cardOverlayEnabled: true,
+  cardStyle: { backgroundColor: 'transparent' },
+  gestureEnabled: false,
+  animationEnabled: false,
+};
+
 export default function AppNavigator() {
   const isAuthenticated = useStore((state) => state.isAuthenticated);
 
@@ -85,12 +137,7 @@ export default function AppNavigator() {
     <Stack.Navigator
       key={isAuthenticated ? 'authenticated' : 'anonymous'}
       initialRouteName={isAuthenticated ? 'MainTabs' : 'AuthLanding'}
-      screenOptions={{
-        headerShown: false,
-        cardStyleInterpolator: CardStyleInterpolators.forHorizontalIOS,
-        gestureEnabled: true,
-        gestureDirection: 'horizontal',
-      }}
+      screenOptions={pushScreenOptions}
     >
       
       {/* Auth Flow */}
@@ -104,22 +151,22 @@ export default function AppNavigator() {
       <Stack.Screen name="Browse" component={BrowseScreen} />
       <Stack.Screen name="ItemDetail" component={ItemDetailScreen} />
       <Stack.Screen name="Favourites" component={FavouritesScreen} />
-      <Stack.Screen name="PosterViewer" component={PosterViewerScreen} options={{ presentation: 'modal' }} />
-      <Stack.Screen name="CreatePoster" component={CreatePosterScreen} options={{ presentation: 'modal' }} />
-      <Stack.Screen name="CreateAuction" component={CreateAuctionScreen} options={{ presentation: 'modal' }} />
-      <Stack.Screen name="CreateCoOwn" component={CreateCoOwnScreen} options={{ presentation: 'modal' }} />
+      <Stack.Screen name="PosterViewer" component={PosterViewerScreen} options={modalScreenOptions} />
+      <Stack.Screen name="CreatePoster" component={CreatePosterScreen} options={modalScreenOptions} />
+      <Stack.Screen name="CreateAuction" component={CreateAuctionScreen} options={modalScreenOptions} />
+      <Stack.Screen name="CreateCoOwn" component={CreateCoOwnScreen} options={modalScreenOptions} />
       <Stack.Screen name="MarketLedger" component={MarketLedgerScreen} />
       <Stack.Screen name="CoOwnHub" component={CoOwnHubScreen} />
       <Stack.Screen name="AssetDetail" component={AssetDetailScreen} />
-      <Stack.Screen name="Trade" component={TradeScreen} options={{ presentation: 'modal' }} />
+      <Stack.Screen name="Trade" component={TradeScreen} options={modalScreenOptions} />
       <Stack.Screen name="Portfolio" component={PortfolioScreen} />
       <Stack.Screen name="CoOwnOrderHistory" component={CoOwnOrderHistoryScreen} />
       <Stack.Screen name="AssetLeaderboard" component={AssetLeaderboardScreen} />
       <Stack.Screen name="Buyout" component={BuyoutScreen} />
-      <Stack.Screen name="CoOwnOnboarding" component={CoOwnOnboardingScreen} options={{ presentation: 'modal' }} />
+      <Stack.Screen name="CoOwnOnboarding" component={CoOwnOnboardingScreen} options={modalScreenOptions} />
       <Stack.Screen name="Chat" component={ChatScreen} />
-      <Stack.Screen name="CreateGroupChat" component={CreateGroupChatScreen} options={{ presentation: 'modal' }} />
-      <Stack.Screen name="GroupBotDirectory" component={GroupBotDirectoryScreen} options={{ presentation: 'modal' }} />
+      <Stack.Screen name="CreateGroupChat" component={CreateGroupChatScreen} options={modalScreenOptions} />
+      <Stack.Screen name="GroupBotDirectory" component={GroupBotDirectoryScreen} options={modalScreenOptions} />
       <Stack.Screen name="UserProfile" component={UserProfileScreen} />
       <Stack.Screen name="Balance" component={BalanceScreen} />
       <Stack.Screen name="Wallet" component={WalletScreen} />
@@ -155,7 +202,7 @@ export default function AppNavigator() {
       <Stack.Screen name="GlobalSearch" component={GlobalSearchScreen} />
 
       {/* Phase 25 new screens */}
-      <Stack.Screen name="Filter" component={FilterScreen} options={{ presentation: 'transparentModal', headerShown: false, cardOverlayEnabled: true, cardStyle: { backgroundColor: 'transparent' } }} />
+      <Stack.Screen name="Filter" component={FilterScreen} options={transparentSheetScreenOptions} />
       <Stack.Screen name="ListingSuccess" component={ListingSuccessScreen} />
 
       {/* Phase 27 new screens */}
@@ -164,8 +211,8 @@ export default function AppNavigator() {
       {/* Phase 28 new screens */}
       <Stack.Screen name="ChangePassword" component={ChangePasswordScreen} />
       <Stack.Screen name="TwoFactorSetup" component={TwoFactorSetupScreen} />
-      <Stack.Screen name="WriteReview" component={WriteReviewScreen} options={{ presentation: 'modal' }} />
-      <Stack.Screen name="Report" component={ReportScreen} options={{ presentation: 'modal' }} />
+      <Stack.Screen name="WriteReview" component={WriteReviewScreen} options={modalScreenOptions} />
+      <Stack.Screen name="Report" component={ReportScreen} options={modalScreenOptions} />
     </Stack.Navigator>
   );
 }

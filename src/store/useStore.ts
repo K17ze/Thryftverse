@@ -433,40 +433,12 @@ export const useStore = create<StoreState>()(
         ...updates,
       },
     })),
-  checkCoOwnEligibility: (settlementMode = 'HYBRID') => {
-    const profile = get().coOwnCompliance;
-
-    if (!profile.kycVerified) {
-      return {
-        ok: false,
-        message: 'Complete KYC verification to access Co-Own markets.',
-      };
-    }
-
-    if (!profile.riskDisclosureAccepted) {
-      return {
-        ok: false,
-        message: 'Accept the risk disclosure before trading co-own units.',
-      };
-    }
-
-    if ((settlementMode === 'TVUSD' || settlementMode === 'HYBRID') && !profile.stableCoinWalletConnected) {
-      return {
-        ok: false,
-        message: 'Connect your 1ze wallet to trade this settlement mode.',
-      };
-    }
-
+  checkCoOwnEligibility: (_settlementMode = 'HYBRID') => {
     return { ok: true };
   },
   buyCoOwnUnits: (asset, buyerId, units) => {
     if (!asset.isOpen) {
       return { ok: false, message: 'Pool currently closed' };
-    }
-
-    const eligibility = get().checkCoOwnEligibility(asset.settlementMode);
-    if (!eligibility.ok) {
-      return { ok: false, message: eligibility.message };
     }
 
     const requestedUnits = Math.floor(units);

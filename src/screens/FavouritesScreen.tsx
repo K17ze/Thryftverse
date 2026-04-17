@@ -22,6 +22,8 @@ import { EmptyState } from '../components/EmptyState';
 import { RefreshIndicator } from '../components/RefreshIndicator';
 import { Listing } from '../data/mockData';
 import { useBackendData } from '../context/BackendDataContext';
+import { Motion } from '../constants/motion';
+import { useReducedMotion } from '../hooks/useReducedMotion';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 const HEADER_BUTTON_BG = Colors.card;
@@ -32,6 +34,7 @@ export default function FavouritesScreen() {
   const navigation = useNavigation<NavT>();
   const wishlistIds = useStore((state) => state.wishlist);
   const { listings, refreshListings } = useBackendData();
+  const reducedMotionEnabled = useReducedMotion();
 
   const [refreshing, setRefreshing] = React.useState(false);
   const scrollY = useSharedValue(0);
@@ -84,10 +87,18 @@ export default function FavouritesScreen() {
           />
         }
         renderItem={({ item, index }: { item: Listing; index: number }) => (
-          <Reanimated.View entering={FadeInDown.delay(Math.min(index, 10) * 45).duration(360)}>
+          <Reanimated.View
+            entering={
+              reducedMotionEnabled
+                ? undefined
+                : FadeInDown
+                    .delay(Math.min(index, Motion.list.maxStaggerItems) * Motion.list.staggerStep)
+                    .duration(Motion.list.enterDuration)
+            }
+          >
             <ProductCard
               item={item}
-              onPress={() => navigation.navigate('ItemDetail', { itemId: item.id })}
+              onPress={() => navigation.push('ItemDetail', { itemId: item.id })}
             />
           </Reanimated.View>
         )}

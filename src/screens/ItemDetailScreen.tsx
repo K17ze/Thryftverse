@@ -41,6 +41,7 @@ import { SyncRetryBanner } from '../components/SyncRetryBanner';
 import { useBackendData } from '../context/BackendDataContext';
 import { getBackendSyncStatus } from '../utils/syncStatus';
 import { AppButton } from '../components/ui/AppButton';
+import { SharedTransitionView } from '../components/SharedTransitionView';
 
 const { width, height } = Dimensions.get('window');
 const IS_LIGHT = ActiveTheme === 'light';
@@ -250,7 +251,12 @@ export default function ItemDetailScreen() {
                     style={styles.sellerItemCard}
                     onPress={() => navigation.push('ItemDetail', { itemId: sItem.id })}
                   >
-                    <CachedImage uri={sItem.images[0]} style={styles.sellerItemImg} containerStyle={{ width: 100, height: 130, borderRadius: 12 }} contentFit="cover" />
+                    <SharedTransitionView
+                      style={styles.sellerItemMediaWrap}
+                      sharedTransitionTag={`image-${sItem.id}-0`}
+                    >
+                      <CachedImage uri={sItem.images[0]} style={styles.sellerItemImg} containerStyle={{ width: '100%', height: '100%', borderRadius: 12 }} contentFit="cover" />
+                    </SharedTransitionView>
                     <Text style={styles.sellerItemPrice}>{formatFromFiat(sItem.price, 'GBP', { displayMode: 'fiat' })}</Text>
                   </AnimatedPressable>
                 ))}
@@ -391,7 +397,8 @@ const styles = StyleSheet.create({
   sellerItemsSection: { marginTop: 24, paddingBottom: 32 },
   sectionTitle: { fontSize: 16, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary, marginBottom: 16 },
   sellerItemCard: { width: 100 },
-  sellerItemImg: { width: 100, height: 130, borderRadius: 16, marginBottom: 8 },
+  sellerItemMediaWrap: { width: 100, height: 130, borderRadius: 12, overflow: 'hidden', marginBottom: 8 },
+  sellerItemImg: { width: '100%', height: '100%' },
   sellerItemPrice: { fontSize: 14, fontFamily: 'Inter_700Bold', color: Colors.textPrimary },
   floatingBuyBar: {
     position: 'absolute',

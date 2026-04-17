@@ -29,30 +29,18 @@ import { useBackendData } from '../context/BackendDataContext';
 import { CachedImage } from '../components/CachedImage';
 import { getListingCoverUri } from '../utils/media';
 import { AppButton } from '../components/ui/AppButton';
-import { AppSegmentControl } from '../components/ui/AppSegmentControl';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 type RouteT = RouteProp<RootStackParamList, 'CreateCoOwn'>;
 
 const STABLE_COIN = '1ze';
-const COUNTRY_OPTIONS = ['GB', 'EU', 'SG', 'AE', 'US', 'CA'] as const;
 const IS_LIGHT = ActiveTheme === 'light';
-const BRAND = IS_LIGHT ? '#2f251b' : '#d7b98f';
+const BRAND = IS_LIGHT ? '#2f251b' : Colors.accent;
 const PANEL_BG = IS_LIGHT ? '#ffffff' : '#121212';
 const PANEL_SOFT_BG = IS_LIGHT ? '#f7f4ef' : '#151515';
 const PANEL_BORDER = IS_LIGHT ? '#d8d1c6' : '#2d2d2d';
 const PANEL_TINT_BG = IS_LIGHT ? '#ece4d8' : '#152520';
 const PANEL_TINT_BORDER = IS_LIGHT ? '#d0c3af' : '#2f4944';
-const SETTLEMENT_MODES: Array<{ key: 'GBP' | 'TVUSD' | 'HYBRID' }> = [
-  { key: 'GBP' },
-  { key: 'TVUSD' },
-  { key: 'HYBRID' },
-];
-
-const TOGGLE_OPTIONS: Array<{ value: 'off' | 'on'; label: string; accessibilityLabel: string }> = [
-  { value: 'off', label: 'OFF', accessibilityLabel: 'Set off' },
-  { value: 'on', label: 'ON', accessibilityLabel: 'Set on' },
-];
 
 export default function CreateCoOwnScreen() {
   const navigation = useNavigation<NavT>();
@@ -66,9 +54,6 @@ export default function CreateCoOwnScreen() {
 
   const currentUser = useStore((state) => state.currentUser);
   const addCoOwn = useStore((state) => state.addCoOwn);
-  const coOwnCompliance = useStore((state) => state.coOwnCompliance);
-  const updateCoOwnCompliance = useStore((state) => state.updateCoOwnCompliance);
-  const checkCoOwnEligibility = useStore((state) => state.checkCoOwnEligibility);
 
   const issuerId = currentUser?.id ?? MOCK_USERS[0]?.id ?? 'u1';
 
@@ -86,8 +71,6 @@ export default function CreateCoOwnScreen() {
   const [selectedListingId, setSelectedListingId] = React.useState(initialState.selectedListingId);
   const [totalUnitsInput, setTotalUnitsInput] = React.useState(initialState.totalUnitsInput);
   const [unitPriceInput, setUnitPriceInput] = React.useState(initialState.unitPriceInput);
-  const [stablePriceInput, setStablePriceInput] = React.useState('1.28');
-  const [settlementMode, setSettlementMode] = React.useState<'GBP' | 'TVUSD' | 'HYBRID'>('HYBRID');
 
   const handleTotalUnitsChange = React.useCallback((value: string) => {
     const sanitized = sanitizeIntegerInput(value);
@@ -149,15 +132,9 @@ export default function CreateCoOwnScreen() {
       return;
     }
 
-    const unitPriceStable = Number(stablePriceInput);
+    const unitPriceStable = toIze(unitPriceGBP, 'GBP', goldRates);
     if (!Number.isFinite(unitPriceStable) || unitPriceStable <= 0) {
-      show('Enter a valid stable coin unit price', 'error');
-      return;
-    }
-
-    const eligibility = checkCoOwnEligibility(settlementMode);
-    if (!eligibility.ok) {
-      show(eligibility.message ?? 'Complete compliance checks before issuing', 'error');
+      show('Unable to derive a valid 1ze split value from this price', 'error');
       return;
     }
 
@@ -173,8 +150,8 @@ export default function CreateCoOwnScreen() {
       availableUnits: totalUnits,
       unitPriceGBP,
       unitPriceStable,
-      settlementMode,
-      issuerJurisdiction: coOwnCompliance.countryCode,
+      settlementMode: 'TVUSD',
+      issuerJurisdiction: undefined,
       marketMovePct24h: 0,
       holders: 0,
       volume24hGBP: 0,
@@ -199,6 +176,20 @@ export default function CreateCoOwnScreen() {
 
     return units * unitPrice;
   }, [fromDisplayToGbp, totalUnitsInput, unitPriceInput]);
+
+  const estimatedValueIze = React.useMemo(
+    () => (estimatedValue > 0 ? toIze(estimatedValue, 'GBP', goldRates) : 0),
+    [estimatedValue, goldRates]
+  );
+
+  const unitPriceStablePreview = React.useMemo(() => {
+    const unitPriceGBP = fromDisplayToGbp(Number(unitPriceInput));
+    if (!Number.isFinite(unitPriceGBP) || unitPriceGBP <= 0) {
+      return 0;
+    }
+
+    return toIze(unitPriceGBP, 'GBP', goldRates);
+  }, [currencyCode, fromDisplayToGbp, goldRates, unitPriceInput]);
 
   const renderListingCard = ({ item }: { item: Listing }) => {
     const selected = item.id === selectedListingId;
@@ -261,7 +252,7 @@ export default function CreateCoOwnScreen() {
           <View style={styles.previewOverlay}>
             <Text style={styles.previewTitle} numberOfLines={1}>{selectedListing?.title ?? 'Select listing'}</Text>
             <Text style={styles.previewMeta}>
-              Estimated cap {formatFromFiat(estimatedValue, 'GBP', { displayMode: 'fiat' })}
+              Est. cap {formatFromFiat(estimatedValue, 'GBP', { displayMode: 'fiat' })} | {estimatedValueIze.toFixed(4)} {STABLE_COIN}
             </Text>
           </View>
         </View>
@@ -276,103 +267,13 @@ export default function CreateCoOwnScreen() {
         ) : null}
 
         <View style={styles.section}>
-          <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionTitle}>Compliance Profile</Text>
-            <Text style={styles.sectionHint}>Required before issuance</Text>
-          </View>
+          <Text style={styles.sectionTitle}>Token Split ({STABLE_COIN} only)</Text>
 
-          <Text style={styles.inputLabel}>Country</Text>
-          <View style={styles.rowWrap}>
-            {COUNTRY_OPTIONS.map((countryCode) => {
-              const active = coOwnCompliance.countryCode === countryCode;
-              return (
-                <AppButton
-                  key={countryCode}
-                  title={countryCode}
-                  style={[styles.chipBtn, active && styles.chipBtnActive]}
-                  titleStyle={[styles.chipBtnText, active && styles.chipBtnTextActive]}
-                  variant="secondary"
-                  size="sm"
-                  onPress={() => updateCoOwnCompliance({ countryCode })}
-                  accessibilityLabel={`Set compliance country to ${countryCode}`}
-                />
-              );
-            })}
-          </View>
-
-          <View style={styles.toggleRow}>
-            <Text style={styles.toggleLabel}>KYC verified</Text>
-            <AppSegmentControl
-              style={styles.toggleControl}
-              options={TOGGLE_OPTIONS}
-              value={coOwnCompliance.kycVerified ? 'on' : 'off'}
-              onChange={(next) => updateCoOwnCompliance({ kycVerified: next === 'on' })}
-              optionStyle={styles.toggleBtn}
-              optionActiveStyle={styles.toggleBtnActive}
-              optionTextStyle={styles.toggleText}
-              optionTextActiveStyle={styles.toggleTextActive}
-            />
-          </View>
-
-          <View style={styles.toggleRow}>
-            <Text style={styles.toggleLabel}>Risk disclosure accepted</Text>
-            <AppSegmentControl
-              style={styles.toggleControl}
-              options={TOGGLE_OPTIONS}
-              value={coOwnCompliance.riskDisclosureAccepted ? 'on' : 'off'}
-              onChange={(next) => updateCoOwnCompliance({ riskDisclosureAccepted: next === 'on' })}
-              optionStyle={styles.toggleBtn}
-              optionActiveStyle={styles.toggleBtnActive}
-              optionTextStyle={styles.toggleText}
-              optionTextActiveStyle={styles.toggleTextActive}
-            />
-          </View>
-
-          <View style={styles.toggleRow}>
-            <Text style={styles.toggleLabel}>{STABLE_COIN} wallet connected</Text>
-            <AppSegmentControl
-              style={styles.toggleControl}
-              options={TOGGLE_OPTIONS}
-              value={coOwnCompliance.stableCoinWalletConnected ? 'on' : 'off'}
-              onChange={(next) =>
-                updateCoOwnCompliance({
-                  stableCoinWalletConnected: next === 'on',
-                })
-              }
-              optionStyle={styles.toggleBtn}
-              optionActiveStyle={styles.toggleBtnActive}
-              optionTextStyle={styles.toggleText}
-              optionTextActiveStyle={styles.toggleTextActive}
-            />
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Token Split</Text>
-
-          <Text style={styles.inputLabel}>Settlement mode</Text>
-          <View style={styles.rowWrap}>
-            {SETTLEMENT_MODES.map((mode) => {
-              const active = settlementMode === mode.key;
-              const modeLabel =
-                mode.key === 'GBP'
-                  ? `${currencyCode} only`
-                  : mode.key === 'TVUSD'
-                    ? `${STABLE_COIN} only`
-                    : `Hybrid (${currencyCode} + ${STABLE_COIN})`;
-              return (
-                <AppButton
-                  key={mode.key}
-                  title={modeLabel}
-                  style={[styles.chipBtn, active && styles.chipBtnActive]}
-                  titleStyle={[styles.chipBtnText, active && styles.chipBtnTextActive]}
-                  variant="secondary"
-                  size="sm"
-                  onPress={() => setSettlementMode(mode.key)}
-                  accessibilityLabel={`Set settlement mode to ${modeLabel}`}
-                />
-              );
-            })}
+          <View style={styles.referenceBanner}>
+            <Ionicons name="information-circle-outline" size={14} color={BRAND} />
+            <Text style={styles.referenceBannerText}>
+              Co-Own settles strictly in {STABLE_COIN}. Local currency is shown as reference only.
+            </Text>
           </View>
 
           <Text style={styles.inputLabel}>Total Units</Text>
@@ -387,7 +288,7 @@ export default function CreateCoOwnScreen() {
           />
           <Text style={styles.inputHint}>Maximum 20 units per asset</Text>
 
-          <Text style={styles.inputLabel}>Unit Price ({currencyCode})</Text>
+          <Text style={styles.inputLabel}>Unit Price Reference ({currencyCode})</Text>
           <TextInput
             style={styles.input}
             value={unitPriceInput}
@@ -397,17 +298,9 @@ export default function CreateCoOwnScreen() {
             placeholderTextColor={Colors.textMuted}
             selectionColor={Colors.accentGold}
           />
-
-          <Text style={styles.inputLabel}>Unit Price ({STABLE_COIN})</Text>
-          <TextInput
-            style={styles.input}
-            value={stablePriceInput}
-            onChangeText={(value) => setStablePriceInput(sanitizeDecimalInput(value))}
-            keyboardType="decimal-pad"
-            placeholder="0.00"
-            placeholderTextColor={Colors.textMuted}
-            selectionColor={Colors.accentGold}
-          />
+          <Text style={styles.inputHint}>
+            Settlement value: {unitPriceStablePreview.toFixed(4)} {STABLE_COIN} / unit
+          </Text>
         </View>
 
         <View style={styles.section}>
@@ -539,6 +432,25 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: 'Inter_600SemiBold',
   },
+  referenceBanner: {
+    marginBottom: 10,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: PANEL_TINT_BORDER,
+    backgroundColor: PANEL_TINT_BG,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  referenceBannerText: {
+    flex: 1,
+    color: BRAND,
+    fontSize: 11,
+    lineHeight: 16,
+    fontFamily: 'Inter_600SemiBold',
+  },
   section: {
     marginBottom: 15,
   },
@@ -583,47 +495,6 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_700Bold',
   },
   chipBtnTextActive: {
-    color: BRAND,
-  },
-  toggleRow: {
-    borderRadius: 11,
-    borderWidth: 1,
-    borderColor: PANEL_BORDER,
-    backgroundColor: PANEL_SOFT_BG,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    marginBottom: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  toggleLabel: {
-    color: Colors.textPrimary,
-    fontSize: 12,
-    fontFamily: 'Inter_600SemiBold',
-  },
-  toggleBtn: {
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: PANEL_BORDER,
-    backgroundColor: PANEL_BG,
-    minHeight: 28,
-    paddingHorizontal: 10,
-  },
-  toggleControl: {
-    minWidth: 118,
-  },
-  toggleBtnActive: {
-    borderColor: BRAND,
-    backgroundColor: PANEL_TINT_BG,
-  },
-  toggleText: {
-    color: Colors.textSecondary,
-    fontSize: 10,
-    fontFamily: 'Inter_700Bold',
-    letterSpacing: 0.5,
-  },
-  toggleTextActive: {
     color: BRAND,
   },
   inputLabel: {

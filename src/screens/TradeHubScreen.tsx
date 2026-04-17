@@ -17,6 +17,7 @@ import { useStore } from '../store/useStore';
 import { RootStackParamList } from '../navigation/types';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { AnimatedCounter } from '../components/AnimatedCounter';
+import { AppButton } from '../components/ui/AppButton';
 import { t } from '../i18n';
 
 type TradeHubTab = 'AUCTIONS' | 'CO-OWN';
@@ -121,6 +122,44 @@ export default function TradeHubScreen() {
     };
   }, [customAuctions, customCoOwns, coOwnRuntime]);
 
+  const quickActions = React.useMemo(() => {
+    if (activeTab === 'AUCTIONS') {
+      return [
+        {
+          key: 'create-auction',
+          label: 'Create Auction',
+          icon: 'hammer-outline' as const,
+          onPress: () => navigation.navigate('CreateAuction'),
+        },
+        {
+          key: 'auction-posters',
+          label: 'Promote Drop',
+          icon: 'megaphone-outline' as const,
+          onPress: () => navigation.navigate('CreatePoster'),
+        },
+      ];
+    }
+
+    return [
+      {
+        key: 'issue-co-own',
+        label: 'Issue Co-Own',
+        icon: 'duplicate-outline' as const,
+        onPress: () => navigation.navigate('CreateCoOwn'),
+      },
+      {
+        key: 'open-portfolio',
+        label: 'Portfolio',
+        icon: 'wallet-outline' as const,
+        onPress: () => navigation.navigate('Portfolio'),
+      },
+    ];
+  }, [activeTab, navigation]);
+
+  const marketGuidance = activeTab === 'CO-OWN'
+    ? 'Co-Own settles in 1ze only, with local fiat shown as price reference.'
+    : 'Auctions run for 6 hours. Schedule posters early so bidders can discover your drop in time.';
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
@@ -168,6 +207,28 @@ export default function TradeHubScreen() {
           </Text>
           <Text style={styles.snapshotLabel}>{t('tradeHub.snapshot.coOwnValue')}</Text>
         </View>
+      </View>
+
+      <View style={styles.quickActionRow}>
+        {quickActions.map((action) => (
+          <AppButton
+            key={action.key}
+            title={action.label}
+            icon={<Ionicons name={action.icon} size={14} color={Colors.textSecondary} />}
+            variant="secondary"
+            size="sm"
+            style={styles.quickActionBtn}
+            titleStyle={styles.quickActionBtnText}
+            iconContainerStyle={styles.quickActionIconWrap}
+            onPress={action.onPress}
+            accessibilityLabel={action.label}
+          />
+        ))}
+      </View>
+
+      <View style={styles.guidanceCard}>
+        <Ionicons name={activeTab === 'CO-OWN' ? 'shield-checkmark-outline' : 'flash-outline'} size={15} color={BRAND} />
+        <Text style={styles.guidanceText}>{marketGuidance}</Text>
       </View>
 
       {/* Animated tab switcher with sliding pill */}
@@ -334,6 +395,52 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontFamily: Typography.family.medium,
     letterSpacing: 0.2,
+  },
+  quickActionRow: {
+    marginHorizontal: 16,
+    marginBottom: 10,
+    flexDirection: 'row',
+    gap: 8,
+  },
+  quickActionBtn: {
+    flex: 1,
+    minHeight: 36,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_TINT_BG,
+  },
+  quickActionIconWrap: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: 'transparent',
+  },
+  quickActionBtnText: {
+    color: Colors.textPrimary,
+    fontSize: 11,
+    fontFamily: Typography.family.semibold,
+    letterSpacing: 0.2,
+  },
+  guidanceCard: {
+    marginHorizontal: 16,
+    marginBottom: 10,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_TINT_BG,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
+  guidanceText: {
+    flex: 1,
+    color: Colors.textSecondary,
+    fontSize: 11,
+    lineHeight: 16,
+    fontFamily: Typography.family.medium,
   },
 
   // Animated tab switcher

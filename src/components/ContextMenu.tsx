@@ -1,10 +1,11 @@
 import React from 'react';
 import { View, Text, StyleSheet, Pressable, Modal } from 'react-native';
-import Reanimated, { FadeIn, FadeOut, ZoomIn } from 'react-native-reanimated';
+import Reanimated, { FadeOut, ZoomIn } from 'react-native-reanimated';
 import { Ionicons } from '@expo/vector-icons';
 import { ActiveTheme, Colors } from '../constants/colors';
 import { Typography } from '../constants/typography';
 import { useHaptic } from '../hooks/useHaptic';
+import { useReducedMotion } from '../hooks/useReducedMotion';
 
 const IS_LIGHT = ActiveTheme === 'light';
 const MENU_BG = IS_LIGHT ? '#ffffff' : '#1c1c1e';
@@ -28,12 +29,20 @@ interface ContextMenuProps {
 
 export function ContextMenu({ visible, onDismiss, actions, title }: ContextMenuProps) {
   const haptic = useHaptic();
+  const reducedMotionEnabled = useReducedMotion();
+
+  const menuEnterAnimation = reducedMotionEnabled
+    ? undefined
+    : ZoomIn.springify().damping(18).stiffness(280);
+  const menuExitAnimation = reducedMotionEnabled
+    ? undefined
+    : FadeOut.duration(150);
 
   const handleAction = (action: ContextMenuAction) => {
     haptic.light();
     onDismiss();
     // Delay action slightly so menu closes first
-    setTimeout(action.onPress, 180);
+    setTimeout(action.onPress, reducedMotionEnabled ? 0 : 180);
   };
 
   return (
@@ -45,8 +54,8 @@ export function ContextMenu({ visible, onDismiss, actions, title }: ContextMenuP
     >
       <Pressable style={styles.backdrop} onPress={onDismiss}>
         <Reanimated.View
-          entering={ZoomIn.springify().damping(18).stiffness(280)}
-          exiting={FadeOut.duration(150)}
+          entering={menuEnterAnimation}
+          exiting={menuExitAnimation}
           style={styles.menuCard}
         >
           {title && <Text style={styles.menuTitle}>{title}</Text>}

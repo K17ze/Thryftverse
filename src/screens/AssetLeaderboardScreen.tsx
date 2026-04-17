@@ -20,6 +20,8 @@ import { getCoOwnMarket, CoOwnAsset } from '../data/tradeHub';
 import { useStore } from '../store/useStore';
 import { resolveAssetMarketState } from '../data/mockSyndicateData';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
+import { useReducedMotion } from '../hooks/useReducedMotion';
+import { Motion } from '../constants/motion';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 const IS_LIGHT = ActiveTheme === 'light';
@@ -32,6 +34,7 @@ export default function AssetLeaderboardScreen() {
   const customCoOwns = useStore((state) => state.customCoOwns);
   const coOwnRuntime = useStore((state) => state.coOwnRuntime);
   const { formatFromFiat } = useFormattedPrice();
+  const reducedMotionEnabled = useReducedMotion();
 
   const baseAssets = React.useMemo(() => getCoOwnMarket(customCoOwns), [customCoOwns]);
 
@@ -57,7 +60,13 @@ export default function AssetLeaderboardScreen() {
       {data.map((asset, idx) => (
         <Reanimated.View
           key={`${title}_${asset.id}`}
-          entering={FadeInDown.duration(320).delay(Math.min(idx, 5) * 36)}
+          entering={
+            reducedMotionEnabled
+              ? undefined
+              : FadeInDown
+                  .duration(Motion.list.enterDuration)
+                  .delay(Math.min(idx, Motion.list.maxStaggerItems) * Motion.list.staggerStep)
+          }
         >
           <AnimatedPressable
             style={styles.row}

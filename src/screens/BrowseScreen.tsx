@@ -31,6 +31,8 @@ import { useBackendData } from '../context/BackendDataContext';
 import { getBackendSyncStatus } from '../utils/syncStatus';
 import { useHaptic } from '../hooks/useHaptic';
 import { AppButton } from '../components/ui/AppButton';
+import { SharedTransitionView } from '../components/SharedTransitionView';
+import { useReducedMotion } from '../hooks/useReducedMotion';
 
 const { width } = Dimensions.get('window');
 const GRID_SPACING = 16;
@@ -67,7 +69,7 @@ function getSubcategoryToken(categoryId: string, subcategoryId?: string, title?:
   return loweredTitle;
 }
 
-const BrowseGridItem = ({ item, index, navigation, wishlist, toggleWishlist, showToast, formatPrice }: any) => {
+const BrowseGridItem = ({ item, index, navigation, wishlist, toggleWishlist, showToast, formatPrice, reducedMotionEnabled }: any) => {
   const isWishlisted = wishlist.includes(item.id);
   const haptic = useHaptic();
   const heartScale = useSharedValue(0);
@@ -107,7 +109,7 @@ const BrowseGridItem = ({ item, index, navigation, wishlist, toggleWishlist, sho
 
   const singleTap = Gesture.Tap()
     .onEnd(() => {
-      runOnJS(navigation.navigate as any)('ItemDetail', { itemId: item.id });
+      runOnJS(navigation.push as any)('ItemDetail', { itemId: item.id });
     });
 
   const combinedGesture = Gesture.Exclusive(taps, singleTap);
@@ -123,13 +125,24 @@ const BrowseGridItem = ({ item, index, navigation, wishlist, toggleWishlist, sho
 
   return (
     <Reanimated.View 
-      entering={FadeInDown.delay(Math.min(index, 10) * 50).duration(400)}
+      entering={
+        reducedMotionEnabled
+          ? undefined
+          : FadeInDown
+              .delay(Math.min(index, Motion.list.maxStaggerItems) * Motion.list.staggerStep)
+              .duration(Motion.list.enterDuration)
+      }
       style={[styles.gridItem, index % 2 === 0 ? { marginTop: 0 } : { marginTop: 24 }]}
     >
       <View style={styles.imageWrap}>
         <GestureDetector gesture={combinedGesture}>
           <View style={{ flex: 1 }}>
-            <CachedImage uri={item.images[0]} style={styles.gridImage} containerStyle={{ width: '100%', height: 180, borderRadius: 12 }} contentFit="cover" />
+            <SharedTransitionView
+              style={styles.sharedImageLayer}
+              sharedTransitionTag={`image-${item.id}-0`}
+            >
+              <CachedImage uri={item.images[0]} style={styles.gridImage} containerStyle={{ width: '100%', height: 180, borderRadius: 12 }} contentFit="cover" />
+            </SharedTransitionView>
 
             <Reanimated.View style={[StyleSheet.absoluteFill, { alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }, bigHeartStyle]}>
               <Ionicons name="heart" size={60} color="#fff" style={{ shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 10 }} />
@@ -152,7 +165,7 @@ const BrowseGridItem = ({ item, index, navigation, wishlist, toggleWishlist, sho
           </AnimatedPressable>
         </Reanimated.View>
       </View>
-      <AnimatedPressable activeOpacity={0.8} onPress={() => navigation.navigate('ItemDetail', { itemId: item.id })}>
+      <AnimatedPressable activeOpacity={0.8} onPress={() => navigation.push('ItemDetail', { itemId: item.id })}>
         <View style={styles.infoWrap}>
           <View style={styles.priceRow}>
             <Text style={styles.priceText}>{formatPrice(item.price, 'GBP', { displayMode: 'fiat' })}</Text>
@@ -176,6 +189,7 @@ export default function BrowseScreen() {
   const { show } = useToast();
   const { formatFromFiat } = useFormattedPrice();
   const { listings, source, isSyncing, lastError, refreshListings } = useBackendData();
+  const reducedMotionEnabled = useReducedMotion();
 
   const [refreshing, setRefreshing] = useState(false);
   const scrollY = useSharedValue(0);
@@ -426,6 +440,7 @@ export default function BrowseScreen() {
               toggleWishlist={toggleWishlist} 
               showToast={show} 
               formatPrice={formatFromFiat} 
+              reducedMotionEnabled={reducedMotionEnabled}
             />
           )}
           ListEmptyComponent={
@@ -545,6 +560,9 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   gridImage: { width: '100%', height: '100%' },
+  sharedImageLayer: {
+    ...StyleSheet.absoluteFillObject,
+  },
   likeBtn: {
     position: 'absolute',
     top: 10,

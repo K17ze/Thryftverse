@@ -70,17 +70,30 @@ export function EmptyState({ icon, title, subtitle, ctaLabel, onCtaPress, iconCo
     ],
   }));
 
+  const iconEnterAnimation = reducedMotionEnabled
+    ? undefined
+    : FadeInDown.delay(100).duration(500).springify();
+  const titleEnterAnimation = reducedMotionEnabled
+    ? undefined
+    : FadeInDown.delay(200).duration(400);
+  const subtitleEnterAnimation = reducedMotionEnabled
+    ? undefined
+    : FadeInDown.delay(300).duration(400);
+  const ctaEnterAnimation = reducedMotionEnabled
+    ? undefined
+    : FadeInDown.delay(400).duration(400);
+
   return (
     <View style={styles.container}>
       <Reanimated.View
-        entering={FadeInDown.delay(100).duration(500).springify()}
+        entering={iconEnterAnimation}
         style={[styles.iconRing, { borderColor: iconColor + '25' }, floatStyle]}
       >
         <Ionicons name={icon} size={38} color={iconColor} />
       </Reanimated.View>
 
       <Reanimated.Text
-        entering={FadeInDown.delay(200).duration(400)}
+        entering={titleEnterAnimation}
         style={styles.title}
       >
         {title}
@@ -88,7 +101,7 @@ export function EmptyState({ icon, title, subtitle, ctaLabel, onCtaPress, iconCo
 
       {subtitle && (
         <Reanimated.Text
-          entering={FadeInDown.delay(300).duration(400)}
+          entering={subtitleEnterAnimation}
           style={styles.subtitle}
         >
           {subtitle}
@@ -96,7 +109,7 @@ export function EmptyState({ icon, title, subtitle, ctaLabel, onCtaPress, iconCo
       )}
 
       {ctaLabel && onCtaPress && (
-        <Reanimated.View entering={FadeInDown.delay(400).duration(400)}>
+        <Reanimated.View entering={ctaEnterAnimation}>
           <AnimatedPressable style={styles.cta} onPress={onCtaPress} activeOpacity={0.8} hapticFeedback="selection">
             <Text style={styles.ctaText}>{ctaLabel}</Text>
           </AnimatedPressable>
