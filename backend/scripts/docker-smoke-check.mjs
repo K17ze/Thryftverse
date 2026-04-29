@@ -73,15 +73,6 @@ async function main() {
   assert(Array.isArray(listings.items), 'Listings endpoint did not return items array');
   assert(listings.items.length >= 1, 'Expected seeded listings');
 
-  const listingSeed1 = listings.items.find((item) => item.id === 'l_seed_1') ?? listings.items[0];
-  const listingSeed2 =
-    listings.items.find((item) => item.id === 'l_seed_2') ??
-    listings.items.find((item) => item.id !== listingSeed1.id) ??
-    listingSeed1;
-
-  assert(Boolean(listingSeed1?.id), 'Missing listing to run smoke checks');
-  assert(Boolean(listingSeed2?.id), 'Missing second listing to run smoke checks');
-
   console.log('[check] Auth signup for smoke actor');
   const smokeSuffix = `${Date.now()}_${Math.floor(Math.random() * 10000)}`;
   const smokeAuth = await requestJson(`${API_BASE}/auth/signup`, {
@@ -215,6 +206,21 @@ async function main() {
     'Payment method response missing id'
   );
 
+  const smokeCommerceListingId = createSmokeId('l_smoke_commerce');
+  const smokeCommerceListing = await requestJson(`${API_BASE}/listings`, {
+    method: 'POST',
+    headers: { ...sellerAuthHeaders, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      id: smokeCommerceListingId,
+      sellerId: sellerUserId,
+      title: 'Smoke Commerce Listing',
+      description: 'Smoke listing used for docker commerce validation.',
+      priceGbp: 149,
+      imageUrl: 'https://picsum.photos/seed/docker-smoke-commerce/800/1000',
+    }),
+  });
+  assert(smokeCommerceListing.ok === true, 'Smoke commerce listing creation failed');
+
   const smokeOrderId = createSmokeId('ord_smoke');
   const orderCreate = await requestJson(`${API_BASE}/orders`, {
     method: 'POST',
@@ -222,7 +228,7 @@ async function main() {
     body: JSON.stringify({
       orderId: smokeOrderId,
       buyerId: smokeUserId,
-      listingId: listingSeed1.id,
+      listingId: smokeCommerceListingId,
       addressId: address.item.id,
       paymentMethodId: paymentMethod.item.id,
     }),
@@ -231,12 +237,34 @@ async function main() {
   assert(orderCreate.order?.id === smokeOrderId, 'Order id mismatch');
   assert(orderCreate.order?.status === 'created', 'Expected new order status to be created');
 
-  const orderPay = await requestJson(`${API_BASE}/orders/${smokeOrderId}/pay`, {
+  const paymentIntentCreate = await requestJson(`${API_BASE}/payments/intents`, {
     method: 'POST',
-    headers: authHeaders,
+    headers: { ...authHeaders, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      userId: smokeUserId,
+      orderId: smokeOrderId,
+      idempotencyKey: createSmokeId('pi_smoke_idem'),
+    }),
   });
-  assert(orderPay.ok === true, 'Order payment failed');
-  assert(orderPay.status === 'paid', 'Expected order status to be paid after payment');
+  assert(paymentIntentCreate.ok === true, 'Payment intent creation failed');
+  assert(
+    typeof paymentIntentCreate.intent?.id === 'string' && paymentIntentCreate.intent.id.length > 3,
+    'Payment intent response missing intent id'
+  );
+
+  const paymentIntentConfirm = await requestJson(
+    `${API_BASE}/payments/intents/${encodeURIComponent(paymentIntentCreate.intent.id)}/confirm`,
+    {
+      method: 'POST',
+      headers: { ...authHeaders, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        simulateStatus: 'succeeded',
+        providerStatus: 'succeeded',
+      }),
+    }
+  );
+  assert(paymentIntentConfirm.ok === true, 'Payment intent confirmation failed');
+  assert(paymentIntentConfirm.intent?.status === 'succeeded', 'Expected payment intent status to be succeeded');
 
   const orderRead = await requestJson(`${API_BASE}/orders/${smokeOrderId}`, {
     headers: authHeaders,

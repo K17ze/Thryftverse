@@ -1,11 +1,17 @@
 import React from 'react';
 import { StyleProp, StyleSheet, Text, TextStyle, View, ViewStyle } from 'react-native';
-import { ActiveTheme, Colors } from '../../constants/colors';
-import { Typography } from '../../constants/typography';
+import { Colors } from '../../constants/colors';
+import { Type } from '../../theme/designTokens';
 import { AnimatedPressable } from '../AnimatedPressable';
 
-export type AppButtonVariant = 'primary' | 'secondary' | 'gold' | 'contrast';
-export type AppButtonSize = 'sm' | 'md' | 'lg' | 'xl';
+// ============================================================================
+// SIMPLIFIED BUTTON COMPONENT (Phase 2 Cleanup)
+// 2 variants only: primary | secondary
+// Uses 5-core color palette
+// ============================================================================
+
+export type AppButtonVariant = 'primary' | 'secondary';
+export type AppButtonSize = 'sm' | 'md' | 'lg';
 type AppButtonHapticFeedback = 'none' | 'light' | 'medium' | 'heavy' | 'selection';
 
 interface AppButtonProps {
@@ -38,42 +44,24 @@ type VariantTokens = {
   iconBackgroundColor: string;
 };
 
-const IS_LIGHT = ActiveTheme === 'light';
-
 function resolveVariantTokens(variant: AppButtonVariant): VariantTokens {
   switch (variant) {
     case 'secondary':
       return {
-        backgroundColor: Colors.cardAlt,
+        backgroundColor: 'transparent',
         borderColor: Colors.border,
         titleColor: Colors.textPrimary,
-        subtitleColor: Colors.textMuted,
-        iconBackgroundColor: IS_LIGHT ? 'rgba(34,31,27,0.08)' : 'rgba(255,255,255,0.06)',
-      };
-    case 'gold':
-      return {
-        backgroundColor: Colors.accentGold,
-        borderColor: IS_LIGHT ? 'rgba(124,95,30,0.28)' : 'rgba(255,207,138,0.2)',
-        titleColor: Colors.textInverse,
-        subtitleColor: IS_LIGHT ? 'rgba(246,242,234,0.84)' : 'rgba(246,242,234,0.76)',
-        iconBackgroundColor: IS_LIGHT ? 'rgba(0,0,0,0.16)' : 'rgba(0,0,0,0.3)',
-      };
-    case 'contrast':
-      return {
-        backgroundColor: Colors.textPrimary,
-        borderColor: IS_LIGHT ? 'rgba(34,31,27,0.2)' : 'rgba(255,255,255,0.14)',
-        titleColor: Colors.textInverse,
-        subtitleColor: IS_LIGHT ? 'rgba(246,242,234,0.84)' : 'rgba(246,242,234,0.76)',
-        iconBackgroundColor: IS_LIGHT ? 'rgba(0,0,0,0.16)' : 'rgba(0,0,0,0.3)',
+        subtitleColor: Colors.textSecondary,
+        iconBackgroundColor: 'transparent',
       };
     case 'primary':
     default:
       return {
-        backgroundColor: Colors.accent,
-        borderColor: IS_LIGHT ? 'rgba(47,37,27,0.2)' : 'rgba(255,255,255,0.14)',
-        titleColor: Colors.textInverse,
-        subtitleColor: IS_LIGHT ? 'rgba(246,242,234,0.84)' : 'rgba(246,242,234,0.76)',
-        iconBackgroundColor: IS_LIGHT ? 'rgba(0,0,0,0.16)' : 'rgba(0,0,0,0.3)',
+        backgroundColor: Colors.brand,
+        borderColor: Colors.brand,
+        titleColor: Colors.background,
+        subtitleColor: Colors.background,
+        iconBackgroundColor: 'rgba(0,0,0,0.15)',
       };
   }
 }
@@ -84,8 +72,6 @@ function resolveSizeStyle(size: AppButtonSize): ViewStyle {
       return styles.sizeSm;
     case 'lg':
       return styles.sizeLg;
-    case 'xl':
-      return styles.sizeXl;
     case 'md':
     default:
       return styles.sizeMd;
@@ -203,11 +189,6 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     paddingHorizontal: 16,
   },
-  sizeXl: {
-    minHeight: 68,
-    borderRadius: 20,
-    paddingHorizontal: 14,
-  },
   contentRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -230,14 +211,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   title: {
-    fontSize: Typography.size.bodyLarge,
-    fontFamily: Typography.family.bold,
+    fontSize: Type.body.size,
+    fontFamily: 'Inter_700Bold',
     letterSpacing: -0.1,
   },
   subtitle: {
     marginTop: 1,
-    fontSize: Typography.size.caption,
-    fontFamily: Typography.family.medium,
+    fontSize: Type.caption.size,
+    fontFamily: 'Inter_500Medium',
     letterSpacing: 0.2,
   },
 });

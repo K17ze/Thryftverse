@@ -552,7 +552,7 @@ export default function ChatScreen({ navigation, route }: Props) {
                   variant="primary"
                   size="sm"
                   align="center"
-                  icon={<Ionicons name="flash-outline" size={15} color={Colors.textInverse} />}
+                  icon={<Ionicons name="flash-outline" size={15} color={Colors.background} />}
                   iconContainerStyle={styles.actionIconWrap}
                   title="Accept offer"
                   titleStyle={styles.offerAcceptText}
@@ -784,17 +784,6 @@ export default function ChatScreen({ navigation, route }: Props) {
               </Text>
             </View>
           </View>
-          <AnimatedPressable
-            style={styles.opsActionBtn}
-            onPress={() => setShowControls((prev) => !prev)}
-            activeOpacity={0.85}
-            accessibilityRole="button"
-            accessibilityLabel={showControls ? 'Hide tools panel' : 'Show tools panel'}
-            accessibilityHint="Shows or hides advanced conversation controls"
-          >
-            <Ionicons name={showControls ? 'chevron-up-outline' : 'chevron-down-outline'} size={18} color={TEXT} />
-            <Text style={styles.opsActionText}>{showControls ? 'Hide tools' : 'Tools'}</Text>
-          </AnimatedPressable>
         </View>
 
         {showControls ? (
@@ -836,8 +825,8 @@ export default function ChatScreen({ navigation, route }: Props) {
               <Switch
                 value={readReceiptsEnabled}
                 onValueChange={setReadReceiptsEnabled}
-                trackColor={{ false: BORDER, true: Colors.accent }}
-                thumbColor={readReceiptsEnabled ? Colors.textInverse : '#f4f4f4'}
+                trackColor={{ false: BORDER, true: Colors.brand }}
+                thumbColor={readReceiptsEnabled ? Colors.background : '#f4f4f4'}
               />
             </View>
 
@@ -846,8 +835,8 @@ export default function ChatScreen({ navigation, route }: Props) {
               <Switch
                 value={safetyGuardEnabled}
                 onValueChange={setSafetyGuardEnabled}
-                trackColor={{ false: BORDER, true: Colors.accent }}
-                thumbColor={safetyGuardEnabled ? Colors.textInverse : '#f4f4f4'}
+                trackColor={{ false: BORDER, true: Colors.brand }}
+                thumbColor={safetyGuardEnabled ? Colors.background : '#f4f4f4'}
               />
             </View>
 
@@ -856,8 +845,8 @@ export default function ChatScreen({ navigation, route }: Props) {
               <Switch
                 value={composerAssistEnabled}
                 onValueChange={setComposerAssistEnabled}
-                trackColor={{ false: BORDER, true: Colors.accent }}
-                thumbColor={composerAssistEnabled ? Colors.textInverse : '#f4f4f4'}
+                trackColor={{ false: BORDER, true: Colors.brand }}
+                thumbColor={composerAssistEnabled ? Colors.background : '#f4f4f4'}
               />
             </View>
 
@@ -946,7 +935,7 @@ export default function ChatScreen({ navigation, route }: Props) {
               onChangeText={setInput}
               onSubmitEditing={sendMessage}
               returnKeyType="send"
-              selectionColor={Colors.accent}
+              selectionColor={Colors.brand}
             />
             {input.length > 0 && (
               <AnimatedPressable
@@ -956,7 +945,7 @@ export default function ChatScreen({ navigation, route }: Props) {
                 accessibilityLabel="Send message"
                 accessibilityHint="Sends the current message"
               >
-                <Ionicons name="arrow-up" size={20} color={Colors.textInverse} />
+                <Ionicons name="arrow-up" size={20} color={Colors.background} />
               </AnimatedPressable>
             )}
           </View>
@@ -1263,8 +1252,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   opsFilterChipActive: {
-    borderColor: Colors.accent,
-    backgroundColor: Colors.accent,
+    borderColor: Colors.brand,
+    backgroundColor: Colors.brand,
   },
   opsFilterChipText: {
     color: MUTED,
@@ -1274,7 +1263,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   opsFilterChipTextActive: {
-    color: Colors.textInverse,
+    color: Colors.background,
   },
   opsCommandRow: {
     flexDirection: 'row',
@@ -1449,12 +1438,12 @@ const styles = StyleSheet.create({
     maxWidth: '80%',
   },
   textBubbleMe: {
-    backgroundColor: Colors.accent,
+    backgroundColor: Colors.brand,
     borderBottomLeftRadius: 24,
     borderBottomRightRadius: 6,
   },
   bubbleText: { fontSize: 15, fontFamily: 'Inter_500Medium', color: TEXT, lineHeight: 22 },
-  bubbleTextMe: { color: Colors.textInverse },
+  bubbleTextMe: { color: Colors.background },
   groupSenderLabel: {
     color: MUTED,
     fontSize: 11,
@@ -1502,7 +1491,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     backgroundColor: 'transparent',
   },
-  offerAcceptText: { color: Colors.textInverse, fontSize: 13, fontFamily: 'Inter_700Bold', letterSpacing: 0.2 },
+  offerAcceptText: { color: Colors.background, fontSize: 13, fontFamily: 'Inter_700Bold', letterSpacing: 0.2 },
 
   inputContainer: {
     paddingHorizontal: 16,
@@ -1555,7 +1544,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: Colors.accent,
+    backgroundColor: Colors.brand,
     alignItems: 'center',
     justifyContent: 'center',
   },

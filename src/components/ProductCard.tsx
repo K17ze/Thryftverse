@@ -312,7 +312,7 @@ const styles = StyleSheet.create({
   sellerLinkText: {
     flex: 1,
     color: Colors.textSecondary,
-    fontSize: Typography.size.micro,
+    fontSize: 9,
     fontFamily: Typography.family.medium,
   },
 });

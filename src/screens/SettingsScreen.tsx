@@ -31,6 +31,8 @@ import {
   updateThemePreference,
 } from '../theme/themePreference';
 import { t } from '../i18n';
+import { Space, Radius } from '../theme/designTokens';
+import { T } from '../components/ui/Text';
 
 type Props = StackScreenProps<RootStackParamList, 'Settings'>;
 const ACCENT = '#d7b98f';
@@ -432,23 +434,22 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 10,
-    paddingBottom: 20,
+    paddingHorizontal: Space.md - Space.xs,
+    paddingVertical: Space.md - Space.xs,
     gap: 14,
   },
   backBtn: {
     width: 44,
     height: 44,
     borderRadius: 14,
-    backgroundColor: PANEL_BG,
+    backgroundColor: Colors.card,
     justifyContent: 'center',
     alignItems: 'center',
   },
   headerLabel: {
     fontSize: 11,
     fontFamily: 'Inter_600SemiBold',
-    color: BRAND,
+    color: Colors.textSecondary,
     letterSpacing: 1.5,
     marginBottom: 2,
   },
@@ -458,19 +459,15 @@ const styles = StyleSheet.create({
     color: Colors.textPrimary,
     letterSpacing: -0.5,
   },
-  scrollContent: { paddingHorizontal: 20, paddingBottom: 40 },
+  scrollContent: { padding: Space.md, paddingBottom: Space.xl },
 
   // Section headers with descriptions
-  sectionHeader: {
-    marginTop: 24,
-    marginBottom: 12,
-    paddingLeft: 4,
-  },
+  sectionHeader: { marginTop: Space.lg, marginBottom: Space.sm },
   sectionTitle: {
-    fontSize: 14,
+    fontSize: 12,
     fontFamily: 'Inter_600SemiBold',
-    color: Colors.textPrimary,
-    marginBottom: 3,
+    color: Colors.textSecondary,
+    marginBottom: Space.xs / 2,
   },
   sectionDesc: {
     fontSize: 12,
@@ -481,38 +478,40 @@ const styles = StyleSheet.create({
 
   // Pill cards
   pillCard: {
-    backgroundColor: PANEL_BG,
-    borderRadius: 22,
-    paddingHorizontal: 16,
+    backgroundColor: Colors.card,
+    borderRadius: Radius.lg,
+    marginBottom: Space.xs,
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: PANEL_BORDER,
-    shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowOffset: { width: 0, height: 4 },
-    shadowRadius: 12,
   },
   settingRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 16,
+    paddingVertical: Space.md,
   },
   settingRowDisabled: {
     opacity: 0.72,
   },
   settingRowBorder: {
     borderBottomWidth: 1,
-    borderBottomColor: PANEL_BORDER,
+    borderBottomColor: Colors.border,
   },
 
   // Larger square icons
-  iconSquare: {
-    width: 42,
-    height: 42,
-    borderRadius: 14,
-    justifyContent: 'center',
+  iconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: Radius.md,
     alignItems: 'center',
-    marginRight: 14,
+    justifyContent: 'center',
+    marginRight: Space.sm,
+  },
+  iconSquare: {
+    width: 36,
+    height: 36,
+    borderRadius: Radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: Space.sm,
     borderWidth: 1,
   },
   settingTexts: { flex: 1 },
@@ -520,11 +519,11 @@ const styles = StyleSheet.create({
   settingSubtitle: { fontSize: 12, fontFamily: 'Inter_400Regular', color: Colors.textMuted, marginTop: 2 },
 
   logoutPill: {
-    marginTop: 32,
+    marginTop: Space.xxl,
     backgroundColor: IS_LIGHT ? 'rgba(182,66,66,0.1)' : 'rgba(255,77,77,0.12)',
-    borderRadius: 22,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    borderRadius: Radius.lg,
+    paddingHorizontal: Space.md,
+    paddingVertical: Space.md,
     alignItems: 'center',
     flexDirection: 'row',
     borderWidth: 1,

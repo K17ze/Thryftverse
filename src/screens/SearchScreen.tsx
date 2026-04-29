@@ -16,15 +16,15 @@ import { CachedImage } from '../components/CachedImage';
 import Reanimated, { useSharedValue, useAnimatedScrollHandler, FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { ProductCard } from '../components/ProductCard';
+import { ProductCardV2 } from '../components/ProductCardV2';
 import { ActiveTheme, Colors } from '../constants/colors';
+import { Space, Radius } from '../theme/designTokens';
 import { Typography } from '../constants/typography';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
 import { RefreshIndicator } from '../components/RefreshIndicator';
 import { EmptyState } from '../components/EmptyState';
-import { SyncStatusPill } from '../components/SyncStatusPill';
 import { SkeletonLoader } from '../components/SkeletonLoader';
 import { SyncRetryBanner } from '../components/SyncRetryBanner';
 import { useStore } from '../store/useStore';
@@ -41,7 +41,7 @@ type NavT = StackNavigationProp<RootStackParamList>;
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const ACCENT = '#d7b98f';
 const IS_LIGHT = ActiveTheme === 'light';
-const PANEL_BG = Colors.card;
+const PANEL_BG = Colors.surface;
 const PANEL_ALT = IS_LIGHT ? '#ece4d8' : '#1f1f1f';
 const BRAND = IS_LIGHT ? '#2f251b' : ACCENT;
 
@@ -346,9 +346,6 @@ export default function SearchScreen() {
         </View>
         <View style={styles.headerRight}>
           <Text style={styles.itemCount}>{wishlistItems.length + savedLooks.length} items</Text>
-          <View style={styles.headerStatusWrap}>
-            <SyncStatusPill tone={closetStatus.tone} label={closetStatus.label} compact />
-          </View>
           <AppButton
             title="Discover"
             icon={<Ionicons name="compass-outline" size={14} color={Colors.textPrimary} />}
@@ -398,7 +395,7 @@ export default function SearchScreen() {
                 <Ionicons
                   name={tab.icon}
                   size={14}
-                  color={activeTab === tab.key ? Colors.textInverse : Colors.textSecondary}
+                  color={activeTab === tab.key ? Colors.background : Colors.textSecondary}
                 />
               }
               trailingIcon={
@@ -524,10 +521,10 @@ export default function SearchScreen() {
                           .duration(Motion.list.enterDuration)
                   }
                 >
-                  <ProductCard
+                  <ProductCardV2
                     item={item}
                     onPress={() => navigation.push('ItemDetail', { itemId: item.id })}
-                    onPressSeller={(sellerId: string) => navigation.navigate('UserProfile', { userId: sellerId })}
+                    showSeller={true}
                   />
                 </Reanimated.View>
               )}
@@ -738,7 +735,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
     paddingHorizontal: 10,
   },
-  activeTab: { backgroundColor: Colors.accent },
+  activeTab: { backgroundColor: Colors.brand },
   tabIconWrap: {
     width: 16,
     height: 16,
@@ -746,7 +743,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   tabText: { fontSize: 11, fontFamily: Typography.family.semibold, color: Colors.textSecondary, letterSpacing: 0.2 },
-  activeTabText: { color: Colors.textInverse },
+  activeTabText: { color: Colors.background },
   tabCountWrap: {
     width: 'auto',
     height: 'auto',

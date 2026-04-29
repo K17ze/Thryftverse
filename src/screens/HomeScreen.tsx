@@ -29,7 +29,7 @@ import { ImageContentFit } from 'expo-image';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { ActiveTheme, Colors } from '../constants/colors';
-import { Typography } from '../constants/typography';
+// Typography simplified - using direct font names
 import { MOCK_USERS } from '../data/mockData';
 import { getFreshPosters } from '../data/posters';
 import { useNavigation, useScrollToTop } from '@react-navigation/native';
@@ -37,19 +37,23 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/types';
 import { useStore } from '../store/useStore';
 import { useTabScroll } from '../context/TabScrollContext';
-import { AnimatedBadge } from '../components/AnimatedBadge';
+// Phase 3: Removed AnimatedBadge (badge clutter reduced)
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useBackendData } from '../context/BackendDataContext';
 import { AnimatedPressable } from '../components/AnimatedPressable';
 import { CachedImage } from '../components/CachedImage';
-import { SyncStatusPill } from '../components/SyncStatusPill';
+// Phase 3: Removed SyncStatusPill (status indicator clutter reduced)
 import { SyncRetryBanner } from '../components/SyncRetryBanner';
 import { SkeletonLoader } from '../components/SkeletonLoader';
 import { ThryftCartIcon } from '../components/icons/ThryftCartIcon';
 import { SharedTransitionView } from '../components/SharedTransitionView';
+import { MasonryGrid, ProductCardV2 } from '../components/ProductCardV2';
+import { DoubleTapHeart } from '../components/DoubleTapHeart';
 import { getBackendSyncStatus } from '../utils/syncStatus';
 import { isVideoUri } from '../utils/media';
 import { AppButton } from '../components/ui/AppButton';
+import { Space, Radius } from '../theme/designTokens';
+import { T } from '../components/ui/Text';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 
@@ -59,9 +63,9 @@ const GRID_GAP = 6;
 const SCREEN_WIDTH = Dimensions.get('window').width;
 
 const IS_LIGHT = ActiveTheme === 'light';
-const PANEL_BG = Colors.card;
-const SOCIAL_RING = Colors.accent;
+const PANEL_BG = Colors.surface;
 
+// Masonry grid: Varied aspect ratios for visual interest
 const TILE_RATIO_SEQUENCE = [1.28, 0.94, 1.16, 0.86, 1.06, 1.22] as const;
 
 function resolveTileAspectRatio(seed: string) {
@@ -132,7 +136,7 @@ const STORY_STATUS_LABEL: Record<StoryStatus, string> = {
 };
 
 const STORY_STATUS_GRADIENT: Record<StoryStatus, [string, string]> = {
-  'new-listing': [Colors.accent, Colors.accentGold],
+  'new-listing': [Colors.brand, Colors.brandPressed],
   'live-auction': ['#f3c17c', '#dd6a33'],
   'co-own-launching': ['#d4a94a', '#8f6721'],
   'sold-recently': ['#f2ddaa', '#d69044'],
@@ -167,6 +171,7 @@ type ExploreTile = {
   price?: number;
   caption: string;
   aspectRatio: number;
+  isSaved?: boolean;
 };
 
 type StoryBubble = {
@@ -177,6 +182,7 @@ type StoryBubble = {
   posterId?: string;
   isNew: boolean;
   status: StoryStatus;
+  isSaved?: boolean;
 };
 
 interface ExploreGridItemProps {
@@ -218,21 +224,26 @@ const ExploreGridItem = React.memo(function ExploreGridItem({
         accessibilityRole="button"
         accessibilityHint="Opens item details. Long press to preview this listing"
       >
-        <SharedTransitionView
-          style={styles.exploreSharedMedia}
-          sharedTransitionTag={sharedTag}
+        <DoubleTapHeart
+          isLiked={item.isSaved || false}
+          onLike={() => {}}
         >
-          <MediaPreview
-            uri={item.mediaUri}
-            posterUri={item.posterUri}
-            style={styles.exploreImage}
-            autoPlay={item.mediaType === 'video'}
-            loop
-            muted
-            contentFit="cover"
-            isVisible
-          />
-        </SharedTransitionView>
+          <SharedTransitionView
+            style={styles.exploreSharedMedia}
+            sharedTransitionTag={sharedTag}
+          >
+            <MediaPreview
+              uri={item.mediaUri}
+              posterUri={item.posterUri}
+              style={styles.exploreImage}
+              autoPlay={item.mediaType === 'video'}
+              loop
+              muted
+              contentFit="cover"
+              isVisible
+            />
+          </SharedTransitionView>
+        </DoubleTapHeart>
 
         <View style={styles.exploreOverlay}>
           <View style={styles.exploreTag}>
@@ -490,7 +501,7 @@ export default function HomeScreen() {
     <View style={styles.postersSection}>
       <View style={styles.sectionRow}>
         <Text style={styles.sectionTitle}>Posters</Text>
-        <SyncStatusPill tone={feedStatus.tone} label={feedStatus.label} compact />
+        {/* Phase 3: Removed sync status pill - cleaner headers */}
       </View>
 
       <ScrollView
@@ -508,7 +519,7 @@ export default function HomeScreen() {
         >
           <View style={styles.posterCreateTile}>
             <View style={styles.posterCreateIcon}>
-              <Ionicons name="add" size={24} color={Colors.textInverse} />
+              <Ionicons name="add" size={24} color={Colors.background} />
             </View>
             <Text style={styles.posterCreateLabel}>Create Poster</Text>
           </View>
@@ -525,31 +536,37 @@ export default function HomeScreen() {
             accessibilityHint="Opens poster details with countdown and listing context"
           >
             <View style={[styles.posterTile, hasSeenPoster(poster.id) ? styles.posterTileSeen : styles.posterTileUnseen]}>
-              <CachedImage
-                uri={
-                  poster.image
-                  || listings.find((listing) => listing.id === poster.listingId)?.images?.[0]
-                  || 'https://picsum.photos/seed/poster-fallback-home/400/500'
-                }
-                style={styles.posterImage}
-                contentFit="cover"
-              />
+              {/* Video/Image with auto-play support */}
+              {isVideoUri(poster.image) ? (
+                <Video
+                  source={{ uri: poster.image }}
+                  style={styles.posterImage}
+                  resizeMode={ResizeMode.COVER}
+                  shouldPlay
+                  isLooping
+                  isMuted
+                />
+              ) : (
+                <CachedImage
+                  uri={
+                    poster.image
+                    || listings.find((listing) => listing.id === poster.listingId)?.images?.[0]
+                    || 'https://picsum.photos/seed/poster-fallback-home/400/500'
+                  }
+                  style={styles.posterImage}
+                  contentFit="cover"
+                />
+              )}
               <View style={styles.posterShade} />
 
-              <View style={styles.posterTopRow}>
-                <View style={styles.posterOwnerPill}>
-                  <CachedImage
-                    uri={poster.uploader?.avatar ?? 'https://picsum.photos/seed/posterUser/60/60'}
-                    style={styles.posterOwnerAvatar}
-                    containerStyle={styles.posterOwnerAvatarWrap}
-                    contentFit="cover"
-                  />
-                  <Text style={styles.posterOwnerName} numberOfLines={1}>@{poster.uploader?.username ?? 'seller'}</Text>
-                </View>
-                <View style={styles.posterExpiryPill}>
-                  <Ionicons name="time-outline" size={11} color="#fff" />
-                  <Text style={styles.posterExpiryText}>{poster.remainingHours}h</Text>
-                </View>
+              {/* User PFP overlay in top left corner */}
+              <View style={styles.posterAvatarOverlay}>
+                <CachedImage
+                  uri={poster.uploader?.avatar ?? 'https://picsum.photos/seed/posterUser/60/60'}
+                  style={styles.posterAvatarOverlayImage}
+                  containerStyle={styles.posterAvatarOverlayWrap}
+                  contentFit="cover"
+                />
               </View>
 
               <View style={styles.posterBottomOverlay}>
@@ -558,7 +575,6 @@ export default function HomeScreen() {
             </View>
 
             <View style={styles.posterCardMetaRow}>
-              <Text style={styles.posterUserName} numberOfLines={1}>@{poster.uploader?.username ?? 'seller'}</Text>
               <Text style={hasSeenPoster(poster.id) ? styles.posterSeenMeta : styles.posterFreshMeta}>
                 {hasSeenPoster(poster.id) ? 'Seen' : 'New'}
               </Text>
@@ -594,8 +610,8 @@ export default function HomeScreen() {
           style={styles.newListingsBanner}
           contentStyle={styles.newListingsBannerContent}
           titleStyle={styles.newListingsBannerText}
-          icon={<Ionicons name="sparkles-outline" size={13} color={Colors.textInverse} />}
-          trailingIcon={<Ionicons name="arrow-up" size={13} color={Colors.textInverse} />}
+          icon={<Ionicons name="sparkles-outline" size={13} color={Colors.background} />}
+          trailingIcon={<Ionicons name="arrow-up" size={13} color={Colors.background} />}
           iconContainerStyle={styles.newListingsBannerIconWrap}
           trailingIconContainerStyle={styles.newListingsBannerIconWrap}
           hapticFeedback="selection"
@@ -688,7 +704,7 @@ export default function HomeScreen() {
               accessibilityHint="Opens notifications center"
             >
               <Ionicons name="notifications-outline" size={22} color={Colors.textPrimary} />
-              <AnimatedBadge count={notificationCount} size={16} />
+              {/* Phase 3: Removed notification badge - less visual clutter */}
             </AnimatedPressable>
           </View>
         </View>
@@ -794,7 +810,7 @@ export default function HomeScreen() {
                     align="center"
                     style={styles.peekPrimaryBtn}
                     titleStyle={styles.peekPrimaryText}
-                    icon={<Ionicons name="arrow-forward" size={14} color={Colors.textInverse} />}
+                    icon={<Ionicons name="arrow-forward" size={14} color={Colors.background} />}
                     iconContainerStyle={styles.peekPrimaryIconWrap}
                     onPress={() => {
                       if (peekItem.routeId) {
@@ -827,8 +843,8 @@ const styles = StyleSheet.create({
     right: 0,
     zIndex: 20,
     overflow: 'hidden',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: Colors.glassBorder,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
   },
   headerForeground: {
     flex: 1,
@@ -842,18 +858,18 @@ const styles = StyleSheet.create({
     paddingRight: 10,
   },
   brandTitle: {
-    fontSize: 30,
-    fontFamily: Typography.family.extrabold,
+    fontSize: 28,
+    fontFamily: 'Inter_800ExtraBold',
     letterSpacing: -0.6,
     color: Colors.textPrimary,
     lineHeight: 32,
   },
   brandSubtitle: {
-    marginTop: 1,
-    fontSize: 10,
-    fontFamily: Typography.family.light,
+    marginTop: 2,
+    fontSize: 11,
+    fontFamily: 'Inter_400Regular',
     letterSpacing: 0.25,
-    color: Colors.textMuted,
+    color: Colors.textSecondary,
   },
   headerRight: {
     flexDirection: 'row',
@@ -865,9 +881,9 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: Colors.glass,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: Colors.glassBorder,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.border,
   },
   feedContent: {
     paddingBottom: 120,
@@ -880,16 +896,11 @@ const styles = StyleSheet.create({
   newListingsBanner: {
     alignSelf: 'center',
     minHeight: 40,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    borderRadius: 999,
-    backgroundColor: Colors.accent,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: Colors.accentPress,
-    shadowColor: '#000',
-    shadowOpacity: 0.22,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    backgroundColor: Colors.brand,
+    borderWidth: 0,
   },
   newListingsBannerContent: {
     gap: 7,
@@ -902,8 +913,8 @@ const styles = StyleSheet.create({
   },
   newListingsBannerText: {
     fontSize: 12,
-    fontFamily: Typography.family.semibold,
-    color: Colors.textInverse,
+    fontFamily: 'Inter_600SemiBold',
+    color: Colors.background,
     letterSpacing: 0.2,
   },
 
@@ -916,16 +927,15 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 17,
-    fontFamily: Typography.family.semibold,
+    fontFamily: 'Inter_600SemiBold',
     color: Colors.textPrimary,
     letterSpacing: -0.1,
   },
   sectionHint: {
     fontSize: 11,
-    fontFamily: Typography.family.light,
+    fontFamily: 'Inter_400Regular',
     color: Colors.textMuted,
     letterSpacing: 0.22,
-    textTransform: 'uppercase',
   },
 
   storiesSection: {
@@ -987,7 +997,7 @@ const styles = StyleSheet.create({
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: SOCIAL_RING,
+    backgroundColor: Colors.brand,
     position: 'absolute',
     right: 1,
     top: 1,
@@ -996,7 +1006,7 @@ const styles = StyleSheet.create({
   },
   storyName: {
     fontSize: 10,
-    fontFamily: Typography.family.medium,
+    fontFamily: 'Inter_500Medium',
     color: Colors.textSecondary,
     width: 66,
     textAlign: 'center',
@@ -1004,7 +1014,7 @@ const styles = StyleSheet.create({
   storyStatus: {
     marginTop: 2,
     fontSize: 9,
-    fontFamily: Typography.family.light,
+    fontFamily: 'Inter_400Regular',
     color: Colors.textMuted,
     width: 66,
     textAlign: 'center',
@@ -1026,7 +1036,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: Colors.border,
-    backgroundColor: Colors.card,
+    backgroundColor: Colors.surface,
   },
   lookImageWrap: {
     width: '100%',
@@ -1042,7 +1052,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: Colors.border,
-    backgroundColor: Colors.card,
+    backgroundColor: Colors.surface,
   },
   lookFeedImageWrap: {
     width: '100%',
@@ -1080,19 +1090,19 @@ const styles = StyleSheet.create({
   lookOwnerName: {
     color: '#fff',
     fontSize: 11,
-    fontFamily: Typography.family.semibold,
+    fontFamily: 'Inter_600SemiBold',
   },
   lookTitle: {
     color: '#fff',
     fontSize: 21,
-    fontFamily: Typography.family.extrabold,
+    fontFamily: 'Inter_800ExtraBold',
     letterSpacing: -0.4,
     lineHeight: 24,
   },
   lookDescription: {
     color: 'rgba(255,255,255,0.85)',
     fontSize: 12,
-    fontFamily: Typography.family.medium,
+    fontFamily: 'Inter_500Medium',
     marginTop: 2,
   },
   lookMetaRow: {
@@ -1113,12 +1123,12 @@ const styles = StyleSheet.create({
   lookMetaText: {
     color: '#fff',
     fontSize: 11,
-    fontFamily: Typography.family.semibold,
+    fontFamily: 'Inter_600SemiBold',
   },
   lookTime: {
     color: 'rgba(255,255,255,0.82)',
     fontSize: 11,
-    fontFamily: Typography.family.medium,
+    fontFamily: 'Inter_500Medium',
     marginLeft: 'auto',
   },
 
@@ -1149,7 +1159,7 @@ const styles = StyleSheet.create({
   },
   posterTileUnseen: {
     borderWidth: 2,
-    borderColor: SOCIAL_RING,
+    borderColor: Colors.brand,
   },
   posterTileSeen: {
     borderWidth: 1,
@@ -1162,6 +1172,32 @@ const styles = StyleSheet.create({
   posterShade: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.2)',
+  },
+  posterAvatarOverlay: {
+    position: 'absolute',
+    top: 5,
+    left: 5,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: '#fff',
+    shadowColor: '#000',
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 4,
+  },
+  posterAvatarOverlayWrap: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+  },
+  posterAvatarOverlayImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 12,
   },
   posterCreateTile: {
     width: 108,
@@ -1182,9 +1218,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   posterCreateLabel: {
-    color: Colors.textInverse,
+    color: Colors.background,
     fontSize: 10,
-    fontFamily: Typography.family.semibold,
+    fontFamily: 'Inter_600SemiBold',
     textAlign: 'center',
   },
   posterTopRow: {
@@ -1220,7 +1256,7 @@ const styles = StyleSheet.create({
   posterOwnerName: {
     color: '#fff',
     fontSize: 8,
-    fontFamily: Typography.family.medium,
+    fontFamily: 'Inter_500Medium',
     flex: 1,
   },
   posterExpiryPill: {
@@ -1235,7 +1271,7 @@ const styles = StyleSheet.create({
   posterExpiryText: {
     color: '#fff',
     fontSize: 9,
-    fontFamily: Typography.family.bold,
+    fontFamily: 'Inter_700Bold',
   },
   posterBottomOverlay: {
     position: 'absolute',
@@ -1250,7 +1286,7 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 9,
     lineHeight: 12,
-    fontFamily: Typography.family.medium,
+    fontFamily: 'Inter_500Medium',
   },
   posterCardMetaRow: {
     flexDirection: 'row',
@@ -1258,37 +1294,37 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   posterUserName: {
-    fontSize: 10,
-    fontFamily: Typography.family.semibold,
+    fontSize: 9,
+    fontFamily: 'Inter_600SemiBold',
     color: Colors.textPrimary,
   },
   posterFreshMeta: {
     fontSize: 9,
-    fontFamily: Typography.family.bold,
-    color: SOCIAL_RING,
+    fontFamily: 'Inter_700Bold',
+    color: Colors.brand,
   },
   posterSeenMeta: {
     fontSize: 9,
-    fontFamily: Typography.family.medium,
+    fontFamily: 'Inter_500Medium',
     color: Colors.textMuted,
   },
 
   masonryGrid: {
     flexDirection: 'row',
-    paddingHorizontal: GRID_GAP,
-    gap: GRID_GAP,
+    paddingHorizontal: Space.sm,
+    gap: Space.sm,
     alignItems: 'flex-start',
   },
   masonryColumn: {
     flex: 1,
-    gap: GRID_GAP,
+    gap: Space.sm,
   },
   exploreItemBox: {
     borderRadius: 14,
     overflow: 'hidden',
     backgroundColor: PANEL_BG,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: Colors.glassBorder,
+    borderColor: Colors.border,
     shadowColor: '#000',
     shadowOpacity: 0.08,
     shadowRadius: 12,
@@ -1321,7 +1357,7 @@ const styles = StyleSheet.create({
   exploreTagText: {
     color: '#fff',
     fontSize: 10,
-    fontFamily: Typography.family.semibold,
+    fontFamily: 'Inter_600SemiBold',
     letterSpacing: 0.14,
   },
   exploreSellerRow: {
@@ -1339,7 +1375,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: Colors.border,
-    backgroundColor: Colors.cardAlt,
+    backgroundColor: Colors.surface,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
@@ -1367,7 +1403,7 @@ const styles = StyleSheet.create({
     flex: 1,
     color: Colors.textSecondary,
     fontSize: 10,
-    fontFamily: Typography.family.medium,
+    fontFamily: 'Inter_500Medium',
   },
   exploreMessageBtn: {
     width: 28,
@@ -1375,7 +1411,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: Colors.border,
-    backgroundColor: Colors.cardAlt,
+    backgroundColor: Colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1398,12 +1434,12 @@ const styles = StyleSheet.create({
   },
   exploreLoadingGrid: {
     flexDirection: 'row',
-    paddingHorizontal: GRID_GAP,
-    gap: GRID_GAP,
+    paddingHorizontal: Space.sm,
+    gap: Space.sm,
   },
   exploreLoadingColumn: {
     flex: 1,
-    gap: GRID_GAP,
+    gap: Space.sm,
   },
 
   peekBackdrop: {
@@ -1419,7 +1455,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: Colors.border,
-    backgroundColor: Colors.card,
+    backgroundColor: Colors.surface,
   },
   peekMediaWrap: {
     width: '100%',
@@ -1436,14 +1472,14 @@ const styles = StyleSheet.create({
   },
   peekTitle: {
     fontSize: 19,
-    fontFamily: Typography.family.bold,
+    fontFamily: 'Inter_700Bold',
     color: Colors.textPrimary,
     letterSpacing: -0.2,
   },
   peekSubtitle: {
     marginTop: 4,
     fontSize: 13,
-    fontFamily: Typography.family.regular,
+    fontFamily: 'Inter_400Regular',
     color: Colors.textSecondary,
   },
   peekActionsRow: {
@@ -1459,7 +1495,7 @@ const styles = StyleSheet.create({
   },
   peekGhostText: {
     fontSize: 13,
-    fontFamily: Typography.family.semibold,
+    fontFamily: 'Inter_600SemiBold',
     color: Colors.textPrimary,
   },
   peekPrimaryBtn: {
@@ -1476,7 +1512,7 @@ const styles = StyleSheet.create({
   },
   peekPrimaryText: {
     fontSize: 13,
-    fontFamily: Typography.family.bold,
-    color: Colors.textInverse,
+    fontFamily: 'Inter_700Bold',
+    color: Colors.background,
   },
 });

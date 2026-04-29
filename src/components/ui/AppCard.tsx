@@ -1,41 +1,51 @@
 import React from 'react';
 import { StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
-import { ActiveTheme, Colors } from '../../constants/colors';
+import { Colors } from '../../constants/colors';
 
-export type AppCardVariant = 'default' | 'soft' | 'tint';
+// ============================================================================
+// STANDARDIZED CARD COMPONENT (Phase 2 Cleanup)
+// 3 variants only: surface | elevated | brand
+// ============================================================================
+
+export type AppCardVariant = 'surface' | 'elevated' | 'brand';
 
 interface AppCardProps {
   children: React.ReactNode;
   variant?: AppCardVariant;
   style?: StyleProp<ViewStyle>;
-  elevated?: boolean;
+  /** No border for cleaner look */
+  noBorder?: boolean;
 }
 
-const IS_LIGHT = ActiveTheme === 'light';
-
-function resolveCardTone(variant: AppCardVariant) {
+function resolveCardStyle(variant: AppCardVariant) {
   switch (variant) {
-    case 'soft':
+    case 'brand':
       return {
-        backgroundColor: IS_LIGHT ? '#f7f4ef' : '#161616',
+        backgroundColor: Colors.brand,
+        borderColor: Colors.brand,
+      };
+    case 'elevated':
+      return {
+        backgroundColor: Colors.surface,
         borderColor: Colors.border,
       };
-    case 'tint':
-      return {
-        backgroundColor: IS_LIGHT ? '#ece4d8' : '#1b1712',
-        borderColor: IS_LIGHT ? '#d0c3af' : '#4f4638',
-      };
-    case 'default':
+    case 'surface':
     default:
       return {
-        backgroundColor: Colors.card,
+        backgroundColor: Colors.surface,
         borderColor: Colors.border,
       };
   }
 }
 
-export function AppCard({ children, variant = 'default', style, elevated }: AppCardProps) {
-  const tone = resolveCardTone(variant);
+export function AppCard({ 
+  children, 
+  variant = 'surface', 
+  style, 
+  noBorder = false 
+}: AppCardProps) {
+  const tone = resolveCardStyle(variant);
+  const isElevated = variant === 'elevated';
 
   return (
     <View
@@ -43,9 +53,9 @@ export function AppCard({ children, variant = 'default', style, elevated }: AppC
         styles.base,
         {
           backgroundColor: tone.backgroundColor,
-          borderColor: tone.borderColor,
+          borderColor: noBorder ? 'transparent' : tone.borderColor,
         },
-        elevated && styles.elevated,
+        isElevated && styles.elevated,
         style,
       ]}
     >
@@ -56,15 +66,27 @@ export function AppCard({ children, variant = 'default', style, elevated }: AppC
 
 const styles = StyleSheet.create({
   base: {
-    borderRadius: 16,
+    borderRadius: 12,
     borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
   },
   elevated: {
     shadowColor: '#000',
-    shadowOpacity: 0.05,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
   },
 });
+
+// ============================================================================
+// SIMPLIFIED CARD USAGE GUIDE
+// ============================================================================
+// - surface: Default cards, info panels, form sections
+// - elevated: Product cards, featured items (subtle shadow)
+// - brand: Primary CTAs, highlighted actions (gold background)
+//
+// MIGRATION NOTES:
+// - Old 'default' → 'surface'
+// - Old 'soft'/'tint' → 'surface' (simplified)
+// - Custom card styles → migrate to AppCard with variant

@@ -44,7 +44,7 @@ type CoOwnView = 'ISSUED' | 'HOLDINGS';
 
 const STABLE_COIN = '1ze';
 const IS_LIGHT = ActiveTheme === 'light';
-const BRAND = Colors.accentGold;
+const BRAND = Colors.brand;
 const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111111';
 const PANEL_SOFT_BG = IS_LIGHT ? '#f7f4ef' : '#161616';
 const PANEL_MUTED_BG = IS_LIGHT ? '#f1ede6' : '#151515';
@@ -357,36 +357,6 @@ export default function CoOwnScreen() {
         <Text style={styles.heroTitle}>{t('syndicate.header.myCoOwn')}</Text>
       </View>
 
-      <View style={styles.supportRow}>
-        <AnimatedPressable
-          style={styles.supportIdentity}
-          onPress={() => navigation.navigate('UserProfile', { userId: supportUser.id })}
-          activeOpacity={0.85}
-          accessibilityRole="button"
-          accessibilityLabel={`Open @${supportUser.username} profile`}
-          accessibilityHint="Shows co-own support profile"
-        >
-          <CachedImage
-            uri={supportUser.avatar}
-            style={styles.supportAvatar}
-            containerStyle={styles.supportAvatarWrap}
-            contentFit="cover"
-          />
-          <Text style={styles.supportText}>Need co-own help? @{supportUser.username}</Text>
-        </AnimatedPressable>
-
-        <AnimatedPressable
-          style={styles.supportMessageBtn}
-          onPress={handleOpenSyndicateSupport}
-          activeOpacity={0.85}
-          accessibilityRole="button"
-          accessibilityLabel="Message co-own support"
-          accessibilityHint="Opens support chat for co-own issuance and holdings"
-        >
-          <Ionicons name="chatbubble-ellipses-outline" size={12} color={Colors.textPrimary} />
-        </AnimatedPressable>
-      </View>
-
       <View style={styles.heroQuickRow}>
         <AppButton
           title={t('syndicate.quick.leaderboard')}
@@ -452,7 +422,7 @@ export default function CoOwnScreen() {
           title={t('syndicate.issue.cta')}
           icon={<Ionicons name="add" size={15} color={Colors.background} />}
           style={styles.issueBtn}
-          variant="gold"
+          variant="primary"
           size="sm"
           titleStyle={styles.issueBtnText}
           iconContainerStyle={styles.issueBtnIconWrap}
@@ -1148,7 +1118,7 @@ const styles = StyleSheet.create({
   },
   issueBtn: {
     borderRadius: 14,
-    backgroundColor: Colors.accentGold,
+    backgroundColor: Colors.brand,
     minHeight: 34,
     paddingHorizontal: 12,
     borderWidth: 0,
@@ -1219,7 +1189,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   switcherBtnActive: {
-    backgroundColor: Colors.accentGold,
+    backgroundColor: Colors.brand,
   },
   switcherText: {
     color: Colors.textSecondary,
@@ -1228,7 +1198,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.4,
   },
   switcherTextActive: {
-    color: Colors.textInverse,
+    color: Colors.background,
   },
   sectionRow: {
     paddingHorizontal: 16,
@@ -1505,7 +1475,7 @@ const styles = StyleSheet.create({
   },
   buyBtn: {
     flex: 1,
-    backgroundColor: Colors.accentGold,
+    backgroundColor: Colors.brand,
     borderRadius: 14,
     paddingVertical: 10,
     alignItems: 'center',
@@ -1655,7 +1625,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 10,
-    backgroundColor: Colors.accentGold,
+    backgroundColor: Colors.brand,
   },
   unitsSubmitText: {
     color: Colors.background,
@@ -1801,7 +1771,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 10,
-    backgroundColor: Colors.accentGold,
+    backgroundColor: Colors.brand,
   },
   complianceDoneBtnText: {
     color: Colors.background,

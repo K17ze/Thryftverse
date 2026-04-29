@@ -420,3 +420,71 @@ export async function getIzePosition(userId: string, fiatCurrency = 'GBP') {
     `/wallet/1ze/${encodeURIComponent(userId)}/position?fiatCurrency=${encodeURIComponent(fiatCurrency)}`
   );
 }
+
+// Convert 1ze to Fiat (for withdrawal)
+interface ConvertIzeToFiatResponse {
+  ok: true;
+  userId: string;
+  wallet: {
+    onezeBalanceMg: number;
+    onezeBalance: number;
+    fiatBalanceMinor: number;
+    fiatBalance: number;
+  };
+  conversion: {
+    izeAmount: number;
+    fiatAmount: number;
+    fiatCurrency: string;
+    rateUsed: number;
+  };
+}
+
+export async function convertIzeToFiat(input: {
+  userId: string;
+  izeAmount: number;
+  fiatCurrency?: string;
+}) {
+  return fetchJson<ConvertIzeToFiatResponse>('/wallet/convert-1ze-to-fiat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      userId: input.userId,
+      izeAmount: input.izeAmount,
+      fiatCurrency: input.fiatCurrency ?? 'GBP',
+    }),
+  });
+}
+
+// Buy 1ze using Fiat Balance
+interface BuyIzeResponse {
+  ok: true;
+  userId: string;
+  wallet: {
+    onezeBalanceMg: number;
+    onezeBalance: number;
+    fiatBalanceMinor: number;
+    fiatBalance: number;
+  };
+  purchase: {
+    fiatAmount: number;
+    fiatCurrency: string;
+    izeAmount: number;
+    rateUsed: number;
+  };
+}
+
+export async function buyIze(input: {
+  userId: string;
+  fiatAmount: number;
+  fiatCurrency?: string;
+}) {
+  return fetchJson<BuyIzeResponse>('/wallet/buy-1ze', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      userId: input.userId,
+      fiatAmount: input.fiatAmount,
+      fiatCurrency: input.fiatCurrency ?? 'GBP',
+    }),
+  });
+}

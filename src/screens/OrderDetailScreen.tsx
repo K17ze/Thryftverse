@@ -20,6 +20,7 @@ import { MOCK_LISTINGS, MOCK_USERS } from '../data/mockData';
 import { mockFind, mockArrayOrEmpty } from '../utils/mockGate';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useBackendData } from '../context/BackendDataContext';
+import { Space, Radius } from '../theme/designTokens';
 import {
   CommerceOrder,
   OrderParcelEvent,
@@ -551,12 +552,10 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     paddingBottom: 16,
   },
-  backBtn: {
-    width: 40, height: 40, borderRadius: 20,
+  backBtn: { width: 40, height: 40, borderRadius: Radius.full,
     backgroundColor: Colors.card, alignItems: 'center', justifyContent: 'center',
   },
-  moreBtn: {
-    width: 40, height: 40, borderRadius: 20,
+  moreBtn: { width: 40, height: 40, borderRadius: Radius.full,
     backgroundColor: Colors.card, alignItems: 'center', justifyContent: 'center',
   },
   headerTitle: {
@@ -568,10 +567,10 @@ const styles = StyleSheet.create({
   itemCard: {
     flexDirection: 'row',
     backgroundColor: Colors.card,
-    borderRadius: 20,
-    padding: 14,
+    borderRadius: Radius.lg,
+    padding: Space.md - Space.xs,
     alignItems: 'center',
-    gap: 14,
+    gap: Space.sm + 2,
     marginBottom: 16,
   },
   itemThumb: { width: 72, height: 72, borderRadius: 14, overflow: 'hidden' },
@@ -584,9 +583,9 @@ const styles = StyleSheet.create({
   statusBanner: {
     flexDirection: 'row',
     backgroundColor: STATUS_PANEL_BG,
-    borderRadius: 16,
-    padding: 16,
-    gap: 12,
+    borderRadius: Radius.lg,
+    padding: Space.md,
+    gap: Space.sm,
     alignItems: 'flex-start',
     marginBottom: 22,
     borderWidth: 1,
@@ -613,9 +612,9 @@ const styles = StyleSheet.create({
 
   shipmentMetaCard: {
     backgroundColor: Colors.card,
-    borderRadius: 18,
-    padding: 16,
-    marginBottom: 24,
+    borderRadius: Radius.xl,
+    padding: Space.md,
+    marginBottom: Space.lg,
     borderWidth: 1,
     borderColor: Colors.border,
     gap: 10,
@@ -661,7 +660,7 @@ const styles = StyleSheet.create({
   },
 
   // Timeline
-  timelineCard: { backgroundColor: Colors.card, borderRadius: 20, padding: 20, marginBottom: 28 },
+  timelineCard: { backgroundColor: Colors.card, borderRadius: Radius.lg, padding: Space.lg, marginBottom: Space.lg + Space.sm },
   timelineRow: { flexDirection: 'row', gap: 16 },
   timelineLeft: { alignItems: 'center', width: 20 },
   dot: {
@@ -692,17 +691,17 @@ const styles = StyleSheet.create({
   sellerCard: {
     flexDirection: 'row',
     backgroundColor: Colors.card,
-    borderRadius: 20,
-    padding: 16,
+    borderRadius: Radius.lg,
+    padding: Space.md,
     alignItems: 'center',
-    gap: 12,
-    marginBottom: 28,
+    gap: Space.sm,
+    marginBottom: Space.lg + Space.sm,
   },
   sellerIdentityTap: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: Space.sm,
   },
   sellerAvatar: { width: 48, height: 48, borderRadius: 24 },
   sellerInfo: { flex: 1 },
@@ -713,15 +712,15 @@ const styles = StyleSheet.create({
   sellerLastSeen: { fontSize: 11, fontFamily: 'Inter_400Regular', color: Colors.textMuted, marginTop: 3 },
   msgBtn: {
     minHeight: 40,
-    paddingHorizontal: 16,
-    borderRadius: 20,
+    paddingHorizontal: Space.md,
+    borderRadius: Radius.full,
     borderWidth: 1,
     borderColor: Colors.accent,
   },
   msgBtnText: { fontSize: 13, fontFamily: 'Inter_600SemiBold', color: Colors.accent },
 
   // Transaction card
-  txCard: { backgroundColor: Colors.card, borderRadius: 20, paddingHorizontal: 20, paddingVertical: 8, marginBottom: 28 },
+  txCard: { backgroundColor: Colors.card, borderRadius: Radius.lg, paddingHorizontal: Space.lg, paddingVertical: Space.sm, marginBottom: Space.lg + Space.sm },
   txDivider: { height: 1, backgroundColor: Colors.border, marginVertical: 6 },
 
   // Actions
@@ -729,7 +728,7 @@ const styles = StyleSheet.create({
   actionBtnSecondary: {
     flex: 1,
     minHeight: 56,
-    borderRadius: 20,
+    borderRadius: Radius.lg,
     backgroundColor: Colors.card,
   },
   actionSecondaryIconWrap: {
@@ -742,7 +741,7 @@ const styles = StyleSheet.create({
   actionBtnPrimary: {
     flex: 2,
     minHeight: 56,
-    borderRadius: 20,
+    borderRadius: Radius.lg,
     borderWidth: 0,
     backgroundColor: Colors.accent,
   },

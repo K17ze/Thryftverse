@@ -11,8 +11,7 @@ import Reanimated, {
 } from 'react-native-reanimated';
 import { TabParamList } from './types';
 import { Colors } from '../constants/colors';
-import { Motion } from '../constants/motion';
-import { Typography } from '../constants/typography';
+import { Space, Radius, Duration } from '../theme/designTokens';
 import { AnimatedPressable } from '../components/AnimatedPressable';
 import { AnimatedBadge } from '../components/AnimatedBadge';
 import { useHaptic } from '../hooks/useHaptic';
@@ -38,7 +37,7 @@ const TabIcon = ({ name, color, focused, badgeCount }: TabIconProps) => {
   const iconScale = useSharedValue(focused ? 1.12 : 1);
 
   useEffect(() => {
-    iconScale.value = withSpring(focused ? 1.12 : 1, Motion.spring.flagship);
+    iconScale.value = withSpring(focused ? 1.12 : 1, { damping: 15, stiffness: 150 });
   }, [focused, iconScale]);
 
   const animatedIconStyle = useAnimatedStyle(() => ({
@@ -88,10 +87,10 @@ export default function TabNavigator() {
           tabBarInactiveTintColor: Colors.tabInactive,
           tabBarLabelStyle: {
             fontSize: 10,
-            fontFamily: Typography.family.semibold,
+            fontFamily: 'Inter_600SemiBold',
             letterSpacing: 0.2,
-            marginTop: 1,
-            marginBottom: 2,
+            marginTop: Space.xs / 4,
+            marginBottom: Space.xs / 2,
           },
         }}
         screenListeners={{
@@ -165,16 +164,16 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: Colors.border,
     elevation: 0,
-    shadowColor: '#000',
+    shadowColor: 'transparent',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0,
     shadowRadius: 0,
-    paddingHorizontal: 8,
+    paddingHorizontal: Space.md,
   },
   tabBarItem: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 2,
+    paddingVertical: Space.xs / 2,
   },
   tabIconWrap: {
     alignItems: 'center',
@@ -182,10 +181,10 @@ const styles = StyleSheet.create({
     width: 28,
   },
   activeIndicator: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
+    width: Space.md - Space.xs,
+    height: Space.md - Space.xs,
+    borderRadius: Radius.full,
     backgroundColor: Colors.tabActive,
-    marginTop: 3,
+    marginTop: Space.xs - 1,
   },
 });

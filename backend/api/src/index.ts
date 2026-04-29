@@ -10,6 +10,11 @@ import Razorpay from 'razorpay';
 import Stripe from 'stripe';
 import { z } from 'zod';
 import { config } from './config.js';
+
+// Shared Stripe instance for Connect operations
+const stripe = config.stripeSecretKey
+  ? new Stripe(config.stripeSecretKey, { apiVersion: '2024-06-20' })
+  : null;
 import { db, closeDb, readDb, replicaConfigured } from './db/pool.js';
 import { redis, closeRedis } from './lib/redis.js';
 import type { AuthRole, AuthenticatedUser } from './lib/auth.js';
@@ -107,6 +112,8 @@ import {
   resolveChannelGateway,
   resolvePayoutPolicyDefaults,
 } from './lib/countryCapabilityPolicy.js';
+import { computePayoutSettlementBreakdown } from './lib/payoutAccounting.js';
+import { resolvePayoutProviderReference } from './lib/payoutTransitionPolicy.js';
 import {
   verifyAppleIdentityToken,
   verifyGoogleIdentityToken,
@@ -4230,6 +4237,61 @@ async function postCommerceOrderRefundLedgerReversal(
     lineType: 'buyer_refund',
   });
 
+  const orderResult = await client.query<{ buyer_protection_fee_gbp: number, postage_fee_gbp: number }>(
+    `SELECT buyer_protection_fee_gbp, postage_fee_gbp FROM orders WHERE id = $1`, [orderId]
+  );
+  const platformChargeGbp = Number(orderResult.rows[0]?.buyer_protection_fee_gbp ?? 0);
+  const postageFeeGbp = Number(orderResult.rows[0]?.postage_fee_gbp ?? 0);
+
+  const platformRevenueAccountId = await ensureLedgerAccount(
+    client,
+    'platform',
+    'platform',
+    'platform_revenue'
+  );
+
+  if (platformChargeGbp > 0) {
+    await appendLedgerEntry(client, {
+      accountId: platformRevenueAccountId,
+      counterpartyAccountId: escrowAccountId,
+      direction: 'debit',
+      amountGbp: platformChargeGbp,
+      sourceType: 'refund',
+      sourceId: orderId,
+      lineType: 'platform_commission_reversal',
+    });
+    await appendLedgerEntry(client, {
+      accountId: escrowAccountId,
+      counterpartyAccountId: platformRevenueAccountId,
+      direction: 'credit',
+      amountGbp: platformChargeGbp,
+      sourceType: 'refund',
+      sourceId: orderId,
+      lineType: 'platform_commission_reversal',
+    });
+  }
+
+  if (postageFeeGbp > 0) {
+    await appendLedgerEntry(client, {
+      accountId: platformRevenueAccountId,
+      counterpartyAccountId: escrowAccountId,
+      direction: 'debit',
+      amountGbp: postageFeeGbp,
+      sourceType: 'refund',
+      sourceId: orderId,
+      lineType: 'postage_fee_reversal',
+    });
+    await appendLedgerEntry(client, {
+      accountId: escrowAccountId,
+      counterpartyAccountId: platformRevenueAccountId,
+      direction: 'credit',
+      amountGbp: postageFeeGbp,
+      sourceType: 'refund',
+      sourceId: orderId,
+      lineType: 'postage_fee_reversal',
+    });
+  }
+
   return {
     reversed: true,
     alreadyReversed: false,
@@ -5090,6 +5152,8 @@ async function createGatewayPaymentIntent(input: {
   metadata: Record<string, unknown>;
   returnUrl?: string;
   webhookUrl?: string;
+  // Platform fee for commerce (stored in metadata, not Stripe Connect)
+  platformFeeAmountGbp?: number | null;
 }): Promise<{
   providerIntentRef: string;
   clientSecret: string | null;
@@ -5110,13 +5174,17 @@ async function createGatewayPaymentIntent(input: {
       apiVersion: '2024-06-20',
     });
 
-    const created = await stripe.paymentIntents.create({
+    // Build Stripe PaymentIntent params
+    // Note: Using platform Stripe account (Vinted/Depop model)
+    // Funds go to platform account, ledger tracks seller payable
+    const paymentIntentParams: Stripe.PaymentIntentCreateParams = {
       amount: Math.max(1, Math.round(input.amountGbp * 100)),
       currency: normalizedCurrency.toLowerCase(),
       automatic_payment_methods: { enabled: true },
-      confirmation_method: 'manual',
       metadata: toStripeMetadata(baseMetadata),
-    });
+    };
+
+    const created = await stripe.paymentIntents.create(paymentIntentParams);
 
     return {
       providerIntentRef: created.id,
@@ -6002,35 +6070,132 @@ async function settlePayoutRequest(
         'withdrawable_balance'
       );
 
-      await appendLedgerEntry(client, {
-        accountId: withdrawalPendingAccountId,
-        counterpartyAccountId: withdrawableBalanceAccountId,
-        direction: 'debit',
+      const payoutMetadataObj = asObject(payoutRequest.metadata);
+      const inputMetadataObj = asObject(input.metadata);
+
+      const payoutBreakdown = computePayoutSettlementBreakdown({
         amountGbp,
-        sourceType: 'payout',
-        sourceId: input.requestId,
-        lineType: 'payout_paid',
-        metadata: {
-          fromStatus: payoutRequest.status,
-          toStatus: input.targetStatus,
-          source: input.source ?? 'manual_status',
-        },
+        networkFeeGbp: Number(inputMetadataObj.networkFeeGbp ?? payoutMetadataObj.networkFeeGbp ?? 0),
+        spreadGbp: Number(inputMetadataObj.spreadGbp ?? payoutMetadataObj.spreadGbp ?? 0),
       });
 
-      await appendLedgerEntry(client, {
-        accountId: withdrawableBalanceAccountId,
-        counterpartyAccountId: withdrawalPendingAccountId,
-        direction: 'credit',
-        amountGbp,
-        sourceType: 'payout',
-        sourceId: input.requestId,
-        lineType: 'payout_paid',
-        metadata: {
-          fromStatus: payoutRequest.status,
-          toStatus: input.targetStatus,
-          source: input.source ?? 'manual_status',
-        },
-      });
+      if (!payoutBreakdown.isValid) {
+        throw createApiError(
+          'PAYOUT_INVALID_DEDUCTIONS',
+          'Payout deductions exceed payout amount',
+          {
+            amountGbp: payoutBreakdown.amountGbp,
+            networkFeeGbp: payoutBreakdown.networkFeeGbp,
+            spreadGbp: payoutBreakdown.spreadGbp,
+          }
+        );
+      }
+
+      const networkFeeGbp = payoutBreakdown.networkFeeGbp;
+      const spreadGbp = payoutBreakdown.spreadGbp;
+      const netPayoutGbp = payoutBreakdown.netPayoutGbp;
+      const totalPlatformDeductionGbp = payoutBreakdown.totalPlatformDeductionGbp;
+
+      const payoutSettlementMetadata = {
+        fromStatus: payoutRequest.status,
+        toStatus: input.targetStatus,
+        source: input.source ?? 'manual_status',
+        netPayoutGbp,
+        networkFeeGbp,
+        spreadGbp,
+        totalPlatformDeductionGbp,
+      };
+
+      if (netPayoutGbp > 0) {
+        await appendLedgerEntry(client, {
+          accountId: withdrawalPendingAccountId,
+          counterpartyAccountId: withdrawableBalanceAccountId,
+          direction: 'debit',
+          amountGbp: netPayoutGbp,
+          sourceType: 'payout',
+          sourceId: input.requestId,
+          lineType: 'payout_paid',
+          metadata: payoutSettlementMetadata,
+        });
+
+        await appendLedgerEntry(client, {
+          accountId: withdrawableBalanceAccountId,
+          counterpartyAccountId: withdrawalPendingAccountId,
+          direction: 'credit',
+          amountGbp: netPayoutGbp,
+          sourceType: 'payout',
+          sourceId: input.requestId,
+          lineType: 'payout_paid',
+          metadata: payoutSettlementMetadata,
+        });
+      }
+
+      if (networkFeeGbp > 0 || spreadGbp > 0) {
+        const platformRevenueAccountId = await ensureLedgerAccount(client, 'platform', 'platform', 'platform_revenue');
+
+        if (networkFeeGbp > 0) {
+          await appendLedgerEntry(client, {
+            accountId: withdrawalPendingAccountId,
+            counterpartyAccountId: platformRevenueAccountId,
+            direction: 'debit',
+            amountGbp: networkFeeGbp,
+            sourceType: 'payout',
+            sourceId: input.requestId,
+            lineType: 'payout_network_fee_credit',
+            metadata: {
+              component: 'network_fee',
+              componentAmountGbp: networkFeeGbp,
+              ...payoutSettlementMetadata,
+            },
+          });
+          await appendLedgerEntry(client, {
+            accountId: platformRevenueAccountId,
+            counterpartyAccountId: withdrawalPendingAccountId,
+            direction: 'credit',
+            amountGbp: networkFeeGbp,
+            sourceType: 'payout',
+            sourceId: input.requestId,
+            lineType: 'payout_network_fee_credit',
+            metadata: {
+              component: 'network_fee',
+              componentAmountGbp: networkFeeGbp,
+              ...payoutSettlementMetadata,
+            },
+          });
+        }
+
+        if (spreadGbp > 0) {
+          await appendLedgerEntry(client, {
+            accountId: withdrawalPendingAccountId,
+            counterpartyAccountId: platformRevenueAccountId,
+            direction: 'debit',
+            amountGbp: spreadGbp,
+            sourceType: 'payout',
+            sourceId: input.requestId,
+            lineType: 'payout_spread_credit',
+            metadata: {
+              component: 'spread',
+              componentAmountGbp: spreadGbp,
+              ...payoutSettlementMetadata,
+            },
+          });
+          await appendLedgerEntry(client, {
+            accountId: platformRevenueAccountId,
+            counterpartyAccountId: withdrawalPendingAccountId,
+            direction: 'credit',
+            amountGbp: spreadGbp,
+            sourceType: 'payout',
+            sourceId: input.requestId,
+            lineType: 'payout_spread_credit',
+            metadata: {
+              component: 'spread',
+              componentAmountGbp: spreadGbp,
+              ...payoutSettlementMetadata,
+            },
+          });
+        }
+      }
+
     } else if (input.targetStatus === 'failed' || input.targetStatus === 'cancelled') {
       const withdrawalPendingBalance = await getLedgerAccountBalance(
         client,
@@ -6105,10 +6270,26 @@ async function settlePayoutRequest(
     },
   };
 
-  const providerPayoutRef =
-    input.targetStatus === 'paid'
-      ? input.providerPayoutRef ?? payoutRequest.provider_payout_ref ?? createRuntimeId('mock_payout')
-      : payoutRequest.provider_payout_ref;
+  const providerPayoutRefResolution = resolvePayoutProviderReference({
+    targetStatus: input.targetStatus,
+    transitionSource,
+    inputProviderPayoutRef: input.providerPayoutRef,
+    existingProviderPayoutRef: payoutRequest.provider_payout_ref,
+    fallbackProviderPayoutRef: createRuntimeId('mock_payout'),
+  });
+
+  if (!providerPayoutRefResolution.isValid) {
+    throw createApiError(
+      'PAYOUT_PROVIDER_REF_REQUIRED',
+      'Provider payout reference is required for externally settled paid transitions',
+      {
+        requestId: input.requestId,
+        transitionSource,
+      }
+    );
+  }
+
+  const providerPayoutRef = providerPayoutRefResolution.providerPayoutRef;
 
   const failureReason =
     input.targetStatus === 'failed'
@@ -8516,6 +8697,26 @@ async function runPlatformReconciliation(
     }
 
     await client.query('COMMIT');
+
+    if (run.status === 'critical') {
+      try {
+        await dispatchOpsAlert({
+          code: 'reconciliation_critical',
+          severity: 'critical',
+          message: `Critical reconciliation mismatch for ${run.runDate}: GBP ${run.mismatchGbp.toFixed(2)}. Outbound payouts are paused until review.`,
+          metricValue: Math.abs(run.mismatchGbp),
+          threshold: Math.max(0, config.reconciliationCriticalMismatchThresholdGbp),
+          metadata: {
+            runId: run.id,
+            runDate: run.runDate,
+            mismatchGbp: run.mismatchGbp,
+            reason,
+          },
+        });
+      } catch (error) {
+        app.log.error({ err: error, runId: run.id }, 'Failed dispatching critical reconciliation ops alert');
+      }
+    }
 
     if (run.status === 'critical' && config.sentryDsn) {
       Sentry.captureMessage(
@@ -16879,6 +17080,230 @@ app.post('/wallet/1ze/burn', async (request, reply) => {
   }
 });
 
+// Convert 1ze to Fiat (for withdrawal)
+app.post('/wallet/convert-1ze-to-fiat', async (request, reply) => {
+  const bodySchema = z.object({
+    userId: z.string().min(2).optional(),
+    izeAmount: z.number().positive(),
+    fiatCurrency: z.string().length(3).default('GBP'),
+    idempotencyKey: z.string().min(8).max(140).optional(),
+  });
+
+  const payload = bodySchema.parse(request.body ?? {});
+  const actorUserId = resolveAuthenticatedUserId(request, payload.userId);
+
+  if (!(await onezeArchitectureTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze wallet architecture tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    await ensureUserExists(actorUserId);
+
+    const normalizedIzeAmount = Number(payload.izeAmount.toFixed(6));
+    const amountMg = onezeAmountToMg(normalizedIzeAmount);
+
+    // Get pricing for conversion rate
+    const fiatCurrency = payload.fiatCurrency.toUpperCase();
+    const pricingQuote = await resolveCountryPricingQuoteByCurrency(client, fiatCurrency);
+    const onezeAmountFromMg = mgToOnezeAmount(amountMg);
+    const fiatAmount = Number((onezeAmountFromMg * pricingQuote.buyPrice).toFixed(6));
+
+    // Validate 1ze balance
+    const wallet = await ensureWallet(client, actorUserId, fiatCurrency);
+    const currentIzeBalance = Number(wallet.oneze_balance_mg);
+
+    if (currentIzeBalance < amountMg) {
+      reply.code(400);
+      return {
+        ok: false,
+        error: 'INSUFFICIENT_1ZE_BALANCE',
+        message: 'Insufficient 1ze balance for conversion',
+        currentBalanceMg: currentIzeBalance,
+        requestedAmountMg: amountMg,
+      };
+    }
+
+    const txId = createRuntimeId('wtx');
+
+    // Burn 1ze from wallet
+    await applyWalletLedgerDelta(client, {
+      walletId: wallet.id,
+      txId,
+      asset: '1ZE',
+      amount: -amountMg,
+      kind: 'CONVERT_TO_FIAT',
+      refType: '1ze_conversion',
+      refId: txId,
+      anchorValueInInr: pricingQuote.anchorValueInInr,
+      metadata: {
+        convertedIzeAmount: normalizedIzeAmount,
+        receivedFiatAmount: fiatAmount,
+        fiatCurrency,
+        rateUsed: pricingQuote.buyPrice,
+      },
+    });
+
+    // Credit fiat to wallet
+    const fiatAmountMinor = Math.round(fiatAmount * 100);
+    await applyWalletLedgerDelta(client, {
+      walletId: wallet.id,
+      txId,
+      asset: 'FIAT',
+      amount: fiatAmountMinor,
+      kind: 'CONVERT_FROM_1ZE',
+      refType: '1ze_conversion',
+      refId: txId,
+      anchorValueInInr: pricingQuote.anchorValueInInr,
+      metadata: {
+        convertedIzeAmount: normalizedIzeAmount,
+        receivedFiatAmount: fiatAmount,
+        fiatCurrency,
+        rateUsed: pricingQuote.buyPrice,
+      },
+    });
+
+    await client.query('COMMIT');
+
+    // Reload wallet to get updated balances
+    const updatedWallet = await ensureWallet(client, actorUserId, fiatCurrency);
+
+    return {
+      ok: true,
+      userId: actorUserId,
+      wallet: toWalletPayload(updatedWallet),
+      conversion: {
+        izeAmount: normalizedIzeAmount,
+        fiatAmount,
+        fiatCurrency,
+        rateUsed: pricingQuote.buyPrice,
+      },
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+});
+
+// Buy 1ze using Fiat Balance
+app.post('/wallet/buy-1ze', async (request, reply) => {
+  const bodySchema = z.object({
+    userId: z.string().min(2).optional(),
+    fiatAmount: z.number().positive(),
+    fiatCurrency: z.string().length(3).default('GBP'),
+    idempotencyKey: z.string().min(8).max(140).optional(),
+  });
+
+  const payload = bodySchema.parse(request.body ?? {});
+  const actorUserId = resolveAuthenticatedUserId(request, payload.userId);
+
+  if (!(await onezeArchitectureTablesAvailable(db))) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: '1ze wallet architecture tables are unavailable. Run migrations first.',
+    };
+  }
+
+  const client = await db.connect();
+  try {
+    await client.query('BEGIN');
+    await ensureUserExists(actorUserId);
+
+    const fiatCurrency = payload.fiatCurrency.toUpperCase();
+    const fiatAmountMinor = Math.round(payload.fiatAmount * 100);
+
+    // Validate fiat balance
+    const wallet = await ensureWallet(client, actorUserId, fiatCurrency);
+    const currentFiatBalance = Number(wallet.fiat_balance_minor);
+
+    if (currentFiatBalance < fiatAmountMinor) {
+      reply.code(400);
+      return {
+        ok: false,
+        error: 'INSUFFICIENT_FIAT_BALANCE',
+        message: 'Insufficient fiat balance to buy 1ze',
+        currentBalanceMinor: currentFiatBalance,
+        requestedAmountMinor: fiatAmountMinor,
+      };
+    }
+
+    // Get pricing for conversion rate
+    const pricingQuote = await resolveCountryPricingQuoteByCurrency(client, fiatCurrency);
+
+    // Calculate 1ze amount (1 GBP = 1000 1ze, or use pricing quote)
+    const izeAmount = payload.fiatAmount * (1 / pricingQuote.buyPrice);
+    const amountMg = onezeAmountToMg(izeAmount);
+
+    const txId = createRuntimeId('wtx');
+
+    // Debit fiat from wallet
+    await applyWalletLedgerDelta(client, {
+      walletId: wallet.id,
+      txId,
+      asset: 'FIAT',
+      amount: -fiatAmountMinor,
+      kind: 'BUY_1ZE',
+      refType: '1ze_purchase',
+      refId: txId,
+      anchorValueInInr: pricingQuote.anchorValueInInr,
+      metadata: {
+        spentFiatAmount: payload.fiatAmount,
+        receivedIzeAmount: izeAmount,
+        fiatCurrency,
+        rateUsed: pricingQuote.buyPrice,
+      },
+    });
+
+    // Mint 1ze to wallet
+    await applyWalletLedgerDelta(client, {
+      walletId: wallet.id,
+      txId,
+      asset: '1ZE',
+      amount: amountMg,
+      kind: 'BUY_1ZE',
+      refType: '1ze_purchase',
+      refId: txId,
+      anchorValueInInr: pricingQuote.anchorValueInInr,
+      metadata: {
+        spentFiatAmount: payload.fiatAmount,
+        receivedIzeAmount: izeAmount,
+        fiatCurrency,
+        rateUsed: pricingQuote.buyPrice,
+      },
+    });
+
+    await client.query('COMMIT');
+
+    // Reload wallet to get updated balances
+    const updatedWallet = await ensureWallet(client, actorUserId, fiatCurrency);
+
+    return {
+      ok: true,
+      userId: actorUserId,
+      wallet: toWalletPayload(updatedWallet),
+      purchase: {
+        fiatAmount: payload.fiatAmount,
+        fiatCurrency,
+        izeAmount,
+        rateUsed: pricingQuote.buyPrice,
+      },
+    };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+});
+
 app.post('/wallet/1ze/transfer', async (request, reply) => {
   const bodySchema = z.object({
     senderUserId: z.string().min(2).optional(),
@@ -16893,6 +17318,21 @@ app.post('/wallet/1ze/transfer', async (request, reply) => {
   });
 
   const payload = bodySchema.parse(request.body ?? {});
+
+  // 1ze Context Restrictions: Only allow co-own trading and platform rewards
+  // Marketplace sales must use fiat escrow (Stripe Connect), not 1ze
+  const ALLOWED_1ZE_CONTEXTS = ['coOwn_trade', 'platform_reward'] as const;
+  if (!ALLOWED_1ZE_CONTEXTS.includes(payload.contextType as typeof ALLOWED_1ZE_CONTEXTS[number])) {
+    reply.code(400);
+    return {
+      ok: false,
+      error: 'IZE_TRANSFER_INVALID_CONTEXT',
+      message: '1ze can only be transferred for co-own trading or platform rewards. For marketplace sales, use fiat escrow (commerce payment).',
+      allowedContexts: ALLOWED_1ZE_CONTEXTS,
+      providedContext: payload.contextType,
+    };
+  }
+
   const senderUserId = resolveAuthenticatedUserId(request, payload.senderUserId);
   const recipientUserId = payload.recipientUserId;
 
@@ -19437,6 +19877,224 @@ app.post('/users/:userId/payout-accounts', async (request, reply) => {
   };
 });
 
+// Stripe Connect Onboarding Endpoints
+app.post('/users/:userId/stripe-connect/account', async (request, reply) => {
+  const paramsSchema = z.object({ userId: z.string().min(2) });
+  const { userId } = paramsSchema.parse(request.params);
+  resolveAuthenticatedUserId(request, userId);
+
+  if (!stripe) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: 'Stripe is not configured. Contact support.',
+    };
+  }
+
+  // Check if user already has a Connect account
+  const existingAccount = await db.query<{ id: number }>(
+    'SELECT id FROM stripe_connect_accounts WHERE user_id = $1 LIMIT 1',
+    [userId]
+  );
+
+  if (existingAccount.rowCount && existingAccount.rowCount > 0) {
+    reply.code(409);
+    return {
+      ok: false,
+      error: 'Stripe Connect account already exists for this user',
+    };
+  }
+
+  try {
+    // Create Stripe Connect account
+    const account = await stripe.accounts.create({
+      type: 'standard',
+      metadata: {
+        userId,
+        platform: 'thryftverse',
+      },
+    });
+
+    // Store account reference
+    await db.query(
+      `
+        INSERT INTO stripe_connect_accounts (
+          user_id,
+          stripe_account_id,
+          status,
+          charges_enabled,
+          payouts_enabled
+        )
+        VALUES ($1, $2, $3, $4, $5)
+      `,
+      [userId, account.id, 'pending', false, false]
+    );
+
+    return {
+      ok: true,
+      stripeAccountId: account.id,
+      status: 'pending',
+    };
+  } catch (error) {
+    app.log.error({ err: error, userId }, 'Failed to create Stripe Connect account');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Failed to create Stripe Connect account',
+    };
+  }
+});
+
+app.post('/users/:userId/stripe-connect/onboarding-link', async (request, reply) => {
+  const paramsSchema = z.object({ userId: z.string().min(2) });
+  const { userId } = paramsSchema.parse(request.params);
+  resolveAuthenticatedUserId(request, userId);
+
+  if (!stripe) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: 'Stripe is not configured. Contact support.',
+    };
+  }
+
+  const accountResult = await db.query<{ stripe_account_id: string }>(
+    'SELECT stripe_account_id FROM stripe_connect_accounts WHERE user_id = $1 LIMIT 1',
+    [userId]
+  );
+
+  if (!accountResult.rowCount || accountResult.rowCount === 0) {
+    reply.code(404);
+    return {
+      ok: false,
+      error: 'Stripe Connect account not found. Create account first.',
+    };
+  }
+
+  const stripeAccountId = accountResult.rows[0].stripe_account_id;
+
+  try {
+    const accountLink = await stripe.accountLinks.create({
+      account: stripeAccountId,
+      refresh_url: `${config.appUrl}/stripe-connect/refresh?userId=${userId}`,
+      return_url: `${config.appUrl}/stripe-connect/return?userId=${userId}`,
+      type: 'account_onboarding',
+    });
+
+    // Update onboarding URL
+    await db.query(
+      'UPDATE stripe_connect_accounts SET onboarding_url = $1 WHERE user_id = $2',
+      [accountLink.url, userId]
+    );
+
+    return {
+      ok: true,
+      onboardingUrl: accountLink.url,
+    };
+  } catch (error) {
+    app.log.error({ err: error, userId, stripeAccountId }, 'Failed to create onboarding link');
+    reply.code(500);
+    return {
+      ok: false,
+      error: 'Failed to create onboarding link',
+    };
+  }
+});
+
+app.get('/users/:userId/stripe-connect/status', async (request, reply) => {
+  const paramsSchema = z.object({ userId: z.string().min(2) });
+  const { userId } = paramsSchema.parse(request.params);
+  resolveAuthenticatedUserId(request, userId);
+
+  if (!stripe) {
+    reply.code(503);
+    return {
+      ok: false,
+      error: 'Stripe is not configured. Contact support.',
+    };
+  }
+
+  const accountResult = await db.query<{
+    stripe_account_id: string;
+    status: string;
+    charges_enabled: boolean;
+    payouts_enabled: boolean;
+    onboarding_url: string;
+  }>(
+    `
+      SELECT
+        stripe_account_id,
+        status,
+        charges_enabled,
+        payouts_enabled,
+        onboarding_url
+      FROM stripe_connect_accounts
+      WHERE user_id = $1
+      LIMIT 1
+    `,
+    [userId]
+  );
+
+  if (!accountResult.rowCount || accountResult.rowCount === 0) {
+    return {
+      ok: true,
+      hasConnectAccount: false,
+    };
+  }
+
+  const row = accountResult.rows[0];
+
+  // Sync with Stripe to get latest status
+  try {
+    const stripeAccount = await stripe.accounts.retrieve(row.stripe_account_id);
+
+    const updatedStatus = stripeAccount.charges_enabled && stripeAccount.payouts_enabled
+      ? 'active'
+      : 'requirements_due';
+
+    // Update local status if changed
+    if (updatedStatus !== row.status ||
+        stripeAccount.charges_enabled !== row.charges_enabled ||
+        stripeAccount.payouts_enabled !== row.payouts_enabled) {
+      await db.query(
+        `
+          UPDATE stripe_connect_accounts
+          SET status = $1,
+              charges_enabled = $2,
+              payouts_enabled = $3,
+              updated_at = NOW()
+          WHERE user_id = $4
+        `,
+        [updatedStatus, stripeAccount.charges_enabled, stripeAccount.payouts_enabled, userId]
+      );
+    }
+
+    return {
+      ok: true,
+      hasConnectAccount: true,
+      stripeAccountId: row.stripe_account_id,
+      status: updatedStatus,
+      chargesEnabled: stripeAccount.charges_enabled,
+      payoutsEnabled: stripeAccount.payouts_enabled,
+      onboardingUrl: row.onboarding_url,
+      requirementsCurrentlyDue: stripeAccount.requirements?.currently_due ?? [],
+    };
+  } catch (error) {
+    app.log.error({ err: error, userId }, 'Failed to retrieve Stripe account status');
+    // Return cached status on error
+    return {
+      ok: true,
+      hasConnectAccount: true,
+      stripeAccountId: row.stripe_account_id,
+      status: row.status,
+      chargesEnabled: row.charges_enabled,
+      payoutsEnabled: row.payouts_enabled,
+      onboardingUrl: row.onboarding_url,
+      requirementsCurrentlyDue: [],
+    };
+  }
+});
+
 app.get('/users/:userId/payout-requests', async (request, reply) => {
   const paramsSchema = z.object({ userId: z.string().min(2) });
   const querySchema = z.object({
@@ -19876,6 +20534,11 @@ app.post('/users/:userId/payout-requests', async (request, reply) => {
 });
 
 app.post('/users/:userId/payout-requests/:requestId/status', async (request, reply) => {
+  const securityAdminError = ensureSecurityAdminAccess(request, reply);
+  if (securityAdminError) {
+    return securityAdminError;
+  }
+
   const paramsSchema = z.object({
     userId: z.string().min(2),
     requestId: z.string().min(4).max(140),
@@ -20874,15 +21537,31 @@ app.post('/payments/intents', async (request, reply) => {
     let gatewayId = defaultGatewayForChannel('commerce', payload.gatewayId);
     let orderId: string | null = null;
     let coOwnOrderId: number | null = null;
+    let platformFeeAmountGbp: number | null = null;
 
     if (payload.orderId) {
+      // Fetch order with seller info
+      // Note: Using platform Stripe account (Vinted/Depop model)
+      // Funds go to platform account, ledger tracks seller payable for escrow
       const order = await client.query<{
         id: string;
         buyer_id: string;
+        seller_id: string;
         total_gbp: number | string;
         status: string;
       }>(
-        'SELECT id, buyer_id, total_gbp, status FROM orders WHERE id = $1 LIMIT 1 FOR UPDATE',
+        `
+          SELECT
+            o.id,
+            o.buyer_id,
+            o.seller_id,
+            o.total_gbp,
+            o.status
+          FROM orders o
+          WHERE o.id = $1
+          LIMIT 1
+          FOR UPDATE
+        `,
         [payload.orderId]
       );
 
@@ -20918,6 +21597,13 @@ app.post('/payments/intents', async (request, reply) => {
       amountGbp = Number(orderRow.total_gbp);
       orderId = orderRow.id;
       gatewayId = defaultGatewayForChannel(channel, payload.gatewayId);
+
+      // Calculate platform fee (5% + £0.70 fixed)
+      // Note: Fee is tracked in ledger, not extracted via Stripe Connect
+      const platformChargeRate = 0.05;
+      const platformChargeFixed = 0.70;
+      const subtotalGbp = amountGbp / (1 + platformChargeRate);
+      platformFeeAmountGbp = roundTo(subtotalGbp * platformChargeRate + platformChargeFixed, 2);
     } else if (payload.coOwnOrderId) {
       const coOwnOrder = await client.query<{
         id: number;
@@ -21029,11 +21715,13 @@ app.post('/payments/intents', async (request, reply) => {
       amountCurrency: payload.amountCurrency,
       returnUrl: payload.returnUrl,
       webhookUrl: payload.webhookUrl,
+      platformFeeAmountGbp,
       metadata: {
         ...(payload.metadata ?? {}),
         userId: actorUserId,
         orderId,
         coOwnOrderId,
+        platformFeeAmountGbp,
       },
     });
 
@@ -21244,6 +21932,17 @@ app.post('/payments/intents/:intentId/confirm', async (request, reply) => {
         ok: false,
         error: 'Forbidden: payment intent access denied',
       };
+    }
+
+    if (payload.simulateStatus !== 'processing') {
+      if (config.nodeEnv === 'production' && request.authUser?.role !== 'admin') {
+        await client.query('ROLLBACK');
+        reply.code(403);
+        return {
+          ok: false,
+          error: 'Forbidden: terminal status simulation is not allowed in production for non-admin users',
+        };
+      }
     }
 
     if (payload.simulateStatus === 'processing') {
@@ -24706,6 +25405,41 @@ async function applyCoOwnTransfer(
       input.feeGbp,
     ]
   );
+
+  if (input.feeGbp > 0 && await ledgerTablesAvailable(client)) {
+    const platformRevenueAccountId = await ensureLedgerAccount(
+      client,
+      'platform',
+      'platform',
+      'platform_revenue'
+    );
+    const buyerSpendAccountId = await ensureLedgerAccount(
+      client,
+      'user',
+      input.buyerId,
+      'buyer_spend'
+    );
+    
+    await appendLedgerEntry(client, {
+      accountId: buyerSpendAccountId,
+      counterpartyAccountId: platformRevenueAccountId,
+      direction: 'debit',
+      amountGbp: input.feeGbp,
+      sourceType: 'coOwn_trade',
+      sourceId: input.buyOrderId ? `buy_${input.buyOrderId}` : `trade_${input.assetId}`,
+      lineType: 'coOwn_trade_fee_credit',
+    });
+    
+    await appendLedgerEntry(client, {
+      accountId: platformRevenueAccountId,
+      counterpartyAccountId: buyerSpendAccountId,
+      direction: 'credit',
+      amountGbp: input.feeGbp,
+      sourceType: 'coOwn_trade',
+      sourceId: input.buyOrderId ? `buy_${input.buyOrderId}` : `trade_${input.assetId}`,
+      lineType: 'coOwn_trade_fee_credit',
+    });
+  }
 
   return {
     notionalGbp,

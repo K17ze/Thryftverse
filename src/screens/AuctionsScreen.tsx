@@ -463,37 +463,36 @@ export default function AuctionsScreen() {
         </View>
       </View>
 
-      <View style={styles.metricsRow}>
-        <View style={styles.metricCard}>
-          <Text style={styles.metricValue}>{liveAuctions.length}</Text>
-          <Text style={styles.metricLabel}>{t('auctions.metric.active')}</Text>
-        </View>
-        <View style={styles.metricCard}>
-          <Text style={styles.metricValue}>{upcomingAuctions.length}</Text>
-          <Text style={styles.metricLabel}>{t('auctions.metric.upcoming')}</Text>
-        </View>
-        <View style={styles.metricCard}>
-          <Text style={styles.metricValue}>{formatCompact(totalLiveBids)}</Text>
-          <Text style={styles.metricLabel}>{t('auctions.metric.bids')}</Text>
-        </View>
-      </View>
-
       <View style={styles.launchRow}>
         <View>
           <Text style={styles.launchTitle}>{t('auctions.cta.createAuction')}</Text>
         </View>
 
-        <AnimatedPressable
-          style={styles.launchBtn}
-          activeOpacity={0.9}
-          onPress={() => navigation.navigate('CreateAuction')}
-          accessibilityRole="button"
-          accessibilityLabel={t('auctions.cta.launch')}
-          accessibilityHint="Opens auction creation flow"
-        >
-          <Ionicons name="add" size={15} color={Colors.background} />
-          <Text style={styles.launchBtnText}>{t('auctions.cta.launch')}</Text>
-        </AnimatedPressable>
+        <View style={styles.actionBtnRow}>
+          <AnimatedPressable
+            style={styles.myBidsBtn}
+            activeOpacity={0.9}
+            onPress={() => navigation.navigate('MyBids')}
+            accessibilityRole="button"
+            accessibilityLabel="My Bids"
+            accessibilityHint="View your active bids"
+          >
+            <Ionicons name="list-outline" size={15} color={Colors.brand} />
+            <Text style={styles.myBidsBtnText}>My Bids</Text>
+          </AnimatedPressable>
+
+          <AnimatedPressable
+            style={styles.launchBtn}
+            activeOpacity={0.9}
+            onPress={() => navigation.navigate('CreateAuction')}
+            accessibilityRole="button"
+            accessibilityLabel={t('auctions.cta.launch')}
+            accessibilityHint="Opens auction creation flow"
+          >
+            <Ionicons name="add" size={15} color={Colors.background} />
+            <Text style={styles.launchBtnText}>{t('auctions.cta.launch')}</Text>
+          </AnimatedPressable>
+        </View>
       </View>
 
       {syncError ? (
@@ -613,10 +612,10 @@ export default function AuctionsScreen() {
             style={[styles.bidBtn, (isSubmittingBid || !!buyNowAuctionId) && styles.actionBtnDisabled]}
             onPress={() => openBidComposer(item)}
             disabled={isSubmittingBid || !!buyNowAuctionId}
-            variant="contrast"
+            variant="primary"
             size="sm"
             align="center"
-            icon={<Ionicons name="hammer-outline" size={14} color={Colors.textInverse} />}
+            icon={<Ionicons name="hammer-outline" size={14} color={Colors.background} />}
             title={t('auctions.cta.placeBid')}
             accessibilityLabel={t('auctions.cta.placeBid')}
             accessibilityHint="Opens bid composer for this auction"
@@ -881,12 +880,33 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 5,
     borderRadius: 14,
-    backgroundColor: Colors.accent,
+    backgroundColor: Colors.brand,
     paddingHorizontal: 12,
     paddingVertical: 7,
   },
   launchBtnText: {
     color: Colors.background,
+    fontSize: 12,
+    fontFamily: 'Inter_700Bold',
+  },
+  actionBtnRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  myBidsBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderRadius: 14,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  myBidsBtnText: {
+    color: Colors.brand,
     fontSize: 12,
     fontFamily: 'Inter_700Bold',
   },

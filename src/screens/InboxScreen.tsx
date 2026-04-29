@@ -34,10 +34,11 @@ import { AppButton } from '../components/ui/AppButton';
 import { AppSegmentControl } from '../components/ui/AppSegmentControl';
 import { useReducedMotion } from '../hooks/useReducedMotion';
 import { Motion } from '../constants/motion';
+import { Space, Radius } from '../theme/designTokens';
 
 type NavT = StackNavigationProp<RootStackParamList>;
-const ACCENT = Colors.accent;
-const PANEL_BG = Colors.card;
+const ACCENT = Colors.brand;
+const PANEL_BG = Colors.surface;
 
 type ConvoItem = Conversation;
 type InboxSegment = 'all' | 'unread' | 'groups' | 'direct';
@@ -447,7 +448,7 @@ export default function InboxScreen() {
             accessibilityRole="button"
             accessibilityLabel="Show unread conversations"
           >
-            <Ionicons name="mail-unread-outline" size={14} color={segment === 'unread' ? Colors.textInverse : Colors.textSecondary} />
+            <Ionicons name="mail-unread-outline" size={14} color={segment === 'unread' ? Colors.background : Colors.textSecondary} />
             <Text style={[styles.quickChipText, segment === 'unread' && styles.quickChipTextActive]}>Unread {unreadCount}</Text>
           </AnimatedPressable>
 
@@ -467,7 +468,7 @@ export default function InboxScreen() {
             accessibilityRole="button"
             accessibilityLabel="Show group conversations"
           >
-            <Ionicons name="people-outline" size={14} color={segment === 'groups' ? Colors.textInverse : Colors.textSecondary} />
+            <Ionicons name="people-outline" size={14} color={segment === 'groups' ? Colors.background : Colors.textSecondary} />
             <Text style={[styles.quickChipText, segment === 'groups' && styles.quickChipTextActive]}>Groups {groupCount}</Text>
           </AnimatedPressable>
         </View>
@@ -556,16 +557,21 @@ const styles = StyleSheet.create({
   },
   addGroupBtn: {
     borderRadius: 16,
-    minHeight: 40,
+    minHeight: 36,
+    paddingHorizontal: 12,
+    alignSelf: 'center',
+    marginTop: 0,
     borderWidth: 1,
-    backgroundColor: Colors.card,
+    backgroundColor: Colors.surface,
     borderColor: Colors.border,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   addGroupIconWrap: {
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: Colors.cardAlt,
+    backgroundColor: Colors.background,
   },
   addGroupBtnText: {
     color: Colors.textPrimary,
@@ -578,7 +584,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: Colors.card,
+    backgroundColor: Colors.surface,
     borderWidth: 1,
     borderColor: Colors.border,
   },
@@ -587,7 +593,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     borderColor: Colors.borderLight,
-    backgroundColor: Colors.card,
+    backgroundColor: Colors.surface,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
@@ -607,7 +613,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: Colors.cardAlt,
+    backgroundColor: Colors.background,
   },
   segmentStrip: {
     marginTop: 2,
@@ -616,7 +622,7 @@ const styles = StyleSheet.create({
   segmentChip: {
     height: 34,
     borderRadius: 17,
-    backgroundColor: Colors.card,
+    backgroundColor: Colors.surface,
     borderWidth: 1,
     borderColor: Colors.border,
     alignItems: 'center',
@@ -624,8 +630,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
   },
   segmentChipActive: {
-    borderColor: Colors.accent,
-    backgroundColor: Colors.accent,
+    borderColor: Colors.brand,
+    backgroundColor: Colors.brand,
   },
   segmentChipText: {
     color: Colors.textSecondary,
@@ -634,7 +640,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
   segmentChipTextActive: {
-    color: Colors.textInverse,
+    color: Colors.background,
   },
   quickRail: {
     flexDirection: 'row',
@@ -651,11 +657,11 @@ const styles = StyleSheet.create({
     borderRadius: 15,
     borderWidth: 1,
     borderColor: Colors.border,
-    backgroundColor: Colors.card,
+    backgroundColor: Colors.surface,
   },
   quickChipActive: {
-    borderColor: Colors.accent,
-    backgroundColor: Colors.accent,
+    borderColor: Colors.brand,
+    backgroundColor: Colors.brand,
   },
   quickChipText: {
     color: Colors.textSecondary,
@@ -663,7 +669,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_600SemiBold',
   },
   quickChipTextActive: {
-    color: Colors.textInverse,
+    color: Colors.background,
   },
   listMeta: {
     color: Colors.textMuted,
@@ -678,7 +684,7 @@ const styles = StyleSheet.create({
   },
 
   messageCard: {
-    backgroundColor: Colors.card,
+    backgroundColor: Colors.surface,
     borderRadius: 22,
     borderWidth: 1,
     borderColor: Colors.border,
@@ -698,7 +704,7 @@ const styles = StyleSheet.create({
     width: 52,
     height: 52,
     borderRadius: 26,
-    backgroundColor: Colors.cardAlt,
+    backgroundColor: Colors.background,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -716,15 +722,15 @@ const styles = StyleSheet.create({
   messageBody: { flex: 1 },
   messageTop: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
   unreadBadge: {
-    borderRadius: 9,
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-    backgroundColor: Colors.accent,
+    borderRadius: Radius.sm,
+    paddingHorizontal: Space.sm,
+    paddingVertical: Space.xs,
+    backgroundColor: Colors.brand,
     alignSelf: 'flex-start',
     marginBottom: 8,
   },
   unreadBadgeText: {
-    color: Colors.textInverse,
+    color: Colors.background,
     fontSize: 10,
     fontFamily: 'Inter_700Bold',
     letterSpacing: 0.7,
@@ -734,22 +740,22 @@ const styles = StyleSheet.create({
   groupMetaRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    marginBottom: 6,
+    gap: Space.sm,
+    marginBottom: Space.xs + 2,
   },
   groupMetaText: {
     color: Colors.textMuted,
     fontSize: 11,
     fontFamily: 'Inter_500Medium',
     letterSpacing: 0.2,
-    marginBottom: 8,
+    marginBottom: Space.sm,
   },
   snippet: { color: Colors.textSecondary, fontSize: 14, fontFamily: 'Inter_400Regular', lineHeight: 20, marginBottom: 10 },
   searchHitRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    marginBottom: 8,
+    gap: Space.xs + 2,
+    marginBottom: Space.sm,
   },
   searchHitText: {
     flex: 1,
@@ -768,7 +774,7 @@ const styles = StyleSheet.create({
     padding: 8,
     gap: 10,
   },
-  itemThumb: { width: 36, height: 36, borderRadius: 8, backgroundColor: Colors.card },
+  itemThumb: { width: 36, height: 36, borderRadius: 8, backgroundColor: Colors.surface },
   itemName: { flex: 1, fontSize: 12, fontFamily: 'Inter_500Medium', color: Colors.textSecondary },
   itemPrice: { fontSize: 13, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary },
 

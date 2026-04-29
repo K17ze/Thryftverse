@@ -15,15 +15,17 @@ import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { ActiveTheme, Colors } from '../constants/colors';
+import { Space, Radius } from '../theme/designTokens';
 import { RootStackParamList } from '../navigation/types';
 import { useStore } from '../store/useStore';
-import { ProductCard } from '../components/ProductCard';
+import { ProductCardV2 } from '../components/ProductCardV2';
 import { EmptyState } from '../components/EmptyState';
 import { RefreshIndicator } from '../components/RefreshIndicator';
 import { Listing } from '../data/mockData';
 import { useBackendData } from '../context/BackendDataContext';
 import { Motion } from '../constants/motion';
 import { useReducedMotion } from '../hooks/useReducedMotion';
+import { MasonryGrid } from '../components/ProductCardV2';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 const HEADER_BUTTON_BG = Colors.card;
@@ -96,10 +98,10 @@ export default function FavouritesScreen() {
                     .duration(Motion.list.enterDuration)
             }
           >
-            <ProductCard
+            <ProductCardV2
               item={item}
               onPress={() => navigation.push('ItemDetail', { itemId: item.id })}
-              onPressSeller={(sellerId) => navigation.navigate('UserProfile', { userId: sellerId })}
+              showSeller={true}
             />
           </Reanimated.View>
         )}
@@ -123,9 +125,9 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.background,
   },
   header: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 14,
+    paddingHorizontal: Space.md,
+    paddingTop: Space.sm,
+    paddingBottom: Space.md - Space.xs,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -133,7 +135,7 @@ const styles = StyleSheet.create({
   backBtn: {
     width: 40,
     height: 40,
-    borderRadius: 20,
+    borderRadius: Radius.full,
     borderWidth: 1,
     borderColor: HEADER_BUTTON_BORDER,
     backgroundColor: HEADER_BUTTON_BG,
@@ -161,11 +163,11 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
   listContent: {
-    paddingHorizontal: 16,
+    paddingHorizontal: Space.md,
     paddingBottom: 120,
   },
   columnWrap: {
     justifyContent: 'space-between',
-    marginBottom: 16,
+    marginBottom: Space.md,
   },
 });

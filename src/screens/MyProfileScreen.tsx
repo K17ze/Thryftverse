@@ -7,7 +7,9 @@ import {
   StatusBar,
   Dimensions,
   Share,
+  Image,
 } from 'react-native';
+import { Video, ResizeMode } from 'expo-av';
 import * as ImagePicker from 'expo-image-picker';
 import Reanimated, {
   useSharedValue,
@@ -31,11 +33,13 @@ import { useStore } from '../store/useStore';
 import { getCoOwnMarket } from '../data/tradeHub';
 import { resolveAssetMarketState } from '../data/mockSyndicateData';
 import { AnimatedPressable } from '../components/AnimatedPressable';
-import { AnimatedCounter } from '../components/AnimatedCounter';
+// Phase 3: Removed AnimatedCounter - plain text is cleaner
 import { CachedImage } from '../components/CachedImage';
 import { SharedTransitionView } from '../components/SharedTransitionView';
 import { useToast } from '../context/ToastContext';
 import { AppButton } from '../components/ui/AppButton';
+import { Space, Radius } from '../theme/designTokens';
+import { T } from '../components/ui/Text';
 import { useReducedMotion } from '../hooks/useReducedMotion';
 import {
   setStoredUserAvatar,
@@ -44,16 +48,17 @@ import {
   setStoredUserCoverForUser,
 } from '../preferences/profileMediaPreferences';
 import { persistProfileMediaUri } from '../utils/profileMediaAsset';
+import { isVideoUri } from '../utils/media';
 
 type NavT = StackNavigationProp<RootStackParamList>;
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const COVER_HEIGHT = 170;
-const AVATAR_SIZE = 82;
+const COVER_HEIGHT = 200;
+const AVATAR_SIZE = 100;
 const HERO_MEDIA_GAP = 6;
 const HERO_MEDIA_TILE = (SCREEN_WIDTH - 40 - HERO_MEDIA_GAP * 2) / 3;
-const ACCENT = Colors.accent;
+// Phase 3: Simplified to use new 5-core palette
 const IS_LIGHT = ActiveTheme === 'light';
-const BRAND = IS_LIGHT ? '#2f251b' : ACCENT;
+const BRAND = Colors.brand;
 const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111';
 const PANEL_SOFT = IS_LIGHT ? '#f4efe7' : '#171717';
 const PANEL_ICON = IS_LIGHT ? '#ece5d9' : '#1a1a1a';
@@ -141,10 +146,9 @@ export default function MyProfileScreen() {
 
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [16, 9],
-        quality: 0.86,
+        mediaTypes: ImagePicker.MediaTypeOptions.All,
+        allowsEditing: false,
+        quality: 1,
       });
 
       if (!result.canceled && result.assets?.[0]?.uri) {
@@ -160,7 +164,7 @@ export default function MyProfileScreen() {
         show('Cover updated', 'success');
       }
     } catch {
-      show('Unable to open gallery right now', 'error');
+      // Silently fail - user can try again
     }
   };
 
@@ -192,7 +196,7 @@ export default function MyProfileScreen() {
         show('Avatar updated', 'success');
       }
     } catch {
-      show('Unable to open gallery right now', 'error');
+      // Silently fail - user can try again
     }
   };
 
@@ -284,7 +288,7 @@ export default function MyProfileScreen() {
         value: `${coOwnHoldings.length} assets`,
         color: IS_LIGHT ? '#5c4830' : '#ccb893',
       },
-      { icon: 'bookmark-outline', label: 'Wishlist', route: 'Favourites', color: IS_LIGHT ? '#704b3b' : '#e6c8b4' },
+      { icon: 'bookmark-outline', label: 'Watchlist', route: 'Favourites', color: IS_LIGHT ? '#704b3b' : '#e6c8b4' },
     ],
     [formatFromFiat, coOwnHoldings.length]
   );
@@ -295,9 +299,24 @@ export default function MyProfileScreen() {
     <View style={styles.container}>
       <StatusBar barStyle={ActiveTheme === 'light' ? 'dark-content' : 'light-content'} backgroundColor={Colors.background} />
 
-      {/* Cover photo with parallax */}
+      {/* Cover photo with parallax - supports images, GIFs and videos */}
       <Reanimated.View style={[styles.coverWrap, coverStyle]}>
-        <CachedImage key={displayCover} uri={displayCover} style={styles.coverImage} contentFit="cover" priority="high" />
+        {isVideoUri(displayCover) ? (
+          <Video
+            source={{ uri: displayCover }}
+            style={styles.coverImage}
+            resizeMode={ResizeMode.COVER}
+            shouldPlay
+            isLooping
+            isMuted
+          />
+        ) : (
+          <Image 
+            source={{ uri: displayCover }} 
+            style={styles.coverImage} 
+            resizeMode="cover"
+          />
+        )}
         <View style={styles.coverGradient} />
       </Reanimated.View>
 
@@ -314,48 +333,45 @@ export default function MyProfileScreen() {
             <Ionicons name="apps-outline" size={18} color="#fff" />
           </AnimatedPressable>
 
-          <View style={styles.topUtilityRight}>
-            <AppButton
-              title="Cover"
-              icon={<Ionicons name="camera" size={16} color="#fff" />}
-              onPress={pickCover}
-              variant="secondary"
-              size="sm"
-              style={styles.topUtilityPillBtn}
-              titleStyle={styles.topUtilityPillText}
-              iconContainerStyle={styles.topUtilityPillIconWrap}
-              accessibilityLabel="Change cover photo"
-              accessibilityHint="Opens photo picker to update your cover photo"
-            />
-          </View>
+          <AnimatedPressable
+            style={[styles.topUtilityIconBtn, { width: 32, height: 32, borderRadius: 16 }]}
+            onPress={pickCover}
+            activeOpacity={0.9}
+            accessibilityLabel="Change cover photo"
+            accessibilityRole="button"
+            accessibilityHint="Opens photo picker to update your cover photo"
+          >
+            <Ionicons name="camera" size={16} color="#fff" />
+          </AnimatedPressable>
         </Reanimated.View>
       </View>
 
       <AnimatedScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={[styles.scrollContent, { paddingTop: COVER_HEIGHT - 42 }]}
+        contentContainerStyle={[styles.scrollContent, { paddingTop: COVER_HEIGHT - 60 }]}
         onScroll={scrollHandler}
         scrollEventThrottle={16}
       >
-        {/* Profile Hero */}
+        {/* Profile Hero - LinkedIn Style */}
         <View style={styles.heroSection}>
-          <View style={styles.heroTop}>
-            <AnimatedPressable style={styles.avatarWrap} onPress={pickAvatar} activeOpacity={0.85}
+          {/* Avatar positioned to overlap the banner bottom edge */}
+          <View style={styles.avatarContainer}>
+            <AnimatedPressable style={styles.avatarWrapLinkedIn} onPress={pickAvatar} activeOpacity={0.85}
               accessibilityLabel="Change profile photo"
               accessibilityRole="button"
               accessibilityHint="Opens photo picker to update your avatar"
             >
               <CachedImage
                 uri={displayAvatar}
-                style={styles.heroAvatar}
-                containerStyle={styles.heroAvatarContainer}
+                style={styles.heroAvatarLinkedIn}
+                containerStyle={styles.heroAvatarContainerLinkedIn}
                 contentFit="cover"
               />
-              <View style={styles.verifiedBadge}>
-                <Ionicons name="checkmark-circle" size={22} color={BRAND} />
+              <View style={styles.verifiedBadgeLinkedIn}>
+                <Ionicons name="checkmark-circle" size={24} color={BRAND} />
               </View>
-              <View style={styles.editAvatarChip}>
-                <Ionicons name="camera" size={16} color="#fff" />
+              <View style={styles.editAvatarChipLinkedIn}>
+                <Ionicons name="camera" size={18} color="#fff" />
               </View>
             </AnimatedPressable>
           </View>
@@ -426,17 +442,17 @@ export default function MyProfileScreen() {
               accessibilityRole="button"
               accessibilityHint="Opens your complete public profile"
             >
-              <AnimatedCounter value={MY_USER.listingCount} style={styles.statNumber} duration={900} />
+              <Text style={styles.statNumber}>{MY_USER.listingCount}</Text>
               <Text style={styles.statLabel}>LISTED</Text>
             </AnimatedPressable>
             <View style={styles.statDivider} />
             <View style={styles.statItem}>
-              <AnimatedCounter value={MY_USER.followers} style={styles.statNumber} duration={900} />
+              <Text style={styles.statNumber}>{MY_USER.followers}</Text>
               <Text style={styles.statLabel}>FOLLOWERS</Text>
             </View>
             <View style={styles.statDivider} />
             <View style={styles.statItem}>
-              <AnimatedCounter value={MY_USER.following} style={styles.statNumber} duration={900} />
+              <Text style={styles.statNumber}>{MY_USER.following}</Text>
               <Text style={styles.statLabel}>FOLLOWING</Text>
             </View>
             <View style={styles.statDivider} />
@@ -513,7 +529,7 @@ export default function MyProfileScreen() {
               accessibilityHint="Navigates to your portfolio holdings"
             >
               <Text style={styles.portfolioSummaryLinkText}>Open</Text>
-              <Ionicons name="arrow-forward" size={14} color={ACCENT} />
+              <Ionicons name="arrow-forward" size={14} color={Colors.brand} />
             </AnimatedPressable>
           </View>
 
@@ -564,7 +580,7 @@ export default function MyProfileScreen() {
               accessibilityHint="Opens your complete wardrobe listings"
             >
               <Text style={styles.viewAllText}>View All</Text>
-              <Ionicons name="arrow-forward" size={14} color={ACCENT} />
+              <Ionicons name="arrow-forward" size={14} color={Colors.brand} />
             </AnimatedPressable>
           </View>
 
@@ -613,7 +629,7 @@ export default function MyProfileScreen() {
             ].map((b) => (
               <View key={b.label} style={styles.badgeItem}>
                 <View style={[styles.badgeCircle, b.earned && styles.badgeCircleEarned]}>
-                  <Ionicons name={b.icon as any} size={22} color={b.earned ? ACCENT : Colors.textMuted} />
+                  <Ionicons name={b.icon as any} size={22} color={b.earned ? Colors.brand : Colors.textMuted} />
                 </View>
                 <Text style={[styles.badgeLabel, b.earned && styles.badgeLabelEarned]}>{b.label}</Text>
               </View>
@@ -627,8 +643,8 @@ export default function MyProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: Colors.background },
-  scrollContent: { paddingBottom: 120 },
+  container: { flex: 1, backgroundColor: Colors.background, overflow: 'hidden' },
+  scrollContent: { paddingBottom: 120, overflow: 'hidden' },
 
   // Cover (parallax banner)
   coverWrap: {
@@ -639,8 +655,9 @@ const styles = StyleSheet.create({
     height: COVER_HEIGHT,
     zIndex: 0,
     overflow: 'hidden',
+    backgroundColor: IS_LIGHT ? '#e8e4dc' : '#1a1a1a',
   },
-  coverImage: { width: '100%', height: '100%' },
+  coverImage: { width: '100%', height: '100%', backgroundColor: IS_LIGHT ? '#d8d1c6' : '#2a2a2a' },
   coverGradient: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: IS_LIGHT ? 'rgba(236,234,230,0.25)' : 'rgba(9,9,9,0.4)',
@@ -675,10 +692,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   topUtilityPillBtn: {
-    backgroundColor: 'rgba(0,0,0,0.58)',
-    minHeight: 36,
-    paddingHorizontal: 10,
-    borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   topUtilityPillIconWrap: {
     width: 20,
@@ -707,6 +726,53 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: -(AVATAR_SIZE + 8),
     marginBottom: 12,
+  },
+  avatarContainer: {
+    marginTop: -(AVATAR_SIZE / 2 + 10),
+    paddingHorizontal: 20,
+    zIndex: 10,
+    alignItems: 'center',
+  },
+  avatarWrapLinkedIn: {
+    width: AVATAR_SIZE,
+    height: AVATAR_SIZE,
+    borderRadius: AVATAR_SIZE / 2,
+    backgroundColor: Colors.background,
+    borderWidth: 4,
+    borderColor: Colors.background,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 5,
+  },
+  heroAvatarLinkedIn: {
+    width: '100%',
+    height: '100%',
+  },
+  heroAvatarContainerLinkedIn: {
+    width: '100%',
+    height: '100%',
+  },
+  verifiedBadgeLinkedIn: {
+    position: 'absolute',
+    bottom: 4,
+    right: 4,
+    backgroundColor: Colors.background,
+    borderRadius: 14,
+    padding: 2,
+  },
+  editAvatarChipLinkedIn: {
+    position: 'absolute',
+    bottom: 8,
+    right: 8,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    borderRadius: 16,
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   avatarWrap: { position: 'relative' },
   heroAvatarContainer: {
@@ -742,13 +808,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   heroName: {
-    fontSize: 36,
-    lineHeight: 40,
-    fontFamily: Typography.family.extrabold,
+    fontSize: 18,
+    lineHeight: 22,
+    fontFamily: Typography.family.bold,
     color: Colors.textPrimary,
     marginBottom: 2,
     alignSelf: 'center',
-    letterSpacing: -0.7,
+    letterSpacing: -0.3,
     maxWidth: '100%',
     textAlign: 'center',
   },
@@ -760,9 +826,9 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
   },
   heroHandle: {
-    fontSize: 16,
-    lineHeight: 18,
-    fontFamily: Typography.family.semibold,
+    fontSize: 11,
+    lineHeight: 14,
+    fontFamily: Typography.family.medium,
     color: Colors.textSecondary,
     marginBottom: 6,
     letterSpacing: 0.12,
@@ -914,9 +980,8 @@ const styles = StyleSheet.create({
   // Quick Access (original layout preserved)
   quickAccessCard: {
     width: '100%',
-    marginTop: 10,
+    marginTop: 16,
     backgroundColor: 'transparent',
-    borderRadius: 14,
     paddingHorizontal: 0,
     paddingVertical: 0,
   },
@@ -924,51 +989,53 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
-    paddingHorizontal: 2,
+    marginBottom: 12,
+    paddingHorizontal: 4,
   },
   quickAccessTitle: {
-    fontSize: 13,
+    fontSize: 14,
     fontFamily: Typography.family.semibold,
     color: Colors.textPrimary,
   },
   quickAccessHint: {
-    fontSize: 9,
-    fontFamily: Typography.family.medium,
+    fontSize: 11,
     color: Colors.textMuted,
-    letterSpacing: 0.35,
-    textTransform: 'uppercase',
   },
   quickGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'flex-start',
+    justifyContent: 'space-between',
   },
   quickItem: {
-    width: '31.2%',
+    width: '22%',
     alignItems: 'center',
-    marginRight: '3.2%',
-    marginBottom: 6,
-    minHeight: 66,
-    borderRadius: 10,
-    backgroundColor: 'transparent',
-    paddingHorizontal: 6,
-    paddingVertical: 7,
+    marginBottom: 10,
+    backgroundColor: Colors.surface,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    paddingHorizontal: 4,
+    paddingVertical: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 2,
   },
   quickItemLastInRow: {
     marginRight: 0,
   },
   quickIconCircle: {
-    width: 32,
-    height: 32,
+    width: 28,
+    height: 28,
     borderRadius: 10,
-    backgroundColor: 'transparent',
+    backgroundColor: IS_LIGHT ? '#f5f3f0' : '#2a2a2a',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 4,
   },
   quickLabel: {
-    fontSize: 9,
+    fontSize: 10,
     fontFamily: Typography.family.medium,
     color: Colors.textSecondary,
     textAlign: 'center',
@@ -978,7 +1045,7 @@ const styles = StyleSheet.create({
   quickValue: {
     fontSize: 8,
     fontFamily: Typography.family.semibold,
-    color: BRAND,
+    color: Colors.brand,
     marginTop: 1,
     letterSpacing: 0.06,
   },
@@ -1000,7 +1067,7 @@ const styles = StyleSheet.create({
   portfolioSummaryLabel: {
     fontSize: 11,
     fontFamily: Typography.family.semibold,
-    color: BRAND,
+    color: Colors.brand,
     letterSpacing: 0.9,
   },
   portfolioSummaryLinkBtn: {
@@ -1011,7 +1078,7 @@ const styles = StyleSheet.create({
   portfolioSummaryLinkText: {
     fontSize: 12,
     fontFamily: Typography.family.semibold,
-    color: BRAND,
+    color: Colors.brand,
   },
   portfolioSummaryValue: {
     fontSize: 26,
@@ -1036,12 +1103,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: Typography.family.semibold,
   },
-  portfolioPnlUp: { color: BRAND },
+  portfolioPnlUp: { color: Colors.brand },
   portfolioPnlDown: { color: '#ff9d9d' },
   portfolioSummaryCta: {
     marginTop: 14,
     borderRadius: 999,
-    backgroundColor: Colors.accent,
+    backgroundColor: Colors.brand,
     alignSelf: 'flex-start',
     flexDirection: 'row',
     alignItems: 'center',
@@ -1070,12 +1137,27 @@ const styles = StyleSheet.create({
   wardrobeSectionLabel: {
     fontSize: 11,
     fontFamily: Typography.family.semibold,
-    color: BRAND,
+    color: Colors.brand,
     letterSpacing: 1,
     marginBottom: 4,
   },
+  heroNameLinkedIn: {
+    fontSize: 18,
+    fontFamily: 'Inter_700Bold',
+    color: Colors.textPrimary,
+    letterSpacing: -0.3,
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  heroHandleLinkedIn: {
+    fontSize: 11,
+    fontFamily: 'Inter_500Medium',
+    color: Colors.textMuted,
+    textAlign: 'center',
+    marginTop: 2,
+  },
   wardrobeTitle: {
-    fontSize: 22,
+    fontSize: 20,
     fontFamily: Typography.family.bold,
     color: Colors.textPrimary,
     letterSpacing: -0.25,
@@ -1088,7 +1170,7 @@ const styles = StyleSheet.create({
   viewAllText: {
     fontSize: 13,
     fontFamily: Typography.family.semibold,
-    color: BRAND,
+    color: Colors.brand,
     letterSpacing: 0.16,
   },
   wardrobeScroll: {
@@ -1155,7 +1237,7 @@ const styles = StyleSheet.create({
   badgesSectionLabel: {
     fontSize: 11,
     fontFamily: Typography.family.semibold,
-    color: BRAND,
+    color: Colors.brand,
     letterSpacing: 1,
     marginBottom: 4,
   },
@@ -1177,8 +1259,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   badgeCircleEarned: {
-    borderColor: BRAND + '50',
-    backgroundColor: BRAND + '14',
+    borderColor: Colors.brand + '50',
+    backgroundColor: Colors.brand + '14',
   },
   badgeLabel: {
     fontSize: 11,
@@ -1188,8 +1270,6 @@ const styles = StyleSheet.create({
     maxWidth: 64,
   },
   badgeLabelEarned: {
-    color: BRAND,
+    color: Colors.brand,
   },
 });
-
-

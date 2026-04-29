@@ -11,7 +11,6 @@ import {
   ViewStyle,
 } from 'react-native';
 import { ActiveTheme, Colors } from '../../constants/colors';
-import { Typography } from '../../constants/typography';
 
 interface AppInputProps extends Omit<TextInputProps, 'style'> {
   label?: string;
@@ -85,8 +84,8 @@ const styles = StyleSheet.create({
   label: {
     marginBottom: 6,
     color: Colors.textSecondary,
-    fontSize: Typography.size.micro + 1,
-    fontFamily: Typography.family.bold,
+    fontSize: 12,
+    fontFamily: 'Inter_700Bold',
     textTransform: 'uppercase',
     letterSpacing: 0.6,
   },
@@ -94,7 +93,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderWidth: 1,
     borderColor: Colors.border,
-    backgroundColor: Colors.card,
+    backgroundColor: Colors.surface,
     paddingHorizontal: 12,
     minHeight: 46,
     flexDirection: 'row',
@@ -110,8 +109,8 @@ const styles = StyleSheet.create({
   },
   prefixText: {
     color: Colors.textMuted,
-    fontSize: Typography.size.caption,
-    fontFamily: Typography.family.bold,
+    fontSize: 12,
+    fontFamily: 'Inter_700Bold',
   },
   prefixNode: {
     alignItems: 'center',
@@ -120,22 +119,22 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     color: Colors.textPrimary,
-    fontSize: Typography.size.bodyLarge,
-    fontFamily: Typography.family.semibold,
+    fontSize: 14,
+    fontFamily: 'Inter_500Medium',
     paddingVertical: 10,
   },
   helperText: {
     marginTop: 7,
     color: Colors.textMuted,
-    fontSize: Typography.size.caption - 1,
+    fontSize: 11,
     lineHeight: 16,
-    fontFamily: Typography.family.medium,
+    fontFamily: 'Inter_500Medium',
   },
   errorText: {
     marginTop: 7,
     color: Colors.danger,
-    fontSize: Typography.size.caption - 1,
+    fontSize: 11,
     lineHeight: 16,
-    fontFamily: Typography.family.semibold,
+    fontFamily: 'Inter_600SemiBold',
   },
 });

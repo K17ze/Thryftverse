@@ -125,6 +125,7 @@ export async function runDailyReconciliation(
       `,
       runDate
     ),
+
     sumQueryByDate(
       client,
       `
@@ -173,9 +174,11 @@ export async function runDailyReconciliation(
 
   const mismatchGbp = roundTo(gatewaySucceededGbp - ledgerEscrowCreditGbp, 6);
   const absMismatch = Math.abs(mismatchGbp);
+  const variancePct = gatewaySucceededGbp > 0 ? absMismatch / gatewaySucceededGbp : 0;
 
   let status: ReconciliationStatus = 'ok';
-  if (absMismatch > Math.max(0, input.criticalMismatchThresholdGbp)) {
+  // 0.5% variance threshold = 0.005
+  if (variancePct > 0.005 || absMismatch > Math.max(0, input.criticalMismatchThresholdGbp)) {
     status = 'critical';
   } else if (absMismatch > Math.max(0, input.mismatchThresholdGbp)) {
     status = 'mismatch';

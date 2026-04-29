@@ -232,71 +232,7 @@ export default function PushNotificationsScreen({ navigation }: Props) {
           ))}
         </View>
 
-        <View style={styles.deviceCard}>
-          <View style={styles.deviceHeaderRow}>
-            <Text style={styles.deviceTitle}>Device Delivery</Text>
-            <Text style={[styles.deviceBadge, isDeviceRegistered ? styles.deviceBadgeActive : styles.deviceBadgeMuted]}>
-              {isDeviceRegistered ? 'Registered' : 'Not Registered'}
-            </Text>
-          </View>
-          <Text style={styles.deviceCopy}>
-            {isDeviceRegistered
-              ? 'Push notifications can be delivered to this device.'
-              : 'Register this device to receive push notifications when events occur.'}
-          </Text>
-
-          <AnimatedPressable
-            style={[styles.deviceActionBtn, (!currentUser?.id || isSyncingDevice) && styles.deviceActionBtnDisabled]}
-            onPress={() => {
-              if (isDeviceRegistered) {
-                void disableDeviceRegistration();
-                return;
-              }
-
-              void ensureDeviceRegistration();
-            }}
-            disabled={!currentUser?.id || isSyncingDevice}
-          >
-            {isSyncingDevice ? (
-              <ActivityIndicator color={Colors.background} size="small" />
-            ) : (
-              <Text style={styles.deviceActionText}>{isDeviceRegistered ? 'Deactivate Device' : 'Register Device'}</Text>
-            )}
-          </AnimatedPressable>
-
-          <View style={styles.supportRow}>
-            <AnimatedPressable
-              style={styles.supportIdentity}
-              onPress={() => navigation.navigate('UserProfile', { userId: supportUser.id })}
-              activeOpacity={0.85}
-              accessibilityRole="button"
-              accessibilityLabel={`Open @${supportUser.username} profile`}
-              accessibilityHint="Shows support profile details"
-            >
-              <CachedImage
-                uri={supportUser.avatar}
-                style={styles.supportAvatar}
-                containerStyle={styles.supportAvatarWrap}
-                contentFit="cover"
-              />
-              <View style={styles.supportCopyWrap}>
-                <Text style={styles.supportTitle}>Need help with push setup?</Text>
-                <Text style={styles.supportHandle}>@{supportUser.username}</Text>
-              </View>
-            </AnimatedPressable>
-
-            <AnimatedPressable
-              style={styles.supportMessageBtn}
-              onPress={handleOpenSupportChat}
-              activeOpacity={0.85}
-              accessibilityRole="button"
-              accessibilityLabel="Message support"
-              accessibilityHint="Opens support chat for notification help"
-            >
-              <Ionicons name="chatbubble-ellipses-outline" size={12} color={Colors.textPrimary} />
-            </AnimatedPressable>
-          </View>
-        </View>
+        {/* Device delivery section removed - unnecessary complexity */}
 
         <Text style={styles.footerNote}>
           You can also manage push notifications from your device Settings app.

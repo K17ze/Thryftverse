@@ -7,7 +7,9 @@ import {
   StatusBar,
   Dimensions,
   Share,
+  Image,
 } from 'react-native';
+import { Video, ResizeMode } from 'expo-av';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StackScreenProps } from '@react-navigation/stack';
@@ -28,16 +30,18 @@ import { Listing, MOCK_USERS, MY_USER } from '../data/mockData';
 import { mockFind } from '../utils/mockGate';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { useBackendData } from '../context/BackendDataContext';
+import { Space, Radius } from '../theme/designTokens';
 import { useToast } from '../context/ToastContext';
 import { Typography } from '../constants/typography';
 import { AppButton } from '../components/ui/AppButton';
 import { AppSegmentControl } from '../components/ui/AppSegmentControl';
 import { SharedTransitionView } from '../components/SharedTransitionView';
+import { isVideoUri } from '../utils/media';
 
 type Props = StackScreenProps<RootStackParamList, 'UserProfile'>;
 
 const IS_LIGHT = ActiveTheme === 'light';
-const ACCENT = IS_LIGHT ? '#2f251b' : Colors.accent;
+const ACCENT = IS_LIGHT ? '#2f251b' : Colors.brand;
 const BG = Colors.background;
 const CARD = IS_LIGHT ? '#ffffff' : '#111111';
 const CARD_ALT = IS_LIGHT ? '#f3eee7' : '#1a1a1a';
@@ -48,7 +52,8 @@ const { width } = Dimensions.get('window');
 
 const GRID_SPACING = 16;
 const ITEM_SIZE = (width - 40 - GRID_SPACING) / 2;
-const COVER_HEIGHT = 170;
+const COVER_HEIGHT = 200;
+const AVATAR_SIZE = 120;
 const COVER_IMAGE = 'https://picsum.photos/seed/profilecoverdefault/1200/800';
 
 type Tab = 'Listings' | 'Reviews' | 'About';
@@ -258,33 +263,45 @@ export default function UserProfileScreen({ navigation, route }: Props) {
         </AnimatedPressable>
       </View>
 
-      {/* Cover photo with parallax */}
+      {/* Cover photo with parallax - supports images, GIFs and videos */}
       <Reanimated.View style={[styles.coverWrap, coverStyle]}>
-        <CachedImage uri={displayCover} style={styles.coverImage} contentFit="cover" priority="high" />
+        {isVideoUri(displayCover) ? (
+          <Video
+            source={{ uri: displayCover }}
+            style={styles.coverImage}
+            resizeMode={ResizeMode.COVER}
+            shouldPlay
+            isLooping
+            isMuted
+          />
+        ) : (
+          <CachedImage uri={displayCover} style={styles.coverImage} contentFit="cover" priority="high" />
+        )}
         <View style={styles.coverGradient} />
       </Reanimated.View>
 
       {/* Main Content Area */}
       <AnimatedScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={[styles.scrollContent, { paddingTop: COVER_HEIGHT - 32 }]}
+        contentContainerStyle={[styles.scrollContent, { paddingTop: COVER_HEIGHT - 60 }]}
         onScroll={scrollHandler}
         scrollEventThrottle={16}
         stickyHeaderIndices={[1]} /* Target the Tab Bar index! */
       >
-        {/* Index 0: Hero Info */}
+        {/* Index 0: Hero Info - LinkedIn Style */}
         <View style={styles.profileHeader}>
-          <View style={styles.heroRow}>
-            <View style={[styles.avatarLarge, { overflow: 'hidden' }]}>
-              <CachedImage uri={displayAvatar} style={{ width: '100%', height: '100%' }} contentFit="cover" />
+          {/* Avatar overlapping banner bottom edge */}
+          <View style={styles.avatarContainer}>
+            <View style={styles.avatarWrapLinkedIn}>
+              <CachedImage uri={displayAvatar} style={styles.heroAvatarLinkedIn} contentFit="cover" />
             </View>
-            <View style={styles.heroInfo}>
-              <Text style={styles.heroUsername}>{displayUsername}</Text>
-              <Text style={styles.heroHandle}>{displayHandle}</Text>
-              <View style={styles.heroRatingRow}>
-                <StarRating rating={5} size={14} />
-                <Text style={styles.heroReviewCount}>(54 reviews)</Text>
-              </View>
+          </View>
+          <View style={styles.heroInfoLinkedIn}>
+            <Text style={styles.heroNameLinkedIn}>{displayUsername}</Text>
+            <Text style={styles.heroHandleLinkedIn}>{displayHandle}</Text>
+            <View style={styles.heroRatingRow}>
+              <StarRating rating={5} size={14} />
+              <Text style={styles.heroReviewCount}>(54 reviews)</Text>
             </View>
           </View>
           
@@ -607,14 +624,93 @@ const styles = StyleSheet.create({
     paddingTop: 24,
   },
   heroRow: { flexDirection: 'row', alignItems: 'center', gap: 16, marginBottom: 24 },
+  avatarContainer: {
+    marginTop: -(AVATAR_SIZE / 2 + 10),
+    paddingHorizontal: 20,
+    zIndex: 10,
+    alignItems: 'center',
+  },
+  avatarWrapLinkedIn: {
+    width: AVATAR_SIZE,
+    height: AVATAR_SIZE,
+    borderRadius: AVATAR_SIZE / 2,
+    backgroundColor: Colors.background,
+    borderWidth: 4,
+    borderColor: Colors.background,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  heroAvatarLinkedIn: {
+    width: '100%',
+    height: '100%',
+  },
+  heroInfoLinkedIn: {
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    alignItems: 'center',
+  },
+  statsRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 32,
+    marginTop: 16,
+    marginBottom: 20,
+  },
+  actionRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 12,
+    marginBottom: 24,
+  },
+  followBtn: {
+    backgroundColor: Colors.brand,
+    paddingHorizontal: 32,
+    paddingVertical: 12,
+    borderRadius: 24,
+  },
+  followBtnText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 15,
+  },
+  messageBtn: {
+    backgroundColor: Colors.surface,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  messageBtnText: {
+    color: Colors.textPrimary,
+    fontWeight: '600',
+    fontSize: 15,
+  },
   avatarLarge: {
     width: 80, height: 80, borderRadius: 40,
     backgroundColor: CARD_ALT,
     alignItems: 'center', justifyContent: 'center',
   },
   heroInfo: { flex: 1 },
-  heroUsername: { fontSize: 24, fontFamily: 'Inter_700Bold', color: TEXT, letterSpacing: -0.5, marginBottom: 6 },
-  heroHandle: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: MUTED, marginBottom: 7 },
+  heroNameLinkedIn: {
+    fontSize: 18,
+    fontFamily: 'Inter_700Bold',
+    color: TEXT,
+    letterSpacing: -0.3,
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  heroHandleLinkedIn: {
+    fontSize: 11,
+    fontFamily: 'Inter_500Medium',
+    color: MUTED,
+    textAlign: 'center',
+    marginTop: 2,
+  },
   heroRatingRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   heroReviewCount: { fontSize: 14, fontFamily: 'Inter_500Medium', color: MUTED },
   
@@ -651,7 +747,7 @@ const styles = StyleSheet.create({
   heroActionPrimaryText: {
     fontSize: 13,
     fontFamily: 'Inter_700Bold',
-    color: Colors.textInverse,
+    color: Colors.background,
     letterSpacing: 0.15,
   },
   heroActionPrimaryTextActive: {
@@ -678,24 +774,25 @@ const styles = StyleSheet.create({
   },
   stickyTabWrapper: {
     backgroundColor: BG,
-    paddingBottom: 16,
+    paddingBottom: Space.md,
     borderBottomWidth: 1,
     borderBottomColor: BORDER,
   },
   tabBarContainer: {
-    paddingHorizontal: 20,
-    gap: 12,
+    paddingHorizontal: Space.lg,
+    gap: Space.sm,
   },
   tabPill: {
-    paddingHorizontal: 28,
-    paddingVertical: 12,
-    borderRadius: 24,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: Radius.lg,
     backgroundColor: CARD_ALT,
     alignItems: 'center',
+    minWidth: 80,
   },
-  tabPillActive: { backgroundColor: Colors.accent },
+  tabPillActive: { backgroundColor: Colors.brand },
   tabText: { fontSize: Typography.size.body, fontFamily: Typography.family.medium, color: MUTED },
-  tabTextActive: { color: Colors.textInverse, fontFamily: Typography.family.bold },
+  tabTextActive: { color: Colors.background, fontFamily: Typography.family.bold },
 
   tabContentArea: {
     backgroundColor: BG,
@@ -711,18 +808,18 @@ const styles = StyleSheet.create({
   gridImageWrap: {
     width: ITEM_SIZE,
     height: ITEM_SIZE * 1.3,
-    borderRadius: 20,
+    borderRadius: Radius.lg,
     overflow: 'hidden',
     backgroundColor: CARD,
-    marginBottom: 12,
+    marginBottom: Space.sm,
   },
   gridSharedImage: {
     ...StyleSheet.absoluteFillObject,
   },
   gridImage: { width: '100%', height: '100%' },
   likeBtnPill: {
-    position: 'absolute', top: 10, right: 10,
-    width: 32, height: 32, borderRadius: 16,
+    position: 'absolute', top: Space.sm, right: Space.sm,
+    width: 32, height: 32, borderRadius: Radius.md,
     backgroundColor: 'rgba(0,0,0,0.3)',
     alignItems: 'center', justifyContent: 'center',
   },
@@ -740,9 +837,9 @@ const styles = StyleSheet.create({
   reviewsFilterRow: { paddingHorizontal: 20, marginBottom: 24 },
   reviewsFilterStrip: { gap: 10 },
   filterChip: { paddingHorizontal: 20, paddingVertical: 12, borderRadius: 24, backgroundColor: CARD_ALT },
-  filterChipActive: { backgroundColor: Colors.accent },
+  filterChipActive: { backgroundColor: Colors.brand },
   filterChipText: { fontSize: Typography.size.body, fontFamily: Typography.family.medium, color: MUTED },
-  filterChipTextActive: { color: Colors.textInverse, fontFamily: Typography.family.bold },
+  filterChipTextActive: { color: Colors.background, fontFamily: Typography.family.bold },
   
   reviewsList: { paddingHorizontal: 20 },
   reviewBlock: {
@@ -758,7 +855,7 @@ const styles = StyleSheet.create({
   },
   reviewerAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: CARD_ALT, alignItems: 'center', justifyContent: 'center' },
   reviewerAvatarAuto: { width: 44, height: 44, borderRadius: 22, backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center' },
-  reviewerAvatarAutoText: { fontSize: Typography.size.bodyLarge, fontFamily: Typography.family.bold, color: Colors.textInverse },
+  reviewerAvatarAutoText: { fontSize: Typography.size.bodyLarge, fontFamily: Typography.family.bold, color: Colors.background },
   reviewBlockInfo: { flex: 1 },
   reviewSenderRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
   reviewSenderName: { fontSize: Typography.size.body, fontFamily: Typography.family.bold, color: TEXT },

@@ -23,6 +23,7 @@ import { useStore } from '../store/useStore';
 import { NotificationEvent, listNotificationEvents } from '../services/notificationsApi';
 import { useReducedMotion } from '../hooks/useReducedMotion';
 import { Motion } from '../constants/motion';
+import { Space, Radius } from '../theme/designTokens';
 import { MOCK_USERS } from '../data/mockData';
 import { mockFind } from '../utils/mockGate';
 
@@ -238,10 +239,8 @@ export default function NotificationsScreen() {
         });
         hasShownSyncErrorRef.current = false;
       } catch {
-        if (!options?.silent || !hasShownSyncErrorRef.current) {
-          show('Unable to sync notifications right now.', 'error');
-          hasShownSyncErrorRef.current = true;
-        }
+        // Silently fail - no user-facing error for sync issues
+        hasShownSyncErrorRef.current = true;
       } finally {
         if (!options?.silent) {
           setIsLoading(false);
@@ -489,9 +488,9 @@ const styles = StyleSheet.create({
     borderColor: PANEL_BORDER,
   },
   notifMainTap: {
-    padding: 16,
+    padding: Space.md,
     flexDirection: 'row',
-    gap: 14,
+    gap: Space.sm + 2,
     alignItems: 'center',
   },
   notifCardUnread: {
@@ -569,12 +568,13 @@ const styles = StyleSheet.create({
     borderRadius: 9,
   },
   notifActorAvatarFallback: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
+    minWidth: 20,
+    height: 20,
+    borderRadius: Radius.sm,
+    backgroundColor: Colors.accent,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: PANEL_BG,
+    marginLeft: Space.sm,
   },
   notifActorText: {
     flex: 1,

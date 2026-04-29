@@ -1,7 +1,7 @@
 import React from 'react';
 import { StyleProp, StyleSheet, Text, TextStyle, View, ViewStyle } from 'react-native';
 import { Colors } from '../../constants/colors';
-import { Typography } from '../../constants/typography';
+// Typography using direct font names
 import { AnimatedPressable } from '../AnimatedPressable';
 
 export interface AppSegmentOption<T extends string> {
@@ -87,7 +87,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 1,
     borderColor: Colors.border,
-    backgroundColor: Colors.card,
+    backgroundColor: Colors.surface,
     paddingHorizontal: 12,
     paddingVertical: 6,
     alignItems: 'center',
@@ -99,15 +99,15 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   optionActive: {
-    borderColor: Colors.accentGold,
-    backgroundColor: Colors.cardAlt,
+    borderColor: Colors.brand,
+    backgroundColor: Colors.surface,
   },
   optionText: {
     color: Colors.textSecondary,
-    fontSize: Typography.size.micro + 1,
-    fontFamily: Typography.family.bold,
+    fontSize: 11,
+    fontFamily: 'Inter_700Bold',
   },
   optionTextActive: {
-    color: Colors.accentGold,
+    color: Colors.brand,
   },
 });

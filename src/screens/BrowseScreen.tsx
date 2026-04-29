@@ -21,6 +21,9 @@ import { RouteProp, useNavigation, useRoute, useScrollToTop } from '@react-navig
 import { RefreshIndicator } from '../components/RefreshIndicator';
 import { EmptyState } from '../components/EmptyState';
 import { SkeletonLoader } from '../components/SkeletonLoader';
+import { Skeleton } from '../components/ui/Skeleton';
+import { MasonryGrid } from '../components/ProductCardV2';
+import { ProductCardV2 } from '../components/ProductCardV2';
 import { SyncStatusPill } from '../components/SyncStatusPill';
 import { SyncRetryBanner } from '../components/SyncRetryBanner';
 import { RootStackParamList } from '../navigation/types';
@@ -31,6 +34,8 @@ import { useBackendData } from '../context/BackendDataContext';
 import { getBackendSyncStatus } from '../utils/syncStatus';
 import { useHaptic } from '../hooks/useHaptic';
 import { AppButton } from '../components/ui/AppButton';
+import { Space, Radius } from '../theme/designTokens';
+import { T } from '../components/ui/Text';
 import { SharedTransitionView } from '../components/SharedTransitionView';
 import { useReducedMotion } from '../hooks/useReducedMotion';
 import { MOCK_USERS } from '../data/mockData';
@@ -359,10 +364,10 @@ export default function BrowseScreen() {
     <View style={styles.loadingStateWrap}>
       {Array.from({ length: 6 }).map((_, index) => (
         <View key={`browse_loading_${index}`} style={[styles.loadingCard, index % 2 === 1 && styles.loadingCardOffset]}>
-          <SkeletonLoader width="100%" height={ITEM_WIDTH * 1.35} borderRadius={12} />
+          <Skeleton variant="image" height={ITEM_WIDTH * 1.35} />
           <View style={styles.loadingCardBody}>
-            <SkeletonLoader width="58%" height={12} borderRadius={6} />
-            <SkeletonLoader width="40%" height={11} borderRadius={6} style={{ marginTop: 6 }} />
+            <Skeleton variant="text" width="58%" />
+            <Skeleton variant="text" width="40%" style={{ marginTop: Space.xs }} />
           </View>
         </View>
       ))}
@@ -452,62 +457,35 @@ export default function BrowseScreen() {
         />
       ) : null}
 
-      {/* Spacious 2-Column Grid */}
+      {/* Masonry Grid - Pinterest/Depop Style */}
       <View style={{ flex: 1 }}>
         <RefreshIndicator scrollY={scrollY} isRefreshing={refreshing} topInset={40} />
         
-        <AnimatedFlashList
-          ref={scrollRef}
-          data={dataToRender}
-          keyExtractor={(item: any) => item.id}
-          numColumns={2}
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.gridContent}
-          onScroll={scrollHandler}
-          scrollEventThrottle={16}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={handleRefresh}
-              tintColor="transparent"
-              colors={['transparent']}
-              progressBackgroundColor="transparent"
-            />
-          }
-          renderItem={({ item, index }: any) => (
-            <BrowseGridItem 
-              item={item} 
-              index={index} 
-              navigation={navigation} 
-              wishlist={wishlist} 
-              toggleWishlist={toggleWishlist} 
-              showToast={show} 
-              formatPrice={formatFromFiat} 
-              reducedMotionEnabled={reducedMotionEnabled}
-            />
-          )}
-          ListEmptyComponent={
-            showBrowseLoadingSkeleton ? (
-              renderBrowseLoadingState()
-            ) : (
-              <EmptyState
-                icon="search-outline"
-                title="No matches found"
-                subtitle="Try clearing filters or searching for another keyword."
-                ctaLabel="Clear filters"
-                onCtaPress={() =>
-                  updateBrowseFilters({
-                    query: '',
-                    sort: 'Recommended',
-                    brands: [],
-                    sizes: [],
-                    condition: 'Any',
-                  })
-                }
-              />
-            )
-          }
-        />
+        {showBrowseLoadingSkeleton ? (
+          renderBrowseLoadingState()
+        ) : dataToRender.length > 0 ? (
+          <MasonryGrid
+            items={dataToRender}
+            onPressItem={(item) => navigation.push('ItemDetail', { itemId: item.id })}
+            numColumns={2}
+          />
+        ) : (
+          <EmptyState
+            icon="search-outline"
+            title="No matches found"
+            subtitle="Try clearing filters or searching for another keyword."
+            ctaLabel="Clear filters"
+            onCtaPress={() =>
+              updateBrowseFilters({
+                query: '',
+                sort: 'Recommended',
+                brands: [],
+                sizes: [],
+                condition: 'Any',
+              })
+            }
+          />
+        )}
       </View>
     </SafeAreaView>
   );
@@ -520,17 +498,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row', 
     alignItems: 'center', 
     justifyContent: 'space-between',
-    paddingHorizontal: 16, 
-    paddingTop: 10, 
-    paddingBottom: 4,
+    paddingHorizontal: Space.md,
+    paddingTop: Space.sm,
+    paddingBottom: Space.xs,
   },
   backBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
-  searchBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: Colors.card, alignItems: 'center', justifyContent: 'center' },
+  searchBtn: { width: 44, height: 44, borderRadius: Radius.full, backgroundColor: Colors.card, alignItems: 'center', justifyContent: 'center' },
   
   titleContainer: {
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 20,
+    paddingHorizontal: Space.md,
+    paddingTop: Space.sm,
+    paddingBottom: Space.lg,
   },
   hugeTitle: { 
     fontSize: 44, 

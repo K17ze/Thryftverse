@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import {
-  AnimatedPressable } from '../components/AnimatedPressable';
+import { AnimatedPressable } from '../components/AnimatedPressable';
+import { Space, Radius } from '../theme/designTokens';
 import { 
   View,
   Text,
@@ -22,7 +22,6 @@ import * as ImagePicker from 'expo-image-picker';
 import { useStore } from '../store/useStore';
 import { SortablePhotoStrip } from '../components/SortablePhotoStrip';
 import { BottomSheetPicker } from '../components/BottomSheetPicker';
-import { SyncStatusPill } from '../components/SyncStatusPill';
 import { CURRENCIES } from '../constants/currencies';
 import { useCurrencyPref } from '../hooks/useCurrencyPref';
 import { sanitizeDecimalInput, sanitizeIntegerInput } from '../utils/currencyAuthoringFlows';
@@ -36,23 +35,28 @@ const CONDITIONS = ['New with tags', 'Very good', 'Good', 'Satisfactory'];
 const SIZES = ['XXS', 'XS', 'S', 'M', 'L', 'XL', 'XXL', 'One size'];
 const BRANDS = ['Nike', 'Adidas', 'Zara', 'H&M', 'Ralph Lauren', 'Off-White', 'Stone Island', 'Stussy', 'Other'];
 const CATEGORY_OPTIONS = ['Women', 'Men', 'Designer', 'Kids', 'Home', 'Electronics', 'Entertainment', 'Hobbies & collectables', 'Sports'];
-const OFFERING_WINDOWS_HOURS = [24, 48, 72] as const;
 type CoOwnMode = 'off' | 'on';
-type OfferingWindowOption = `${typeof OFFERING_WINDOWS_HOURS[number]}h`;
+type ListingType = 'marketplace' | 'co-own' | 'auction';
 
 const CO_OWN_MODE_OPTIONS: AppSegmentOption<CoOwnMode>[] = [
   { value: 'off', label: 'Off', accessibilityLabel: 'Disable co-own listing' },
   { value: 'on', label: 'On', accessibilityLabel: 'Enable co-own listing' },
 ];
 
-const OFFERING_WINDOW_OPTIONS: AppSegmentOption<OfferingWindowOption>[] = OFFERING_WINDOWS_HOURS.map((hours) => ({
-  value: `${hours}h` as OfferingWindowOption,
-  label: `${hours}h`,
-  accessibilityLabel: `${hours} hour offering window`,
-}));
+const OFFERING_WINDOW_OPTIONS: AppSegmentOption<`${number}h`>[] = [
+  { value: '24h', label: '24h', accessibilityLabel: '24 hour offering window' },
+  { value: '48h', label: '48h', accessibilityLabel: '48 hour offering window' },
+  { value: '72h', label: '72h', accessibilityLabel: '72 hour offering window' },
+];
+
+const LISTING_TYPE_OPTIONS: AppSegmentOption<ListingType>[] = [
+  { value: 'marketplace', label: 'Marketplace', accessibilityLabel: 'Create marketplace listing' },
+  { value: 'co-own', label: 'Co-Own', accessibilityLabel: 'Create co-own listing' },
+  { value: 'auction', label: 'Auction', accessibilityLabel: 'Create auction listing' },
+];
 
 const IS_LIGHT = ActiveTheme === 'light';
-const BRAND = IS_LIGHT ? '#2f251b' : Colors.accent;
+const BRAND = IS_LIGHT ? '#2f251b' : Colors.brand;
 const HEADER_BG = IS_LIGHT ? '#f3eee7' : '#0a0a0a';
 const PANEL_BG = IS_LIGHT ? '#ffffff' : '#111111';
 const PANEL_SOFT_BG = IS_LIGHT ? '#f7f4ef' : '#171717';
@@ -73,6 +77,7 @@ export default function SellScreen() {
   const [desc, setDesc] = useState('');
   const [price, setPrice] = useState('');
   const [photos, setPhotos] = useState<string[]>([]);
+  const [listingType, setListingType] = useState<ListingType>('marketplace');
   const [coOwnEnabled, setCoOwnEnabled] = useState(false);
   const [shareCountInput, setShareCountInput] = useState('20');
   const [sharePriceInput, setSharePriceInput] = useState('');
@@ -106,7 +111,7 @@ export default function SellScreen() {
   const layoutAnimation = reducedMotionEnabled ? undefined : Layout.springify();
 
   const coOwnModeValue: CoOwnMode = coOwnEnabled ? 'on' : 'off';
-  const offeringWindowValue = `${offeringWindowHours}h` as OfferingWindowOption;
+  const offeringWindowValue = `${offeringWindowHours}h` as `${number}h`;
 
   const handleCoOwnModeChange = (nextMode: CoOwnMode) => {
     const nextEnabled = nextMode === 'on';
@@ -117,7 +122,7 @@ export default function SellScreen() {
     }
   };
 
-  const handleOfferingWindowChange = (nextValue: OfferingWindowOption) => {
+  const handleOfferingWindowChange = (nextValue: `${number}h`) => {
     const parsedHours = Number(nextValue.replace('h', ''));
     if (Number.isFinite(parsedHours) && parsedHours > 0) {
       setOfferingWindowHours(parsedHours);
@@ -140,15 +145,31 @@ export default function SellScreen() {
     setShareCountInput(String(Math.min(20, parsed)));
   };
 
+  // Co-Own bidirectional math: price = shareCount * sharePrice
   React.useEffect(() => {
-    if (!coOwnEnabled || sharePriceInput) {
-      return;
-    }
+    if (!coOwnEnabled) return;
 
     const listingPrice = Number(sanitizeDecimalInput(price));
     const shareCount = Math.min(20, Math.max(1, Math.floor(Number(shareCountInput))));
-    if (Number.isFinite(listingPrice) && listingPrice > 0 && Number.isFinite(shareCount) && shareCount > 0) {
-      setSharePriceInput((listingPrice / shareCount).toFixed(2));
+    const sharePrice = Number(sanitizeDecimalInput(sharePriceInput));
+
+    if (!Number.isFinite(shareCount) || shareCount <= 0) return;
+
+    // Case 1: User set sharePrice, calculate price
+    if (Number.isFinite(sharePrice) && sharePrice > 0 && (!Number.isFinite(listingPrice) || listingPrice <= 0)) {
+      const calculatedPrice = (sharePrice * shareCount).toFixed(2);
+      if (calculatedPrice !== price) {
+        setPrice(calculatedPrice);
+      }
+      return;
+    }
+
+    // Case 2: User set price and shareCount, calculate sharePrice
+    if (Number.isFinite(listingPrice) && listingPrice > 0) {
+      const calculatedSharePrice = (listingPrice / shareCount).toFixed(2);
+      if (calculatedSharePrice !== sharePriceInput) {
+        setSharePriceInput(calculatedSharePrice);
+      }
     }
   }, [price, shareCountInput, sharePriceInput, coOwnEnabled]);
 
@@ -425,7 +446,7 @@ export default function SellScreen() {
                 variant="primary"
                 size="sm"
                 onPress={handlePickFromCamera}
-                icon={<Ionicons name="camera-outline" size={16} color={Colors.textInverse} />}
+                icon={<Ionicons name="camera-outline" size={16} color={Colors.background} />}
                 style={styles.uploadActionBtn}
                 contentStyle={styles.uploadActionContent}
                 iconContainerStyle={styles.uploadActionIconWrap}
@@ -438,7 +459,7 @@ export default function SellScreen() {
                 variant="primary"
                 size="sm"
                 onPress={handlePickFromLibrary}
-                icon={<Ionicons name="images-outline" size={16} color={Colors.textInverse} />}
+                icon={<Ionicons name="images-outline" size={16} color={Colors.background} />}
                 style={styles.uploadActionBtn}
                 contentStyle={styles.uploadActionContent}
                 iconContainerStyle={styles.uploadActionIconWrap}
@@ -462,45 +483,50 @@ export default function SellScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-          <View style={styles.flowCard}>
-            <View style={styles.flowHeaderRow}>
-              <Text style={styles.flowTitle}>Listing Flow</Text>
-              <Text style={styles.flowProgress}>{flowProgressLabel}</Text>
-            </View>
 
-            <View style={styles.flowStepsRow}>
-              {flowSteps.map((step, index) => {
-                const isCurrent = currentFlowStep === index || (currentFlowStep === -1 && index === flowSteps.length - 1);
-
-                return (
-                  <View
-                    key={step.key}
+          {/* ── Listing Type Selector ── */}
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>Listing Type</Text>
+            <View style={styles.listingTypeRow}>
+              {LISTING_TYPE_OPTIONS.map((option) => (
+                <AnimatedPressable
+                  key={option.value}
+                  style={[
+                    styles.listingTypeChip,
+                    listingType === option.value && styles.listingTypeChipActive,
+                  ]}
+                  onPress={() => setListingType(option.value)}
+                  activeOpacity={0.85}
+                  accessibilityRole="button"
+                  accessibilityLabel={option.accessibilityLabel}
+                >
+                  <Ionicons
+                    name={
+                      option.value === 'marketplace'
+                        ? 'cart-outline'
+                        : option.value === 'co-own'
+                          ? 'people-outline'
+                          : 'hammer-outline'
+                    }
+                    size={16}
+                    color={listingType === option.value ? '#fff' : Colors.textPrimary}
+                  />
+                  <Text
                     style={[
-                      styles.flowStepChip,
-                      step.done && styles.flowStepChipDone,
-                      isCurrent && styles.flowStepChipActive,
+                      styles.listingTypeChipText,
+                      listingType === option.value && styles.listingTypeChipTextActive,
                     ]}
                   >
-                    <Ionicons
-                      name={step.done ? 'checkmark-circle' : 'ellipse-outline'}
-                      size={12}
-                      color={step.done ? BRAND : Colors.textMuted}
-                    />
-                    <Text
-                      style={[
-                        styles.flowStepText,
-                        step.done && styles.flowStepTextDone,
-                        isCurrent && styles.flowStepTextActive,
-                      ]}
-                    >
-                      {step.label}
-                    </Text>
-                  </View>
-                );
-              })}
+                    {option.label}
+                  </Text>
+                </AnimatedPressable>
+              ))}
             </View>
-
-            <Text style={styles.flowHint}>{nextFlowActionHint}</Text>
+            <Text style={styles.helperTextLeft}>
+              {listingType === 'marketplace' && 'Standard buy-now listing with fixed price.'}
+              {listingType === 'co-own' && 'Fractional ownership with share issuance.'}
+              {listingType === 'auction' && 'Time-limited bidding with highest bid wins.'}
+            </Text>
           </View>
           
           <Text style={styles.sectionHeading}>Item Details</Text>
@@ -630,144 +656,97 @@ export default function SellScreen() {
 
           <Text style={styles.priceCurrencyHint}>Listing currency: {currencyCode}</Text>
 
-          <Text style={[styles.sectionHeading, { marginTop: 24 }]}>Co-Own Listing</Text>
-          <View style={styles.coOwnCard}>
-            <View style={styles.coOwnTopRow}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.coOwnTitle}>Tokenize this item</Text>
-                <Text style={styles.coOwnHint}>Create fractional shares for the Co-Own marketplace.</Text>
+          {listingType === 'co-own' && (
+            <>
+              <Text style={[styles.sectionHeading, { marginTop: 24 }]}>Co-Own Details</Text>
+              <View style={styles.coOwnCard}>
+                <View style={styles.coOwnTopRow}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.coOwnTitle}>Tokenize this item</Text>
+                    <Text style={styles.coOwnHint}>Create fractional shares for the Co-Own marketplace.</Text>
+                  </View>
+                  <AppSegmentControl
+                    options={CO_OWN_MODE_OPTIONS}
+                    value={coOwnModeValue}
+                    onChange={handleCoOwnModeChange}
+                    style={styles.coOwnToggleWrap}
+                    optionStyle={styles.coOwnToggleBtn}
+                    optionActiveStyle={styles.coOwnToggleBtnActive}
+                    optionTextStyle={styles.coOwnToggleText}
+                    optionTextActiveStyle={styles.coOwnToggleTextActive}
+                  />
+                </View>
+
+                {coOwnEnabled ? (
+                  <View style={styles.coOwnFieldsWrap}>
+                    <Text style={styles.inputLabel}>Share count</Text>
+                    <TextInput
+                      style={styles.coOwnInput}
+                      value={shareCountInput}
+                      onChangeText={handleShareCountChange}
+                      keyboardType="number-pad"
+                      placeholder="20"
+                      placeholderTextColor={Colors.textMuted}
+                      accessibilityLabel="Co-own share count"
+                      accessibilityHint="Enter number of shares to create"
+                    />
+                    <Text style={styles.coOwnInputHint}>Maximum 20 units per co-own</Text>
+
+                    <Text style={styles.inputLabel}>Initial share price ({currencyCode})</Text>
+                    <TextInput
+                      style={styles.coOwnInput}
+                      value={sharePriceInput}
+                      onChangeText={(value) => setSharePriceInput(sanitizeDecimalInput(value))}
+                      keyboardType="decimal-pad"
+                      placeholder="0.00"
+                      placeholderTextColor={Colors.textMuted}
+                      accessibilityLabel="Initial share price"
+                      accessibilityHint="Enter starting price per share"
+                    />
+
+                  </View>
+                ) : (
+                  <Text style={styles.coOwnHintMuted}>Enable this to route publishing into the Co-Own issuer flow.</Text>
+                )}
               </View>
-              <AppSegmentControl
-                options={CO_OWN_MODE_OPTIONS}
-                value={coOwnModeValue}
-                onChange={handleCoOwnModeChange}
-                style={styles.coOwnToggleWrap}
-                optionStyle={styles.coOwnToggleBtn}
-                optionActiveStyle={styles.coOwnToggleBtnActive}
-                optionTextStyle={styles.coOwnToggleText}
-                optionTextActiveStyle={styles.coOwnToggleTextActive}
-              />
-            </View>
+            </>
+          )}
 
-            {coOwnEnabled ? (
-              <View style={styles.coOwnFieldsWrap}>
-                <Text style={styles.inputLabel}>Share count</Text>
+          {listingType === 'auction' && (
+            <>
+              <Text style={[styles.sectionHeading, { marginTop: 24 }]}>Auction Details</Text>
+              <View style={styles.coOwnCard}>
+                <Text style={styles.inputLabel}>Starting Bid ({currencyCode})</Text>
                 <TextInput
                   style={styles.coOwnInput}
-                  value={shareCountInput}
-                  onChangeText={handleShareCountChange}
-                  keyboardType="number-pad"
-                  placeholder="20"
-                  placeholderTextColor={Colors.textMuted}
-                  accessibilityLabel="Co-own share count"
-                  accessibilityHint="Enter number of shares to create"
-                />
-                <Text style={styles.coOwnInputHint}>Maximum 20 units per co-own</Text>
-
-                <Text style={styles.inputLabel}>Initial share price ({currencyCode})</Text>
-                <TextInput
-                  style={styles.coOwnInput}
-                  value={sharePriceInput}
-                  onChangeText={(value) => setSharePriceInput(sanitizeDecimalInput(value))}
+                  value={price}
+                  onChangeText={setPrice}
                   keyboardType="decimal-pad"
                   placeholder="0.00"
                   placeholderTextColor={Colors.textMuted}
-                  accessibilityLabel="Initial share price"
-                  accessibilityHint="Enter starting price per share"
+                  accessibilityLabel="Starting bid"
                 />
+                <Text style={styles.coOwnInputHint}>Minimum bid to start the auction</Text>
 
-                <Text style={styles.inputLabel}>Offering window</Text>
+                <Text style={styles.inputLabel}>Duration</Text>
                 <AppSegmentControl
-                  options={OFFERING_WINDOW_OPTIONS}
-                  value={offeringWindowValue}
-                  onChange={handleOfferingWindowChange}
+                  options={[
+                    { value: '24h', label: '24h', accessibilityLabel: '24 hour auction' },
+                    { value: '48h', label: '48h', accessibilityLabel: '48 hour auction' },
+                    { value: '72h', label: '72h', accessibilityLabel: '72 hour auction' },
+                    { value: '7d', label: '7d', accessibilityLabel: '7 day auction' },
+                  ]}
+                  value="24h"
+                  onChange={() => {}}
                   style={styles.windowChipsRow}
                   optionStyle={styles.windowChip}
                   optionActiveStyle={styles.windowChipActive}
                   optionTextStyle={styles.windowChipText}
                   optionTextActiveStyle={styles.windowChipTextActive}
                 />
-
-                <View style={styles.authRow}>
-                  <View>
-                    <Text style={styles.authTitle}>Authentication photos</Text>
-                    <Text style={styles.authHint}>{authPhotos.length} attached | Required for issuance</Text>
-                  </View>
-                  <View style={styles.authBtnRow}>
-                    <AnimatedPressable
-                      style={styles.authBtn}
-                      activeOpacity={0.85}
-                      onPress={() => {
-                        if (photos.length === 0) {
-                          setErrorMsg('Add listing media first, then attach auth photos.');
-                          shake();
-                          return;
-                        }
-
-                        const nextAuthPhotos = filterImageUris(photos, 3);
-                        if (nextAuthPhotos.length === 0) {
-                          setErrorMsg('Authentication requires at least one image. Add a photo to continue.');
-                          shake();
-                          return;
-                        }
-
-                        setAuthPhotos(nextAuthPhotos);
-                      }}
-                      accessibilityRole="button"
-                      accessibilityLabel="Use listing photos for authentication"
-                      accessibilityHint="Copies listing media into authentication photos"
-                    >
-                      <Text style={styles.authBtnText}>Use listing</Text>
-                    </AnimatedPressable>
-                    <AnimatedPressable
-                      style={[styles.authBtn, styles.authBtnMuted]}
-                      activeOpacity={0.85}
-                      onPress={() => setAuthPhotos([])}
-                      accessibilityRole="button"
-                      accessibilityLabel="Clear authentication photos"
-                      accessibilityHint="Removes selected authentication photos"
-                    >
-                      <Text style={[styles.authBtnText, styles.authBtnTextMuted]}>Clear</Text>
-                    </AnimatedPressable>
-                  </View>
-                </View>
               </View>
-            ) : (
-              <Text style={styles.coOwnHintMuted}>Enable this to route publishing into the Co-Own issuer flow.</Text>
-            )}
-          </View>
-
-          <View style={styles.readinessCard}>
-            <View style={styles.readinessHeader}>
-              <Text style={styles.readinessTitle}>Publish Readiness</Text>
-              <SyncStatusPill
-                tone={publishReady ? 'live' : 'syncing'}
-                label={readinessLabel}
-                compact
-              />
-            </View>
-
-            <View style={styles.readinessChipRow}>
-              {visibleReadinessItems.map((item) => (
-                <View key={item.key} style={[styles.readinessChip, item.done && styles.readinessChipDone]}>
-                  <Ionicons
-                    name={item.done ? 'checkmark-circle' : 'ellipse-outline'}
-                    size={14}
-                    color={item.done ? BRAND : Colors.textMuted}
-                  />
-                  <Text style={[styles.readinessChipText, item.done && styles.readinessChipTextDone]}>
-                    {item.label}
-                  </Text>
-                </View>
-              ))}
-            </View>
-
-            <Text style={[styles.readinessHint, publishReady && styles.readinessHintReady]}>
-              {publishReady
-                ? 'All required checks are complete. You can safely continue.'
-                : 'Complete all highlighted checks before you publish this listing.'}
-            </Text>
-          </View>
+            </>
+          )}
 
           <View style={{ height: 164 }} />
         </ScrollView>
@@ -775,35 +754,6 @@ export default function SellScreen() {
 
       {/* ── Publish Dock ── */}
       <View style={styles.stickyFooter}>
-        <View style={styles.footerStatusCard}>
-          <View style={styles.footerStatusHeader}>
-            <View style={[styles.footerStatusDot, publishReady && styles.footerStatusDotReady]} />
-            <Text style={[styles.footerStatusTitle, publishReady && styles.footerStatusTitleReady]}>
-              {publishReady
-                ? coOwnEnabled
-                  ? 'Issuer checks complete'
-                  : 'Listing ready to publish'
-                : `${missingReadinessItems.length} required check${missingReadinessItems.length === 1 ? '' : 's'} left`}
-            </Text>
-          </View>
-
-          {publishReady ? (
-            <Text style={styles.footerReadyHint}>
-              {coOwnEnabled
-                ? 'You will continue into the Co-Own issuer flow after this step.'
-                : 'This will publish your listing directly to the marketplace feed.'}
-            </Text>
-          ) : (
-            <View style={styles.footerMissingChipRow}>
-              {missingReadinessItems.slice(0, 3).map((item) => (
-                <View key={item.key} style={styles.footerMissingChip}>
-                  <Text style={styles.footerMissingChipText}>{item.label}</Text>
-                </View>
-              ))}
-            </View>
-          )}
-        </View>
-
         {!!errorMsg && (
           <Reanimated.Text 
             entering={statusEnterAnimation}
@@ -822,8 +772,8 @@ export default function SellScreen() {
             size="lg"
             onPress={handlePublish}
             align="start"
-            icon={<Ionicons name={publishReady ? 'cloud-upload-outline' : 'alert-circle-outline'} size={18} color={publishReady ? Colors.textInverse : Colors.textPrimary} />}
-            trailingIcon={<Ionicons name={publishReady ? 'arrow-forward' : 'sparkles-outline'} size={18} color={publishReady ? Colors.textInverse : Colors.textMuted} />}
+            icon={<Ionicons name={publishReady ? 'cloud-upload-outline' : 'alert-circle-outline'} size={18} color={publishReady ? Colors.background : Colors.textPrimary} />}
+            trailingIcon={<Ionicons name={publishReady ? 'arrow-forward' : 'sparkles-outline'} size={18} color={publishReady ? Colors.background : Colors.textMuted} />}
             style={[styles.uploadCta, !publishReady && styles.uploadCtaPending]}
             contentStyle={styles.uploadCtaContent}
             iconContainerStyle={[styles.uploadCtaIconWrap, !publishReady && styles.uploadCtaIconWrapPending]}
@@ -872,8 +822,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    height: 64,
+    paddingHorizontal: Space.md,
+    paddingTop: Space.md - Space.xs,
+    paddingBottom: Space.sm,
   },
   iconBtn: {
     width: 40,
@@ -886,7 +837,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   headerTitle: { fontSize: 16, fontFamily: 'Inter_700Bold', color: Colors.textPrimary, textTransform: 'uppercase', letterSpacing: 1 },
-  
+
+  section: { marginHorizontal: 20, marginTop: 12 },
+  sectionLabel: { fontSize: 13, fontFamily: 'Inter_600SemiBold', color: Colors.textMuted, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
+  listingTypeRow: { flexDirection: 'row', gap: 8 },
+  listingTypeChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: PANEL_BORDER,
+    backgroundColor: PANEL_BG,
+  },
+  listingTypeChipActive: { backgroundColor: Colors.brand, borderColor: Colors.brand },
+  listingTypeChipText: { color: Colors.textPrimary, fontSize: 13, fontFamily: 'Inter_600SemiBold' },
+  listingTypeChipTextActive: { color: '#fff' },
+  helperTextLeft: { fontSize: 12, color: Colors.textMuted, marginTop: 8, fontFamily: 'Inter_500Medium' },
+
   giantCameraBox: {
     marginHorizontal: 20,
     marginTop: 8,
@@ -942,81 +912,12 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   uploadActionBtnText: {
-    color: Colors.textInverse,
+    color: Colors.background,
     fontSize: 10,
     fontFamily: 'Inter_700Bold',
   },
 
   scrollContent: { paddingTop: 18, paddingHorizontal: 20 },
-  flowCard: {
-    backgroundColor: PANEL_BG,
-    borderWidth: 0,
-    borderColor: PANEL_BORDER,
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    marginBottom: 12,
-  },
-  flowHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-    gap: 8,
-  },
-  flowTitle: {
-    fontSize: 11,
-    fontFamily: 'Inter_700Bold',
-    color: Colors.textPrimary,
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-  },
-  flowProgress: {
-    fontSize: 10,
-    fontFamily: 'Inter_600SemiBold',
-    color: Colors.textMuted,
-  },
-  flowStepsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-  },
-  flowStepChip: {
-    borderRadius: 999,
-    borderWidth: 0,
-    borderColor: PANEL_BORDER,
-    backgroundColor: PANEL_SOFT_BG,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  flowStepChipDone: {
-    backgroundColor: IS_LIGHT ? '#ece4d8' : '#2f291f',
-  },
-  flowStepChipActive: {
-    borderColor: Colors.accent,
-    backgroundColor: IS_LIGHT ? '#ece4d8' : '#2f291f',
-  },
-  flowStepText: {
-    fontSize: 10,
-    fontFamily: 'Inter_600SemiBold',
-    color: Colors.textSecondary,
-  },
-  flowStepTextDone: {
-    color: BRAND,
-  },
-  flowStepTextActive: {
-    color: Colors.textPrimary,
-  },
-  flowHint: {
-    marginTop: 8,
-    color: Colors.textMuted,
-    fontSize: 10,
-    lineHeight: 14,
-    fontFamily: 'Inter_500Medium',
-  },
   sectionHeading: { fontSize: 14, fontFamily: 'Inter_700Bold', color: Colors.textPrimary, marginBottom: 12, textTransform: 'uppercase', letterSpacing: 1 },
 
   pillInputBox: {
@@ -1119,7 +1020,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
   },
   coOwnToggleBtnActive: {
-    backgroundColor: Colors.accent,
+    backgroundColor: Colors.brand,
   },
   coOwnToggleText: {
     fontSize: 11,
@@ -1127,7 +1028,7 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
   },
   coOwnToggleTextActive: {
-    color: Colors.textInverse,
+    color: Colors.background,
   },
   coOwnFieldsWrap: {
     marginTop: 14,
@@ -1143,6 +1044,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     height: 46,
     marginBottom: 10,
+  },
+  thumbnailRow: {
+    flexDirection: 'row',
+    gap: Space.sm,
+    marginTop: Space.md - Space.xs,
   },
   windowChipsRow: {
     flexDirection: 'row',
@@ -1400,7 +1306,7 @@ const styles = StyleSheet.create({
     backgroundColor: PANEL_SOFT_BG,
   },
   uploadCtaText: {
-    color: Colors.textInverse,
+    color: Colors.background,
     fontSize: 14,
     fontFamily: 'Inter_700Bold',
     letterSpacing: -0.2,

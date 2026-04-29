@@ -25,8 +25,8 @@ import { CachedImage } from '../components/CachedImage';
 
 type TradeHubTab = 'AUCTIONS' | 'CO-OWN';
 type NavT = StackNavigationProp<RootStackParamList>;
-const BRAND = Colors.accent;
-const PANEL_TINT_BG = Colors.cardAlt;
+const BRAND = Colors.brand;
+const PANEL_TINT_BG = Colors.background;
 const PANEL_BORDER = Colors.border;
 const PANEL_BORDER_STRONG = Colors.borderLight;
 
@@ -34,7 +34,6 @@ export default function TradeHubScreen() {
   const navigation = useNavigation<NavT>();
   const { formatFromFiat } = useFormattedPrice();
   const { show } = useToast();
-  const supportUser = MOCK_USERS[0];
   const [activeTab, setActiveTab] = React.useState<TradeHubTab>('AUCTIONS');
   const marketLedger = useStore((state) => state.marketLedger);
   const customAuctions = useStore((state) => state.customAuctions);
@@ -137,6 +136,12 @@ export default function TradeHubScreen() {
           onPress: () => navigation.navigate('CreateAuction'),
         },
         {
+          key: 'my-listings',
+          label: 'My Listings',
+          icon: 'list-outline' as const,
+          onPress: () => show('Auction listings coming soon', 'info'),
+        },
+        {
           key: 'auction-posters',
           label: 'Promote Drop',
           icon: 'megaphone-outline' as const,
@@ -147,10 +152,22 @@ export default function TradeHubScreen() {
 
     return [
       {
-        key: 'issue-co-own',
-        label: 'Issue Co-Own',
-        icon: 'duplicate-outline' as const,
+        key: 'create-coown',
+        label: 'Create Co-Own',
+        icon: 'people-outline' as const,
         onPress: () => navigation.navigate('CreateCoOwn'),
+      },
+      {
+        key: 'my-listings',
+        label: 'My Listings',
+        icon: 'list-outline' as const,
+        onPress: () => show('Co-Own listings coming soon', 'info'),
+      },
+      {
+        key: 'coown-posters',
+        label: 'Promote Drop',
+        icon: 'megaphone-outline' as const,
+        onPress: () => navigation.navigate('CreatePoster'),
       },
       {
         key: 'open-portfolio',
@@ -164,15 +181,6 @@ export default function TradeHubScreen() {
   const marketGuidance = activeTab === 'CO-OWN'
     ? 'Co-Own settles in 1ze only, with local fiat shown as price reference.'
     : 'Auctions run for 6 hours. Schedule posters early so bidders can discover your drop in time.';
-
-  const handleOpenTradeSupport = React.useCallback(() => {
-    navigation.navigate('Chat', {
-      conversationId: 'c1',
-      focusQuery: activeTab === 'CO-OWN' ? 'co-own trade help' : 'auction trade help',
-      partnerUserId: supportUser.id,
-    });
-    show('Opening support chat for trade help.', 'info');
-  }, [activeTab, navigation, show, supportUser.id]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -265,36 +273,6 @@ export default function TradeHubScreen() {
       <View style={styles.guidanceCard}>
         <Ionicons name={activeTab === 'CO-OWN' ? 'shield-checkmark-outline' : 'flash-outline'} size={15} color={BRAND} />
         <Text style={styles.guidanceText}>{marketGuidance}</Text>
-      </View>
-
-      <View style={styles.supportRow}>
-        <AnimatedPressable
-          style={styles.supportIdentity}
-          onPress={() => navigation.navigate('UserProfile', { userId: supportUser.id })}
-          activeOpacity={0.85}
-          accessibilityRole="button"
-          accessibilityLabel={`Open @${supportUser.username} profile`}
-          accessibilityHint="Shows trade support profile"
-        >
-          <CachedImage
-            uri={supportUser.avatar}
-            style={styles.supportAvatar}
-            containerStyle={styles.supportAvatarWrap}
-            contentFit="cover"
-          />
-          <Text style={styles.supportText}>Need trading help? @{supportUser.username}</Text>
-        </AnimatedPressable>
-
-        <AnimatedPressable
-          style={styles.supportMessageBtn}
-          onPress={handleOpenTradeSupport}
-          activeOpacity={0.85}
-          accessibilityRole="button"
-          accessibilityLabel="Message trade support"
-          accessibilityHint="Opens support chat for auctions and co-own"
-        >
-          <Ionicons name="chatbubble-ellipses-outline" size={12} color={Colors.textPrimary} />
-        </AnimatedPressable>
       </View>
 
       <AnimatedPressable
@@ -551,7 +529,7 @@ const styles = StyleSheet.create({
     top: 4,
     bottom: 4,
     borderRadius: 22,
-    backgroundColor: Colors.accent,
+    backgroundColor: Colors.brand,
     zIndex: 0,
   },
   tabBtn: {
@@ -571,7 +549,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
   tabTextActive: {
-    color: Colors.textInverse,
+    color: Colors.background,
   },
 
   // Mode card
@@ -621,7 +599,7 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: Colors.accent,
+    backgroundColor: Colors.brand,
   },
   activityRightWrap: {
     flexDirection: 'row',

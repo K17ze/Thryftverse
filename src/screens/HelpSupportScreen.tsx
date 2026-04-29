@@ -42,7 +42,7 @@ export default function HelpSupportScreen({ navigation }: Props) {
     try {
       await Linking.openURL(url);
     } catch {
-      show('Unable to open link right now. Please try again.', 'error');
+      // Silently fail - user can try again
     }
   }, [show]);
 

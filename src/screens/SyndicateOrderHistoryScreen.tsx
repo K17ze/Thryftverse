@@ -56,11 +56,11 @@ const SIDE_FILTERS: SideFilter[] = ['all', 'buy', 'sell'];
 const DATE_FILTERS: DateFilter[] = ['all', '24h', '7d', '30d'];
 const PAGE_SIZE = 80;
 const IS_LIGHT = ActiveTheme === 'light';
-const TRADE_ACCENT = Colors.accentGold;
-const PANEL_BG = Colors.card;
+const TRADE_ACCENT = Colors.brand;
+const PANEL_BG = Colors.surface;
 const PANEL_BORDER = Colors.border;
 const CHIP_ACTIVE_BG = IS_LIGHT ? '#ede4d3' : '#17302b';
-const ROW_BG = Colors.card;
+const ROW_BG = Colors.surface;
 const ROW_BORDER = Colors.border;
 const POSITIVE_COLOR = IS_LIGHT ? '#7c5f1e' : '#d7b98f';
 const NEGATIVE_COLOR = IS_LIGHT ? '#b64242' : '#ff9d9d';
@@ -464,36 +464,6 @@ export default function CoOwnOrderHistoryScreen() {
         </AnimatedPressable>
         <Text style={styles.headerTitle}>Co-Own Orders</Text>
         <View style={{ width: 40 }} />
-      </View>
-
-      <View style={styles.supportRow}>
-        <AnimatedPressable
-          style={styles.supportIdentity}
-          onPress={() => navigation.navigate('UserProfile', { userId: supportUser.id })}
-          activeOpacity={0.85}
-          accessibilityRole="button"
-          accessibilityLabel={`Open @${supportUser.username} profile`}
-          accessibilityHint="Shows support profile details"
-        >
-          <CachedImage
-            uri={supportUser.avatar}
-            style={styles.supportAvatar}
-            containerStyle={styles.supportAvatarWrap}
-            contentFit="cover"
-          />
-          <Text style={styles.supportText} numberOfLines={1}>Support @{supportUser.username}</Text>
-        </AnimatedPressable>
-
-        <AnimatedPressable
-          style={styles.supportMessageBtn}
-          onPress={handleOpenHistorySupport}
-          activeOpacity={0.85}
-          accessibilityRole="button"
-          accessibilityLabel={`Message @${supportUser.username}`}
-          accessibilityHint="Opens support chat for co-own order history"
-        >
-          <Ionicons name="chatbubble-ellipses-outline" size={14} color={Colors.textPrimary} />
-        </AnimatedPressable>
       </View>
 
       {isSyncingRemote ? <Text style={styles.syncHint}>Syncing backend order fills...</Text> : null}

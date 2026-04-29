@@ -37,17 +37,19 @@ import { useToast } from '../context/ToastContext';
 import { useHaptic } from '../hooks/useHaptic';
 import { useFormattedPrice } from '../hooks/useFormattedPrice';
 import { Motion } from '../constants/motion';
-import { SyncStatusPill } from '../components/SyncStatusPill';
+// Phase 3: Removed SyncStatusPill - no status indicators on detail screen
 import { SyncRetryBanner } from '../components/SyncRetryBanner';
 import { useBackendData } from '../context/BackendDataContext';
 import { getBackendSyncStatus } from '../utils/syncStatus';
 import { AppButton } from '../components/ui/AppButton';
 import { SharedTransitionView } from '../components/SharedTransitionView';
+import { Space, Radius } from '../theme/designTokens';
+import { T } from '../components/ui/Text';
 
 const { width, height } = Dimensions.get('window');
 const IS_LIGHT = ActiveTheme === 'light';
-const PANEL_BG = Colors.card;
-const PANEL_ALT_BG = Colors.cardAlt;
+const PANEL_BG = Colors.surface;
+const PANEL_ALT_BG = Colors.background;
 const PANEL_BORDER = Colors.border;
 const TOP_SCRIM_BG = IS_LIGHT ? 'rgba(236,234,230,0.42)' : 'rgba(0,0,0,0.34)';
 
@@ -99,7 +101,7 @@ export default function ItemDetailScreen() {
         message: `Check out ${item.title} on Thryftverse for ${formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}.`,
       });
     } catch {
-      show('Unable to open share sheet right now.', 'error');
+      // Silently fail - user can try again
     }
   };
 
@@ -191,31 +193,52 @@ export default function ItemDetailScreen() {
         </Reanimated.View>
 
         <View style={styles.detailsContainer}>
-          <Text style={styles.price}>{formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}</Text>
-          <Text style={styles.brand} numberOfLines={1} ellipsizeMode="tail">{item.brand}</Text>
-          {item.priceWithProtection && (
-            <Text style={styles.protectionText}>
-              incl. {formatFromFiat(item.priceWithProtection - item.price, 'GBP', { displayMode: 'fiat' })} Platform charge
-            </Text>
-          )}
+          {/* ── Seller Card at Top ── */}
+          <View style={styles.sellerCardTop}>
+            <AnimatedPressable
+              style={styles.sellerIdentityTapTop}
+              onPress={() => navigation.navigate('UserProfile', { userId: seller.id })}
+              activeOpacity={0.86}
+              accessibilityRole="button"
+              accessibilityLabel={`Open @${seller.username} profile`}
+              accessibilityHint="Shows seller profile and trust details"
+            >
+              <CachedImage uri={seller.avatar} style={styles.sellerAvatarTop} containerStyle={{ width: 40, height: 40, borderRadius: 20 }} contentFit="cover" />
+              <View style={styles.sellerInfoTop}>
+                <Text style={styles.sellerNameTop}>@{seller.username}</Text>
+                <Text style={styles.sellerLocationTop} numberOfLines={1}>{seller.location}</Text>
+              </View>
+            </AnimatedPressable>
+          </View>
+
+          {/* ── Price & Details Row ── */}
+          <View style={styles.priceDetailsRow}>
+            <View style={styles.priceSection}>
+              <Text style={styles.price}>{formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}</Text>
+              {item.priceWithProtection && (
+                <Text style={styles.protectionText}>
+                  incl. {formatFromFiat(item.priceWithProtection - item.price, 'GBP', { displayMode: 'fiat' })} Platform charge
+                </Text>
+              )}
+            </View>
+            <View style={styles.itemMetaSection}>
+              <Text style={styles.brandTag} numberOfLines={1} ellipsizeMode="tail">{item.brand}</Text>
+              <Text style={styles.sizeConditionTag}>{item.size} • {item.condition}</Text>
+            </View>
+          </View>
 
           <Text style={styles.title}>{item.title}</Text>
-          <Text style={styles.sizeCondition}>{item.size} • {item.condition}</Text>
 
-          <View style={styles.syncStatusCard}>
-            <View style={styles.syncStatusTopRow}>
-              <SyncStatusPill tone={detailStatus.tone} label={detailStatus.label} compact />
-            </View>
-            {lastError ? (
-              <SyncRetryBanner
-                message="Pull latest listing changes now."
-                onRetry={() => void refreshListings()}
-                isRetrying={isSyncing}
-                telemetryContext="item_detail_listing_sync"
-                containerStyle={styles.syncRetryBanner}
-              />
-            ) : null}
-          </View>
+          {/* Phase 3: Removed sync status card - cleaner detail view */}
+          {lastError ? (
+            <SyncRetryBanner
+              message="Pull latest listing changes now."
+              onRetry={() => void refreshListings()}
+              isRetrying={isSyncing}
+              telemetryContext="item_detail_listing_sync"
+              containerStyle={styles.syncRetryBanner}
+            />
+          ) : null}
 
           <View style={styles.descriptionBox}>
             <Text style={styles.description}>{item.description}</Text>
@@ -297,19 +320,17 @@ export default function ItemDetailScreen() {
           <AppButton
             style={styles.actionBtn}
             variant="primary"
-            size="xl"
+            size="lg"
             title="Buy now"
-            subtitle="Instant checkout"
-            icon={<Ionicons name="flash-outline" size={15} color={Colors.textInverse} />}
+            icon={<Ionicons name="flash-outline" size={15} color={Colors.background} />}
             onPress={() => navigation.navigate('Checkout', { itemId: item.id })}
             accessibilityLabel={`Buy ${item.title} for ${formatFromFiat(item.price, 'GBP', { displayMode: 'fiat' })}`}
           />
           <AppButton
             style={styles.actionBtn}
             variant="secondary"
-            size="xl"
+            size="lg"
             title="Make offer"
-            subtitle="Negotiate in chat"
             icon={<Ionicons name="chatbubbles-outline" size={14} color={Colors.textPrimary} />}
             onPress={() => navigation.navigate('MakeOffer', { itemId: item.id, price: item.price, title: item.title })}
             accessibilityLabel={`Make an offer on ${item.title}`}
@@ -332,13 +353,64 @@ const styles = StyleSheet.create({
   heroTopScrim: { position: 'absolute', top: 0, left: 0, right: 0, height: 132, backgroundColor: TOP_SCRIM_BG },
   heroImage: { width: width, height: '100%' },
   soldOverlay: { position: 'absolute', bottom: 32, left: 20, backgroundColor: Colors.success, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
-  soldText: { color: Colors.textInverse, fontSize: 16, fontFamily: 'Inter_700Bold', letterSpacing: 1 },
+  soldText: { color: Colors.background, fontSize: 16, fontFamily: 'Inter_700Bold', letterSpacing: 1 },
   floatingHeader: { position: 'absolute', top: 0, left: 0, right: 0, flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 20, zIndex: 10 },
   headerRight: { flexDirection: 'row', gap: 12 },
   blurBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center' },
   detailsContainer: { paddingHorizontal: 20, paddingTop: 24 },
   price: { fontSize: 38, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary, letterSpacing: -0.9, marginBottom: 2 },
   brand: { fontSize: 15, fontFamily: 'Inter_300Light', color: Colors.textSecondary, letterSpacing: 0.34, marginBottom: 8 },
+  sellerCardTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 16,
+    backgroundColor: PANEL_BG,
+    gap: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  sellerIdentityTapTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  sellerAvatarTop: { width: 40, height: 40, borderRadius: 20 },
+  sellerInfoTop: { flex: 1 },
+  sellerNameTop: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary },
+  sellerLocationTop: { fontSize: 12, fontFamily: 'Inter_500Medium', color: Colors.textMuted, marginTop: 2 },
+  priceDetailsRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  priceSection: {
+    flex: 1,
+    alignItems: 'flex-start',
+  },
+  itemMetaSection: {
+    alignItems: 'flex-end',
+    gap: 4,
+  },
+  brandTag: {
+    fontSize: 13,
+    fontFamily: 'Inter_600SemiBold',
+    color: Colors.textPrimary,
+    backgroundColor: PANEL_BG,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  sizeConditionTag: {
+    fontSize: 12,
+    fontFamily: 'Inter_500Medium',
+    color: Colors.textSecondary,
+  },
   protectionText: { fontSize: 12, color: Colors.textSecondary, fontFamily: 'Inter_400Regular', marginBottom: 12 },
   title: { fontSize: 22, fontFamily: 'Inter_500Medium', color: Colors.textPrimary, marginBottom: 12, lineHeight: 30 },
   sizeCondition: { fontSize: 15, fontFamily: 'Inter_500Medium', color: Colors.textSecondary },
@@ -348,8 +420,8 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: Colors.borderLight,
     backgroundColor: PANEL_ALT_BG,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingHorizontal: Space.sm,
+    paddingVertical: Space.sm - Space.xs,
     shadowColor: '#000',
     shadowOpacity: 0.05,
     shadowRadius: 12,
@@ -359,7 +431,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 8,
+    gap: Space.sm,
   },
   syncStatusHint: {
     marginTop: 8,
@@ -369,7 +441,7 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_500Medium',
   },
   syncRetryBanner: {
-    marginTop: 10,
+    marginTop: Space.md - Space.xs,
   },
   syncFallbackHint: {
     marginTop: 8,
@@ -379,10 +451,10 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_500Medium',
   },
   descriptionBox: {
-    marginTop: 24,
+    marginTop: Space.lg,
     backgroundColor: PANEL_ALT_BG,
-    padding: 20,
-    borderRadius: 24,
+    padding: Space.lg,
+    borderRadius: Radius.xl,
     shadowColor: '#000',
     shadowOpacity: 0.05,
     shadowRadius: 16,
@@ -414,7 +486,7 @@ const styles = StyleSheet.create({
   },
   sellerAvatar: { width: 56, height: 56, borderRadius: 28 },
   sellerInfo: { flex: 1 },
-  sellerName: { fontSize: 16, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary },
+  sellerName: { fontSize: 14, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary },
   sellerLocation: { fontSize: 12, fontFamily: 'Inter_500Medium', color: Colors.textMuted, marginTop: 2 },
   sellerStats: { fontSize: 13, fontFamily: 'Inter_500Medium', color: Colors.textMuted, marginTop: 4 },
   sellerLastSeen: { fontSize: 11, fontFamily: 'Inter_400Regular', color: Colors.textMuted, marginTop: 2 },

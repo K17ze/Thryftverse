@@ -281,7 +281,7 @@ export default function CoOwnHubScreen() {
                 accessibilityHint="Shows co-own support profile"
               >
                 <Image source={{ uri: supportUser.avatar }} style={styles.supportAvatar} />
-                <Text style={styles.supportText}>Need co-own help? @{supportUser.username}</Text>
+                <Text style={styles.supportText}>Support: @{supportUser.username}</Text>
               </AnimatedPressable>
 
               <AnimatedPressable
@@ -290,7 +290,7 @@ export default function CoOwnHubScreen() {
                 activeOpacity={0.85}
                 accessibilityRole="button"
                 accessibilityLabel="Message co-own support"
-                accessibilityHint="Opens support chat for issuance and trading help"
+                accessibilityHint="Opens support chat"
               >
                 <Ionicons name="chatbubble-ellipses-outline" size={12} color={Colors.textPrimary} />
               </AnimatedPressable>
@@ -338,20 +338,20 @@ export default function CoOwnHubScreen() {
                 variant="gold"
                 size="sm"
                 align="center"
-                icon={<Ionicons name="time-outline" size={15} color={Colors.textInverse} />}
-                title="Orders"
-                onPress={() => navigation.navigate('CoOwnOrderHistory')}
-                accessibilityLabel="Open co-own order history"
+                icon={<Ionicons name="list-outline" size={15} color={Colors.textInverse} />}
+                title="My Listings"
+                onPress={() => navigation.navigate('MyListings', { type: 'coown' })}
+                accessibilityLabel="View my co-own listings"
               />
               <AppButton
                 style={styles.quickBtn}
                 variant="gold"
                 size="sm"
                 align="center"
-                icon={<Ionicons name="trophy-outline" size={15} color={Colors.textInverse} />}
-                title="Leaders"
-                onPress={() => navigation.navigate('AssetLeaderboard')}
-                accessibilityLabel="Open asset leaderboard"
+                icon={<Ionicons name="time-outline" size={15} color={Colors.textInverse} />}
+                title="Orders"
+                onPress={() => navigation.navigate('CoOwnOrderHistory')}
+                accessibilityLabel="Open co-own order history"
               />
             </View>
 

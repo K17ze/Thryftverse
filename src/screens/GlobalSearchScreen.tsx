@@ -275,13 +275,13 @@ export default function GlobalSearchScreen({ navigation }: Props) {
     const borderColor = interpolateColor(
       focusProgress.value,
       [0, 1],
-      [Colors.glassBorder, Colors.accent],
+      [Colors.border, Colors.brand],
     );
 
     const backgroundColor = interpolateColor(
       focusProgress.value,
       [0, 1],
-      [Colors.card, Colors.cardAlt],
+      [Colors.surface, Colors.background],
     );
 
     return {
@@ -422,7 +422,7 @@ export default function GlobalSearchScreen({ navigation }: Props) {
             onBlur={() => setIsSearchFocused(false)}
             returnKeyType="search"
             autoCapitalize="none"
-            selectionColor={Colors.accent}
+            selectionColor={Colors.brand}
           />
           {query.length > 0 && (
             <AnimatedPressable style={styles.clearBtn} onPress={() => setQuery('')}>
@@ -636,7 +636,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: Colors.card,
+    backgroundColor: Colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -644,10 +644,10 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.card,
+    backgroundColor: Colors.surface,
     borderRadius: 24,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: Colors.glassBorder,
+    borderColor: Colors.border,
     paddingHorizontal: 20,
     height: 56,
   },
@@ -691,8 +691,8 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 38,
     borderRadius: 14,
-    borderColor: Colors.glassBorder,
-    backgroundColor: Colors.card,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
   },
   controlBtnIconWrap: {
     width: 18,
@@ -722,8 +722,8 @@ const styles = StyleSheet.create({
   controlClearBtn: {
     minHeight: 30,
     borderRadius: 14,
-    borderColor: Colors.glassBorder,
-    backgroundColor: Colors.card,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
     paddingHorizontal: 10,
   },
   controlClearText: {
@@ -790,8 +790,8 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     overflow: 'hidden',
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: Colors.glassBorder,
-    backgroundColor: Colors.card,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
   },
   recoImageContainer: {
     width: '100%',
@@ -807,7 +807,7 @@ const styles = StyleSheet.create({
     gap: 5,
   },
   recoReason: {
-    color: Colors.accent,
+    color: Colors.brand,
     fontSize: 10,
     fontFamily: 'Inter_700Bold',
     textTransform: 'uppercase',
@@ -849,8 +849,8 @@ const styles = StyleSheet.create({
     minHeight: 28,
     borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: Colors.glassBorder,
-    backgroundColor: Colors.card,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
@@ -885,18 +885,18 @@ const styles = StyleSheet.create({
     height: 28,
     borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: Colors.glassBorder,
-    backgroundColor: Colors.card,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
   recoEmptyState: {
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: Colors.glassBorder,
+    borderColor: Colors.border,
     borderRadius: 14,
     paddingVertical: 14,
     paddingHorizontal: 12,
-    backgroundColor: Colors.card,
+    backgroundColor: Colors.surface,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
@@ -916,7 +916,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 20,
     borderWidth: StyleSheet.hairlineWidth,
-    borderColor: Colors.glassBorder,
+    borderColor: Colors.border,
   },
   trendingPillText: {
     fontSize: 15,

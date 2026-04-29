@@ -38,11 +38,20 @@ export default function CreateGroupChatScreen({ navigation }: Props) {
   const [isCreating, setIsCreating] = useState(false);
   const [inviteInput, setInviteInput] = useState('');
   const [isJoining, setIsJoining] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const members = useMemo(
     () => MOCK_USERS.filter((user) => user.id !== (currentUser?.id ?? 'me')),
     [currentUser?.id]
   );
+
+  const filteredMembers = useMemo(() => {
+    if (!searchQuery.trim()) return members;
+    const query = searchQuery.toLowerCase();
+    return members.filter(
+      (user) => user.username.toLowerCase().includes(query)
+    );
+  }, [members, searchQuery]);
 
   const toggleMember = (userId: string) => {
     setSelectedIds((current) =>
@@ -166,8 +175,26 @@ export default function CreateGroupChatScreen({ navigation }: Props) {
           <Text style={styles.sectionMeta}>{selectedIds.length} selected</Text>
         </View>
 
+        <View style={styles.searchCard}>
+          <Ionicons name="search-outline" size={18} color={Colors.textMuted} />
+          <TextInput
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholder="Search by username..."
+            placeholderTextColor={Colors.textMuted}
+            style={styles.searchInput}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          {searchQuery.length > 0 && (
+            <AnimatedPressable onPress={() => setSearchQuery('')}>
+              <Ionicons name="close-circle" size={18} color={Colors.textMuted} />
+            </AnimatedPressable>
+          )}
+        </View>
+
         <FlashList
-          data={members}
+          data={filteredMembers}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => {
             const selected = selectedIds.includes(item.id);
@@ -302,17 +329,38 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 10,
+    marginBottom: 8,
   },
   sectionTitle: {
-    color: Colors.textPrimary,
-    fontFamily: 'Inter_700Bold',
-    fontSize: 16,
+    fontSize: 13,
+    fontFamily: 'Inter_600SemiBold',
+    color: Colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   sectionMeta: {
-    color: Colors.textSecondary,
-    fontFamily: 'Inter_500Medium',
     fontSize: 12,
+    fontFamily: 'Inter_500Medium',
+    color: Colors.textSecondary,
+  },
+  searchCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: BORDER,
+    backgroundColor: PANEL,
+    marginBottom: 12,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    fontFamily: 'Inter_400Regular',
+    color: Colors.textPrimary,
+    padding: 0,
   },
   memberList: { paddingBottom: 12 },
   memberRow: {

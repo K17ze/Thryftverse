@@ -376,7 +376,7 @@ export default function WithdrawScreen() {
               onChangeText={(value) => setAmount(sanitizeDecimalInput(value))}
               keyboardType="decimal-pad"
               autoFocus
-              selectionColor={Colors.accent}
+              selectionColor={Colors.brand}
               accessibilityLabel="Withdrawal amount"
               accessibilityHint="Enter the amount to withdraw from your available balance"
             />
@@ -385,39 +385,6 @@ export default function WithdrawScreen() {
           {policyScopeLabel ? <Text style={styles.policyLabel}>Policy scope: {policyScopeLabel}</Text> : null}
           {payoutPolicyHint ? <Text style={styles.policyHint}>{payoutPolicyHint}</Text> : null}
           {exceedsBalance ? <Text style={styles.balanceError}>Entered amount exceeds available balance.</Text> : null}
-
-          <View style={styles.supportRow}>
-            <AnimatedPressable
-              style={styles.supportIdentity}
-              onPress={() => navigation.navigate('UserProfile', { userId: supportUser.id })}
-              activeOpacity={0.85}
-              accessibilityRole="button"
-              accessibilityLabel={`Open @${supportUser.username} profile`}
-              accessibilityHint="Shows payout support profile"
-            >
-              <CachedImage
-                uri={supportUser.avatar}
-                style={styles.supportAvatar}
-                containerStyle={styles.supportAvatarWrap}
-                contentFit="cover"
-              />
-              <View style={styles.supportCopyWrap}>
-                <Text style={styles.supportTitle}>Need payout help?</Text>
-                <Text style={styles.supportHandle}>@{supportUser.username}</Text>
-              </View>
-            </AnimatedPressable>
-
-            <AnimatedPressable
-              style={styles.supportMessageBtn}
-              onPress={handleOpenPayoutSupport}
-              activeOpacity={0.85}
-              accessibilityRole="button"
-              accessibilityLabel="Message payout support"
-              accessibilityHint="Opens support chat for withdrawal issues"
-            >
-              <Ionicons name="chatbubble-ellipses-outline" size={12} color={Colors.textPrimary} />
-            </AnimatedPressable>
-          </View>
 
           <Text style={styles.sectionTitle}>Transfer to</Text>
           <AnimatedPressable
@@ -456,7 +423,7 @@ export default function WithdrawScreen() {
               accessibilityLabel="Add a new bank account"
               accessibilityHint="Opens the bank account setup form"
             >
-              <Ionicons name="add" size={18} color={Colors.accent} />
+              <Ionicons name="add" size={18} color={Colors.brand} />
               <Text style={styles.addBankText}>Add a new bank account</Text>
             </AnimatedPressable>
           ) : (
@@ -475,7 +442,7 @@ export default function WithdrawScreen() {
             }
             onPress={handleWithdraw}
             disabled={!canWithdraw}
-            variant="contrast"
+            variant="primary"
             style={[styles.primaryBtn, !canWithdraw && styles.primaryBtnDisabled]}
             titleStyle={styles.primaryText}
             accessibilityLabel={
@@ -519,7 +486,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     borderWidth: 1,
     borderColor: Colors.border,
-    backgroundColor: Colors.card,
+    backgroundColor: Colors.surface,
     paddingHorizontal: 10,
     flexDirection: 'row',
     alignItems: 'center',
@@ -546,21 +513,21 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     borderColor: Colors.border,
-    backgroundColor: Colors.card,
+    backgroundColor: Colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
   sectionTitle: { fontSize: 13, fontFamily: 'Inter_600SemiBold', color: Colors.textMuted, textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 12 },
 
-  bankCard: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: Colors.card, padding: 16, borderRadius: 16, marginBottom: 12 },
+  bankCard: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: Colors.surface, padding: 16, borderRadius: 16, marginBottom: 12 },
   bankLeft: { flexDirection: 'row', alignItems: 'center', gap: 16 },
-  bankIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: Colors.cardAlt, alignItems: 'center', justifyContent: 'center' },
+  bankIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: Colors.surface, alignItems: 'center', justifyContent: 'center' },
   bankName: { fontSize: 16, fontFamily: 'Inter_600SemiBold', color: Colors.textPrimary, marginBottom: 4 },
   bankDetails: { fontSize: 13, fontFamily: 'Inter_400Regular', color: Colors.textSecondary },
 
   addBankBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 12 },
-  addBankText: { fontSize: 15, fontFamily: 'Inter_600SemiBold', color: Colors.accent },
+  addBankText: { fontSize: 15, fontFamily: 'Inter_600SemiBold', color: Colors.brand },
   railHintText: { fontSize: 12, fontFamily: 'Inter_500Medium', color: Colors.textMuted, paddingVertical: 12 },
 
   footer: { paddingVertical: 20, borderTopWidth: 1, borderTopColor: Colors.border, backgroundColor: Colors.background },

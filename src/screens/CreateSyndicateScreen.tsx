@@ -35,7 +35,7 @@ type RouteT = RouteProp<RootStackParamList, 'CreateCoOwn'>;
 
 const STABLE_COIN = '1ze';
 const IS_LIGHT = ActiveTheme === 'light';
-const BRAND = IS_LIGHT ? '#2f251b' : Colors.accent;
+const BRAND = IS_LIGHT ? '#2f251b' : Colors.brand;
 const PANEL_BG = IS_LIGHT ? '#ffffff' : '#121212';
 const PANEL_SOFT_BG = IS_LIGHT ? '#f7f4ef' : '#151515';
 const PANEL_BORDER = IS_LIGHT ? '#d8d1c6' : '#2d2d2d';
@@ -239,7 +239,7 @@ export default function CreateCoOwnScreen() {
           title="Issue"
           style={styles.issueBtn}
           titleStyle={styles.issueBtnText}
-          variant="gold"
+          variant="primary"
           size="sm"
           onPress={issueCoOwn}
           accessibilityLabel="Issue co-own asset"
@@ -284,7 +284,7 @@ export default function CreateCoOwnScreen() {
             keyboardType="number-pad"
             placeholder="20"
             placeholderTextColor={Colors.textMuted}
-            selectionColor={Colors.accentGold}
+            selectionColor={Colors.brand}
           />
           <Text style={styles.inputHint}>Maximum 20 units per asset</Text>
 
@@ -296,7 +296,7 @@ export default function CreateCoOwnScreen() {
             keyboardType="decimal-pad"
             placeholder="0.00"
             placeholderTextColor={Colors.textMuted}
-            selectionColor={Colors.accentGold}
+            selectionColor={Colors.brand}
           />
           <Text style={styles.inputHint}>
             Settlement value: {unitPriceStablePreview.toFixed(4)} {STABLE_COIN} / unit
@@ -362,14 +362,14 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   issueBtn: {
-    backgroundColor: Colors.accentGold,
+    backgroundColor: Colors.brand,
     borderRadius: 16,
     minHeight: 36,
     paddingHorizontal: 12,
     borderWidth: 0,
   },
   issueBtnText: {
-    color: Colors.textInverse,
+    color: Colors.background,
     fontSize: 12,
     fontFamily: 'Inter_700Bold',
   },
@@ -564,7 +564,6 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: Colors.accentGold,
+    backgroundColor: Colors.brand,
   },
 });
-

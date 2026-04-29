@@ -34,6 +34,7 @@ type NavT = StackNavigationProp<RootStackParamList>;
 type ListingSource = 'mine' | 'marketplace';
 type StoryPosition = 'top' | 'center' | 'bottom';
 type CreatePosterRoute = RouteProp<RootStackParamList, 'CreatePoster'>;
+type PosterMode = 'marketplace' | 'co-own' | 'auction' | 'blank';
 
 const EXPIRY_OPTIONS = [6, 12, 24, 48] as const;
 type ExpiryOption = `${typeof EXPIRY_OPTIONS[number]}h`;
@@ -99,6 +100,9 @@ export default function CreatePosterScreen() {
   const [storyText, setStoryText] = React.useState('');
   const [storyColor, setStoryColor] = React.useState('#ffffff');
   const [storyPosition, setStoryPosition] = React.useState<StoryPosition>('bottom');
+  const [posterMode, setPosterMode] = React.useState<PosterMode>('marketplace');
+  const [blankBackgroundColor, setBlankBackgroundColor] = React.useState('#1a1a2e');
+  const [showColorPicker, setShowColorPicker] = React.useState(false);
   const lastAppliedEditorResultAtRef = React.useRef<number | null>(null);
 
   const expiryOptionValue = `${expiryHours}h` as ExpiryOption;
@@ -155,11 +159,13 @@ export default function CreatePosterScreen() {
         : styles.storyOverlayBottom;
 
   const previewUri =
-    posterImageUri ??
-    (selectedListing
-      ? getListingCoverUri(selectedListing.images, 'https://picsum.photos/seed/poster-fallback/600/800')
-      : undefined) ??
-    'https://picsum.photos/seed/poster-fallback/600/800';
+    posterMode === 'blank'
+      ? null // blank canvas mode uses background color, not image
+      : (posterImageUri ??
+        (selectedListing
+          ? getListingCoverUri(selectedListing.images, 'https://picsum.photos/seed/poster-fallback/600/800')
+          : undefined) ??
+        'https://picsum.photos/seed/poster-fallback/600/800');
 
   const pickFromLibrary = async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -182,7 +188,7 @@ export default function CreatePosterScreen() {
         show('Poster image selected', 'success');
       }
     } catch {
-      show('Unable to open gallery right now', 'error');
+      // Silently fail - user can try again
     } finally {
       setIsPickingImage(false);
     }
@@ -209,7 +215,7 @@ export default function CreatePosterScreen() {
         show('Poster image captured', 'success');
       }
     } catch {
-      show('Unable to open camera right now', 'error');
+      // Silently fail - user can try again
     } finally {
       setIsPickingImage(false);
     }
@@ -235,7 +241,7 @@ export default function CreatePosterScreen() {
       id: `p_user_${Date.now()}`,
       uploaderId,
       listingId: selectedListing.id,
-      image: previewUri,
+      image: previewUri ?? blankBackgroundColor,
       caption: trimmedCaption,
       createdAt: new Date().toISOString(),
       expiryHours,
@@ -270,7 +276,7 @@ export default function CreatePosterScreen() {
 
   const handleOpenStoryEditor = React.useCallback(() => {
     navigation.navigate('PosterEditor', {
-      baseImageUri: previewUri,
+      baseImageUri: previewUri ?? blankBackgroundColor,
       initialText: storyText,
       initialColor: storyColor,
       initialPosition: storyPosition,
@@ -337,7 +343,7 @@ export default function CreatePosterScreen() {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.previewCard}>
-          <CachedImage uri={previewUri} style={styles.previewImage} contentFit="cover" />
+          <CachedImage uri={previewUri ?? blankBackgroundColor} style={styles.previewImage} contentFit="cover" />
           <View style={styles.previewOverlayTop}>
             {selectedListing && selectedListing.sellerId !== uploaderId ? (
               <View style={styles.sharedListingPill}>
@@ -399,78 +405,146 @@ export default function CreatePosterScreen() {
         ) : null}
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Listing Source</Text>
-          <AppSegmentControl
-            options={LISTING_SOURCE_OPTIONS}
-            value={listingSource}
-            onChange={setListingSource}
-            style={styles.sourceRow}
-            fullWidth
-            optionStyle={styles.sourceChip}
-            optionActiveStyle={styles.sourceChipActive}
-            optionTextStyle={styles.sourceChipText}
-            optionTextActiveStyle={styles.sourceChipTextActive}
-          />
-          <Text style={styles.helperTextLeft}>Pick your own listing or share another seller listing with attribution.</Text>
+          <Text style={styles.sectionTitle}>Poster Type</Text>
+          <View style={styles.modeSelector}>
+            {[
+              { key: 'marketplace', label: 'Marketplace', icon: 'pricetag-outline' },
+              { key: 'co-own', label: 'Co-Own', icon: 'people-outline' },
+              { key: 'auction', label: 'Auction', icon: 'gavel-outline' },
+              { key: 'blank', label: 'Blank', icon: 'color-palette-outline' },
+            ].map((mode) => (
+              <AnimatedPressable
+                key={mode.key}
+                style={[
+                  styles.modeChip,
+                  posterMode === mode.key && styles.modeChipActive,
+                ]}
+                onPress={() => setPosterMode(mode.key as PosterMode)}
+                activeOpacity={0.85}
+              >
+                <Ionicons
+                  name={mode.icon as any}
+                  size={16}
+                  color={posterMode === mode.key ? '#fff' : Colors.textPrimary}
+                />
+                <Text
+                  style={[
+                    styles.modeChipText,
+                    posterMode === mode.key && styles.modeChipTextActive,
+                  ]}
+                >
+                  {mode.label}
+                </Text>
+              </AnimatedPressable>
+            ))}
+          </View>
         </View>
 
-        <View style={styles.section}>
-          <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionTitle}>Poster Image</Text>
-            <Text style={styles.sectionHint}>{posterImageUri ? 'Custom image selected' : 'Using listing image'}</Text>
-          </View>
-
-          <View style={styles.imagePickerRow}>
-            <AppButton
-              title="Gallery"
-              variant="secondary"
-              size="sm"
-              align="center"
-              style={styles.imagePickerBtn}
-              icon={<Ionicons name="images-outline" size={16} color={Colors.textPrimary} />}
-              iconContainerStyle={styles.imagePickerIconWrap}
-              titleStyle={styles.imagePickerBtnText}
-              onPress={pickFromLibrary}
-              disabled={isPickingImage}
-              accessibilityLabel="Choose image from gallery"
-            />
-
-            <AppButton
-              title="Camera"
-              variant="secondary"
-              size="sm"
-              align="center"
-              style={styles.imagePickerBtn}
-              icon={<Ionicons name="camera-outline" size={16} color={Colors.textPrimary} />}
-              iconContainerStyle={styles.imagePickerIconWrap}
-              titleStyle={styles.imagePickerBtnText}
-              onPress={pickFromCamera}
-              disabled={isPickingImage}
-              accessibilityLabel="Capture image using camera"
-            />
-
-            <AppButton
-              title="Reset"
-              variant="secondary"
-              size="sm"
-              align="center"
-              style={[styles.imagePickerBtn, !posterImageUri && styles.imagePickerBtnDisabled]}
-              icon={<Ionicons name="refresh-outline" size={16} color={posterImageUri ? Colors.textPrimary : Colors.textMuted} />}
-              iconContainerStyle={styles.imagePickerIconWrap}
-              titleStyle={[styles.imagePickerBtnText, !posterImageUri && styles.imagePickerBtnTextDisabled]}
-              onPress={() => setPosterImageUri(null)}
-              disabled={!posterImageUri || isPickingImage}
-              accessibilityLabel="Reset poster image"
-            />
-          </View>
-
-          {isPickingImage ? (
-            <View style={styles.pickingRow}>
-              <ActivityIndicator size="small" color="#d7b98f" />
-              <Text style={styles.pickingText}>Opening picker...</Text>
+        {posterMode === 'blank' && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionTitle}>Background Color</Text>
+              <View style={[styles.colorPreview, { backgroundColor: blankBackgroundColor }]} />
             </View>
-          ) : null}
-        </View>
+            <View style={styles.colorGrid}>
+              {[
+                '#1a1a2e', '#16213e', '#0f3460', '#e94560', '#ff6b6b',
+                '#feca57', '#48dbfb', '#1dd1a1', '#5f27cd', '#ff9f43',
+                '#10ac84', '#00d2d3', '#54a0ff', '#5f27cd', '#341f97',
+                '#222f3e', '#576574', '#8395a7', '#c8d6e5', '#dfe6e9',
+              ].map((color) => (
+                <AnimatedPressable
+                  key={color}
+                  style={[
+                    styles.colorSwatch,
+                    { backgroundColor: color },
+                    blankBackgroundColor === color && styles.colorSwatchActive,
+                  ]}
+                  onPress={() => setBlankBackgroundColor(color)}
+                  activeOpacity={0.85}
+                />
+              ))}
+            </View>
+          </View>
+        )}
+
+        {posterMode !== 'blank' && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Listing Source</Text>
+            <AppSegmentControl
+              options={LISTING_SOURCE_OPTIONS}
+              value={listingSource}
+              onChange={setListingSource}
+              style={styles.sourceRow}
+              fullWidth
+              optionStyle={styles.sourceChip}
+              optionActiveStyle={styles.sourceChipActive}
+              optionTextStyle={styles.sourceChipText}
+              optionTextActiveStyle={styles.sourceChipTextActive}
+            />
+            <Text style={styles.helperTextLeft}>Pick your own listing or share another seller listing with attribution.</Text>
+          </View>
+        )}
+
+        {posterMode !== 'blank' && (
+          <View style={styles.section}>
+            <View style={styles.sectionHeaderRow}>
+              <Text style={styles.sectionTitle}>Poster Image</Text>
+              <Text style={styles.sectionHint}>{posterImageUri ? 'Custom image selected' : 'Using listing image'}</Text>
+            </View>
+
+            <View style={styles.imagePickerRow}>
+              <AppButton
+                title="Gallery"
+                variant="secondary"
+                size="sm"
+                align="center"
+                style={styles.imagePickerBtn}
+                icon={<Ionicons name="images-outline" size={16} color={Colors.textPrimary} />}
+                iconContainerStyle={styles.imagePickerIconWrap}
+                titleStyle={styles.imagePickerBtnText}
+                onPress={pickFromLibrary}
+                disabled={isPickingImage}
+                accessibilityLabel="Choose image from gallery"
+              />
+
+              <AppButton
+                title="Camera"
+                variant="secondary"
+                size="sm"
+                align="center"
+                style={styles.imagePickerBtn}
+                icon={<Ionicons name="camera-outline" size={16} color={Colors.textPrimary} />}
+                iconContainerStyle={styles.imagePickerIconWrap}
+                titleStyle={styles.imagePickerBtnText}
+                onPress={pickFromCamera}
+                disabled={isPickingImage}
+                accessibilityLabel="Capture image using camera"
+              />
+
+              <AppButton
+                title="Reset"
+                variant="secondary"
+                size="sm"
+                align="center"
+                style={[styles.imagePickerBtn, !posterImageUri && styles.imagePickerBtnDisabled]}
+                icon={<Ionicons name="refresh-outline" size={16} color={posterImageUri ? Colors.textPrimary : Colors.textMuted} />}
+                iconContainerStyle={styles.imagePickerIconWrap}
+                titleStyle={[styles.imagePickerBtnText, !posterImageUri && styles.imagePickerBtnTextDisabled]}
+                onPress={() => setPosterImageUri(null)}
+                disabled={!posterImageUri || isPickingImage}
+                accessibilityLabel="Reset poster image"
+              />
+            </View>
+
+            {isPickingImage ? (
+              <View style={styles.pickingRow}>
+                <ActivityIndicator size="small" color="#d7b98f" />
+                <Text style={styles.pickingText}>Opening picker...</Text>
+              </View>
+            ) : null}
+          </View>
+        )}
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Caption</Text>
@@ -788,6 +862,55 @@ const styles = StyleSheet.create({
   sourceRow: {
     flexDirection: 'row',
     gap: 8,
+  },
+  modeSelector: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  modeChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.card,
+  },
+  modeChipActive: {
+    backgroundColor: Colors.accent,
+    borderColor: Colors.accent,
+  },
+  modeChipText: {
+    color: Colors.textPrimary,
+    fontSize: 13,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  modeChipTextActive: {
+    color: '#fff',
+  },
+  colorPreview: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: Colors.border,
+  },
+  colorGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  colorSwatch: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+  },
+  colorSwatchActive: {
+    borderWidth: 3,
+    borderColor: '#fff',
   },
   sourceChip: {
     borderRadius: 999,
